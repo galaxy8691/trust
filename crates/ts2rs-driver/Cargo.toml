@@ -1,0 +1,11 @@
+[package]
+name = "ts2rs-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tempfile = "3.27.0"
+thiserror = "2.0.18"
+ts2rs-lower = { path = "../ts2rs-lower" }
+ts2rs-parser = { path = "../ts2rs-parser" }

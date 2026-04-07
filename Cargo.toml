@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/ts2rs-cli",
+    "crates/ts2rs-parser",
+    "crates/ts2rs-hir",
+    "crates/ts2rs-lower",
+    "crates/ts2rs-driver",
+    "crates/ts2rs_rt",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"

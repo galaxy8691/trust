@@ -1,0 +1,8 @@
+[package]
+name = "ts2rs_rt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimal runtime helpers for ts2rs-generated Rust (optional)"
+
+[dependencies]
