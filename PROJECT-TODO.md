@@ -2,7 +2,7 @@
 
 本文档用于**长期跟进**编译器与工具链的演进，按主题分层列出可验收项。状态建议用 `[ ]` / `[~]` 进行中 / `[x]` 在 PR 或提交中维护。
 
-**相关代码入口**：[`README.md`](README.md) · [`crates/ts2rs-hir`](crates/ts2rs-hir)（`build.rs` / `sem.rs` / `codegen.rs` / `ir.rs`）· [`crates/ts2rs-parser`](crates/ts2rs-parser) · [`crates/ts2rs-driver`](crates/ts2rs-driver) · [`crates/ts2rs-cli`](crates/ts2rs-cli) · [`test-ts/test-ts.ts`](test-ts/test-ts.ts) · [`crates/ts2rs-cli/tests/fixtures/`](crates/ts2rs-cli/tests/fixtures/)
+**相关代码入口**：[`README.md`](README.md) · [`crates/ts2rs-hir`](crates/ts2rs-hir)（`build.rs` / `sem.rs` / `codegen.rs` / `ir.rs`）· [`crates/ts2rs-parser`](crates/ts2rs-parser) · [`crates/ts2rs-driver`](crates/ts2rs-driver) · [`crates/ts2rs-cli`](crates/ts2rs-cli) · [`test-ts/main.ts`](test-ts/main.ts)（多文件：`test-ts/math.ts`） · [`crates/ts2rs-cli/tests/fixtures/`](crates/ts2rs-cli/tests/fixtures/)
 
 ---
 
