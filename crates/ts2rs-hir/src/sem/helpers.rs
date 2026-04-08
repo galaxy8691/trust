@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use swc_common::{sync::Lrc, SourceMap, Span};
+use swc_common::Span;
 
 use crate::error::{diag, CompileError};
-use crate::ir::TsType;
+use crate::ir::{SendSourceMap, TsType};
 
 pub(super) fn is_numberish(t: &TsType) -> bool {
     match t {
@@ -91,7 +91,7 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
 pub(super) fn unify_ternary_branches(
     a: TsType,
     b: TsType,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
     span: Span,
 ) -> Result<TsType, CompileError> {

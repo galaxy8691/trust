@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use rayon::prelude::*;
 use swc_common::{sync::Lrc, SourceMap, Span, DUMMY_SP};
 
 use crate::error::{diag, warn, CompileError, CompileWarning};
@@ -18,11 +19,25 @@ struct FnSig {
     is_async: bool,
 }
 
+/// `HttpResponse` 的 body 是否已被 `.text()` / `.json()`（缓冲）或 `body.getReader()`（流）消耗。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HttpBodyUsage {
+    Fresh,
+    Streamed,
+    Buffered,
+    /// 分支合并后无法静态确定
+    Unknown,
+}
+
 #[derive(Clone)]
 struct Binding {
     ty: TsType,
     mutable: bool,
     initialized: bool,
+    /// 仅 [`TsType::HttpResponse`]：body 消耗状态。
+    http_body: Option<HttpBodyUsage>,
+    /// 仅 [`TsType::ReadableStreamDefaultReader`]：对应 `bytes_stream` 槽位（codegen）。
+    reader_stream_slot: Option<u32>,
 }
 
 fn is_numberish(t: &TsType) -> bool {
@@ -50,7 +65,7 @@ fn type_assignable(expected: &TsType, got: &TsType) -> bool {
 fn unify_ternary_branches(
     a: TsType,
     b: TsType,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
     span: Span,
 ) -> Result<TsType, CompileError> {
@@ -131,12 +146,18 @@ pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, Compil
         ));
     }
 
-    let mut warnings = Vec::new();
-    for f in &mut module.fns {
-        let cm = f.cm.clone();
-        let p = f.source_path.clone();
-        check_function(f, &globals, &cm, &p, &mut warnings)?;
-    }
+    let warning_chunks: Result<Vec<Vec<CompileWarning>>, CompileError> = module
+        .fns
+        .par_iter_mut()
+        .map(|f| {
+            let mut local = Vec::new();
+            let cm = f.cm.clone();
+            let p = f.source_path.clone();
+            check_function(f, &globals, &cm, &p, &mut local)?;
+            Ok(local)
+        })
+        .collect();
+    let warnings: Vec<CompileWarning> = warning_chunks?.into_iter().flatten().collect();
     Ok(warnings)
 }
 
@@ -268,7 +289,7 @@ fn collect_fn_sigs_in_stmts(stmts: &[IRStmt]) -> HashMap<String, FnSig> {
 fn check_function(
     f: &mut IRFunction,
     globals: &HashMap<String, FnSig>,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
     warnings: &mut Vec<CompileWarning>,
 ) -> Result<(), CompileError> {
@@ -285,6 +306,12 @@ fn check_function(
                     ty: t.clone(),
                     mutable: true,
                     initialized: true,
+                    http_body: if t == &TsType::HttpResponse {
+                        Some(HttpBodyUsage::Fresh)
+                    } else {
+                        None
+                    },
+                    reader_stream_slot: None,
                 },
             )
             .is_some()
@@ -295,12 +322,12 @@ fn check_function(
     stack.push(root);
 
     if f.is_async {
-        check_async_mvp_stmts(&f.body, cm, path, f.span)?;
         reject_naked_fetchtext_in_stmts(&f.body, cm, path)?;
         reject_readline_in_async_stmts(&f.body, cm, path)?;
     }
 
     let mut reachable = true;
+    let mut next_reader_slot = 0u32;
     check_stmts(
         &mut f.body,
         &mut stack,
@@ -311,6 +338,7 @@ fn check_function(
         path,
         warnings,
         &mut reachable,
+        &mut next_reader_slot,
     )?;
 
     if f.ret != TsType::Void && !fn_body_returns(&f.body, &f.ret) {
@@ -348,9 +376,14 @@ fn insert_let(
     mutable: bool,
     initialized: bool,
     span: Span,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
 ) -> Result<(), CompileError> {
+    let http_body = if ty == TsType::HttpResponse {
+        Some(HttpBodyUsage::Fresh)
+    } else {
+        None
+    };
     if stack
         .last_mut()
         .unwrap()
@@ -360,6 +393,8 @@ fn insert_let(
                 ty,
                 mutable,
                 initialized,
+                http_body,
+                reader_stream_slot: None,
             },
         )
         .is_some()
@@ -398,6 +433,196 @@ fn restore_inits(stack: &mut [HashMap<String, Binding>], snap: &[HashMap<String,
             }
         }
     }
+}
+
+fn snapshot_http_body(stack: &[HashMap<String, Binding>]) -> Vec<HashMap<String, Option<HttpBodyUsage>>> {
+    stack
+        .iter()
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), v.http_body))
+                .collect()
+        })
+        .collect()
+}
+
+fn restore_http_body(
+    stack: &mut [HashMap<String, Binding>],
+    snap: &[HashMap<String, Option<HttpBodyUsage>>],
+) {
+    for (m, s) in stack.iter_mut().zip(snap.iter()) {
+        for (name, hb) in s {
+            if let Some(b) = m.get_mut(name) {
+                b.http_body = *hb;
+            }
+        }
+    }
+}
+
+fn merge_http_body_after_if_else(
+    stack: &mut [HashMap<String, Binding>],
+    pre: &[HashMap<String, Option<HttpBodyUsage>>],
+    then_snap: &[HashMap<String, Option<HttpBodyUsage>>],
+    else_snap: &[HashMap<String, Option<HttpBodyUsage>>],
+) {
+    for i in 0..stack.len() {
+        let names: Vec<String> = stack[i].keys().cloned().collect();
+        for name in names {
+            let p = pre
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .flatten();
+            let t = then_snap
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .flatten();
+            let e = else_snap
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .flatten();
+            if let Some(b) = stack[i].get_mut(&name) {
+                if b.ty != TsType::HttpResponse {
+                    continue;
+                }
+                if t == e {
+                    b.http_body = t.or(p);
+                } else {
+                    b.http_body = Some(HttpBodyUsage::Unknown);
+                }
+            }
+        }
+    }
+}
+
+fn merge_http_body_if_no_else(
+    stack: &mut [HashMap<String, Binding>],
+    pre: &[HashMap<String, Option<HttpBodyUsage>>],
+    then_snap: &[HashMap<String, Option<HttpBodyUsage>>],
+) {
+    for i in 0..stack.len() {
+        let names: Vec<String> = stack[i].keys().cloned().collect();
+        for name in names {
+            let p = pre
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .flatten();
+            let t = then_snap
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .flatten();
+            if let Some(b) = stack[i].get_mut(&name) {
+                if b.ty != TsType::HttpResponse {
+                    continue;
+                }
+                if t != p {
+                    b.http_body = Some(HttpBodyUsage::Unknown);
+                } else {
+                    b.http_body = t.or(p);
+                }
+            }
+        }
+    }
+}
+
+fn lookup_binding_mut<'a>(
+    stack: &'a mut Vec<HashMap<String, Binding>>,
+    name: &str,
+) -> Option<&'a mut Binding> {
+    for m in stack.iter_mut().rev() {
+        if let Some(b) = m.get_mut(name) {
+            return Some(b);
+        }
+    }
+    None
+}
+
+fn mark_http_response_body_stream(
+    stack: &mut Vec<HashMap<String, Binding>>,
+    receiver: &IRExpr,
+    span: Span,
+    cm: &SendSourceMap,
+    path: &str,
+) -> Result<(), CompileError> {
+    if let IRExpr::Ident(name, _) = receiver {
+        if let Some(b) = lookup_binding_mut(stack, name) {
+            if b.ty == TsType::HttpResponse {
+                match b.http_body {
+                    Some(HttpBodyUsage::Fresh) => {
+                        b.http_body = Some(HttpBodyUsage::Streamed);
+                    }
+                    Some(HttpBodyUsage::Streamed) | Some(HttpBodyUsage::Buffered) => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            span,
+                            "response body is already consumed (cannot call `body.getReader()` again)",
+                        ));
+                    }
+                    Some(HttpBodyUsage::Unknown) => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            span,
+                            "response body consumption is ambiguous here; assign `fetch` to a variable and consume once",
+                        ));
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn mark_http_response_body_buffer(
+    stack: &mut Vec<HashMap<String, Binding>>,
+    receiver: &IRExpr,
+    span: Span,
+    cm: &SendSourceMap,
+    path: &str,
+) -> Result<(), CompileError> {
+    if let IRExpr::Ident(name, _) = receiver {
+        if let Some(b) = lookup_binding_mut(stack, name) {
+            if b.ty == TsType::HttpResponse {
+                match b.http_body {
+                    Some(HttpBodyUsage::Fresh) => {
+                        b.http_body = Some(HttpBodyUsage::Buffered);
+                    }
+                    Some(HttpBodyUsage::Streamed) => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            span,
+                            "cannot call `.text()` / `.json()` after `body.getReader()` on this response",
+                        ));
+                    }
+                    Some(HttpBodyUsage::Buffered) => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            span,
+                            "response body is already consumed by `.text()` / `.json()`",
+                        ));
+                    }
+                    Some(HttpBodyUsage::Unknown) => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            span,
+                            "response body consumption is ambiguous here; assign `fetch` to a variable and consume once",
+                        ));
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn merge_init_after_if_else(
@@ -493,107 +718,51 @@ fn stmt_span(s: &IRStmt) -> Span {
     }
 }
 
-fn check_async_mvp_stmts(
-    stmts: &[IRStmt],
-    cm: &Lrc<SourceMap>,
-    path: &str,
-    _fn_span: Span,
-) -> Result<(), CompileError> {
-    for s in stmts {
-        match s {
-            IRStmt::If { span, .. }
-            | IRStmt::While { span, .. }
-            | IRStmt::ForIn { span, .. }
-            | IRStmt::DoWhile { span, .. } => {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    "async MVP: `if` / `while` / `for..in` / `do..while` are not allowed",
-                ));
-            }
-            IRStmt::Break { span } | IRStmt::Continue { span } => {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    "async MVP: `break` / `continue` are not allowed",
-                ));
-            }
-            IRStmt::FnDecl { span, .. } => {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    "async MVP: nested `function` declarations are not allowed",
-                ));
-            }
-            IRStmt::Block { stmts: inner, .. } => {
-                check_async_mvp_stmts(inner, cm, path, _fn_span)?;
-            }
-            _ => {}
-        }
-    }
-    Ok(())
+fn needs_await_surrounding(e: &IRExpr) -> bool {
+    matches!(
+        e,
+        IRExpr::FetchText { .. }
+            | IRExpr::Fetch { .. }
+            | IRExpr::HttpResponseMethodBuiltin { .. }
+            | IRExpr::ReaderRead { .. }
+            | IRExpr::PromiseAll { .. }
+    )
 }
 
 fn reject_naked_fetchtext_in_stmts(
     stmts: &[IRStmt],
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
 ) -> Result<(), CompileError> {
+    const AWAIT_MSG: &str =
+        "`fetch` / `fetchText` and `Promise.all(...)` must be used as `await ...`";
     for s in stmts {
         match s {
             IRStmt::Let { init, span, .. } => {
                 if let Some(e) = init {
-                    if matches!(e, IRExpr::FetchText { .. }) {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "`fetchText(...)` must be used as `await fetchText(...)`",
-                        ));
+                    if needs_await_surrounding(e) {
+                        return Err(diag(cm, path, *span, AWAIT_MSG));
                     }
                 }
             }
             IRStmt::Return { arg: Some(e), span } => {
-                if matches!(e, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        *span,
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(e) {
+                    return Err(diag(cm, path, *span, AWAIT_MSG));
                 }
             }
             IRStmt::Expr { expr, span } => {
-                if matches!(expr, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        *span,
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(expr) {
+                    return Err(diag(cm, path, *span, AWAIT_MSG));
                 }
             }
             IRStmt::Assign { rhs, span, .. } => {
-                if matches!(rhs, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        *span,
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(rhs) {
+                    return Err(diag(cm, path, *span, AWAIT_MSG));
                 }
             }
             IRStmt::MemberAssign { rhs, span, .. } => {
-                if matches!(rhs, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        *span,
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(rhs) {
+                    return Err(diag(cm, path, *span, AWAIT_MSG));
                 }
             }
             IRStmt::Block { stmts: inner, .. } => {
@@ -605,13 +774,8 @@ fn reject_naked_fetchtext_in_stmts(
                 else_b,
                 ..
             } => {
-                if matches!(cond, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        stmt_span(s),
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(cond) {
+                    return Err(diag(cm, path, stmt_span(s), AWAIT_MSG));
                 }
                 reject_naked_fetchtext_in_stmts(then_b, cm, path)?;
                 if let Some(eb) = else_b {
@@ -619,36 +783,21 @@ fn reject_naked_fetchtext_in_stmts(
                 }
             }
             IRStmt::While { cond, body, .. } => {
-                if matches!(cond, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        stmt_span(s),
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(cond) {
+                    return Err(diag(cm, path, stmt_span(s), AWAIT_MSG));
                 }
                 reject_naked_fetchtext_in_stmts(body, cm, path)?;
             }
             IRStmt::ForIn { target, body, .. } => {
-                if matches!(target, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        stmt_span(s),
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(target) {
+                    return Err(diag(cm, path, stmt_span(s), AWAIT_MSG));
                 }
                 reject_naked_fetchtext_in_stmts(body, cm, path)?;
             }
             IRStmt::DoWhile { body, cond, .. } => {
                 reject_naked_fetchtext_in_stmts(body, cm, path)?;
-                if matches!(cond, IRExpr::FetchText { .. }) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        stmt_span(s),
-                        "`fetchText(...)` must be used as `await fetchText(...)`",
-                    ));
+                if needs_await_surrounding(cond) {
+                    return Err(diag(cm, path, stmt_span(s), AWAIT_MSG));
                 }
             }
             IRStmt::FnDecl { func, .. } => {
@@ -662,7 +811,7 @@ fn reject_naked_fetchtext_in_stmts(
 
 fn reject_readline_in_async_stmts(
     stmts: &[IRStmt],
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
 ) -> Result<(), CompileError> {
     for s in stmts {
@@ -722,7 +871,7 @@ fn reject_readline_in_async_stmts(
 
 fn reject_readline_in_async_expr(
     e: &IRExpr,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
     span: Span,
 ) -> Result<(), CompileError> {
@@ -767,7 +916,9 @@ fn reject_readline_in_async_expr(
             }
             Ok(())
         }
-        IRExpr::Conditional { test, cons, alt, .. } => {
+        IRExpr::Conditional {
+            test, cons, alt, ..
+        } => {
             reject_readline_in_async_expr(test, cm, path, span)?;
             reject_readline_in_async_expr(cons, cm, path, span)?;
             reject_readline_in_async_expr(alt, cm, path, span)
@@ -812,6 +963,27 @@ fn reject_readline_in_async_expr(
         IRExpr::ArrowFn { body, .. } => reject_readline_in_async_stmts(body, cm, path),
         IRExpr::Await { arg, .. } => reject_readline_in_async_expr(arg, cm, path, span),
         IRExpr::FetchText { url, .. } => reject_readline_in_async_expr(url, cm, path, span),
+        IRExpr::Fetch { url, init, .. } => {
+            reject_readline_in_async_expr(url, cm, path, span)?;
+            if let Some(i) = init {
+                if let Some(b) = &i.body {
+                    reject_readline_in_async_expr(b, cm, path, span)?;
+                }
+            }
+            Ok(())
+        }
+        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => {
+            reject_readline_in_async_expr(receiver, cm, path, span)
+        }
+        IRExpr::HttpResponseBodyGetReader { response, .. } => {
+            reject_readline_in_async_expr(response, cm, path, span)
+        }
+        IRExpr::PromiseAll { elems, .. } => {
+            for x in elems {
+                reject_readline_in_async_expr(x, cm, path, span)?;
+            }
+            Ok(())
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -819,9 +991,11 @@ fn reject_readline_in_async_expr(
         | IRExpr::Null(..)
         | IRExpr::Undefined(..)
         | IRExpr::This(..)
-        | IRExpr::Super(..) => Ok(()),
+        | IRExpr::Super(..)
+        | IRExpr::ReaderRead { .. } => Ok(()),
     }
 }
+
 
 /// 当前语句执行后，同一块内后续语句是否均不可达（用于不可达警告）。
 fn stmt_block_diverges(s: &IRStmt, ret_ty: &TsType, loop_depth: usize) -> bool {
@@ -936,16 +1110,27 @@ fn check_stmts(
     globals: &HashMap<String, FnSig>,
     ret_ty: &TsType,
     loop_depth: usize,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
     warnings: &mut Vec<CompileWarning>,
     reachable: &mut bool,
+    next_reader_slot: &mut u32,
 ) -> Result<(), CompileError> {
     for s in stmts.iter_mut() {
         if !*reachable {
             warnings.push(warn(cm, path, stmt_span(s), "unreachable code"));
         }
-        check_stmt(s, stack, globals, ret_ty, loop_depth, cm, path, warnings)?;
+        check_stmt(
+            s,
+            stack,
+            globals,
+            ret_ty,
+            loop_depth,
+            cm,
+            path,
+            warnings,
+            next_reader_slot,
+        )?;
         if *reachable && stmt_block_diverges(s, ret_ty, loop_depth) {
             *reachable = false;
         }
@@ -959,9 +1144,10 @@ fn check_stmt(
     globals: &HashMap<String, FnSig>,
     ret_ty: &TsType,
     loop_depth: usize,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
     warnings: &mut Vec<CompileWarning>,
+    next_reader_slot: &mut u32,
 ) -> Result<(), CompileError> {
     match s {
         IRStmt::Empty { .. } => Ok(()),
@@ -990,6 +1176,14 @@ fn check_stmt(
                         "cannot use `void` expression in initializer",
                     ));
                 }
+                if got == TsType::ReadableStream {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "cannot bind `response.body` alone; use `response.body.getReader()`",
+                    ));
+                }
                 if !type_assignable(ty, &got) {
                     return Err(diag(
                         cm,
@@ -1012,6 +1206,20 @@ fn check_stmt(
                 cm,
                 path,
             )?;
+            if let Some(init_e) = init.as_mut() {
+                if let IRExpr::HttpResponseBodyGetReader {
+                    ref mut stream_slot,
+                    ..
+                } = init_e
+                {
+                    let slot = *next_reader_slot;
+                    *next_reader_slot += 1;
+                    *stream_slot = Some(slot);
+                    if let Some(b) = lookup_binding_mut(stack, name) {
+                        b.reader_stream_slot = Some(slot);
+                    }
+                }
+            }
             Ok(())
         }
         IRStmt::Assign {
@@ -1046,6 +1254,11 @@ fn check_stmt(
                         b.ty
                     ),
                 ));
+            }
+            if got == TsType::HttpResponse {
+                if let Some(bb) = lookup_binding_mut(stack, name) {
+                    bb.http_body = Some(HttpBodyUsage::Fresh);
+                }
             }
             mark_initialized(stack, name);
             Ok(())
@@ -1083,8 +1296,16 @@ fn check_stmt(
             }
             Ok(())
         }
-        IRStmt::Expr { ref mut expr, .. } => {
-            infer_expr_mut(expr, stack, globals, cm, path)?;
+        IRStmt::Expr { ref mut expr, span } => {
+            let g = infer_expr_mut(expr, stack, globals, cm, path)?;
+            if g == TsType::ReadableStream {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "expression value `response.body` cannot be used alone; use `response.body.getReader()`",
+                ));
+            }
             Ok(())
         }
         IRStmt::Return { ref mut arg, span } => {
@@ -1135,6 +1356,7 @@ fn check_stmt(
                 path,
                 warnings,
                 &mut inner_reachable,
+                next_reader_slot,
             )?;
             pop_scope(stack);
             Ok(())
@@ -1157,6 +1379,7 @@ fn check_stmt(
             }
             *cond_ty = ct.clone();
             let pre = snapshot_inits(stack);
+            let pre_http = snapshot_http_body(stack);
             push_scope(stack);
             let mut then_r = true;
             check_stmts(
@@ -1169,10 +1392,13 @@ fn check_stmt(
                 path,
                 warnings,
                 &mut then_r,
+                next_reader_slot,
             )?;
             pop_scope(stack);
             let then_snap = snapshot_inits(stack);
+            let then_snap_http = snapshot_http_body(stack);
             restore_inits(stack, &pre);
+            restore_http_body(stack, &pre_http);
             if let Some(else_b) = else_b {
                 push_scope(stack);
                 let mut else_r = true;
@@ -1186,13 +1412,18 @@ fn check_stmt(
                     path,
                     warnings,
                     &mut else_r,
+                    next_reader_slot,
                 )?;
                 pop_scope(stack);
                 let else_snap = snapshot_inits(stack);
+                let else_snap_http = snapshot_http_body(stack);
                 restore_inits(stack, &pre);
+                restore_http_body(stack, &pre_http);
                 merge_init_after_if_else(stack, &pre, &then_snap, &else_snap);
+                merge_http_body_after_if_else(stack, &pre_http, &then_snap_http, &else_snap_http);
             } else {
                 merge_init_after_if_no_else(stack, &pre, &then_snap);
+                merge_http_body_if_no_else(stack, &pre_http, &then_snap_http);
             }
             Ok(())
         }
@@ -1225,6 +1456,7 @@ fn check_stmt(
                 path,
                 warnings,
                 &mut body_r,
+                next_reader_slot,
             )?;
             pop_scope(stack);
             apply_loop_conservative_init(stack, &pre);
@@ -1273,6 +1505,7 @@ fn check_stmt(
                 path,
                 warnings,
                 &mut body_r,
+                next_reader_slot,
             )?;
             pop_scope(stack);
             apply_loop_conservative_init(stack, &pre);
@@ -1307,6 +1540,7 @@ fn check_stmt(
                 path,
                 warnings,
                 &mut body_r,
+                next_reader_slot,
             )?;
             pop_scope(stack);
             apply_loop_conservative_init(stack, &pre);
@@ -1340,9 +1574,9 @@ fn check_stmt(
 
 fn infer_expr_mut(
     e: &mut IRExpr,
-    stack: &[HashMap<String, Binding>],
+    stack: &mut Vec<HashMap<String, Binding>>,
     globals: &HashMap<String, FnSig>,
-    cm: &Lrc<SourceMap>,
+    cm: &SendSourceMap,
     path: &str,
 ) -> Result<TsType, CompileError> {
     match e {
@@ -1359,6 +1593,14 @@ fn infer_expr_mut(
                         path,
                         *span,
                         "variable may be used before being assigned",
+                    ));
+                }
+                if b.ty == TsType::ReadableStreamDefaultReader {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "stream reader is not a first-class value; use only `await reader.read()`",
                     ));
                 }
                 return Ok(b.ty.clone());
@@ -1665,6 +1907,8 @@ fn infer_expr_mut(
             prop,
             span,
             length_dispatch,
+            http_response_member,
+            stream_read_member,
         } => {
             let ot = infer_expr_mut(obj, stack, globals, cm, path)?;
             if prop == "length" {
@@ -1676,11 +1920,37 @@ fn infer_expr_mut(
                     *length_dispatch = Some(MemberLengthDispatch::VecLen);
                     return Ok(TsType::Number);
                 }
+                if ot == TsType::Uint8Array {
+                    *length_dispatch = Some(MemberLengthDispatch::Uint8ArrayLen);
+                    return Ok(TsType::Number);
+                }
                 if let TsType::ObjectNum(keys) = &ot {
                     if keys.iter().any(|k| k == prop) {
                         *length_dispatch = None;
                         return Ok(TsType::Number);
                     }
+                }
+            } else if ot == TsType::HttpResponse {
+                if prop == "status" {
+                    *http_response_member = Some(crate::ir::HttpResponseMember::Status);
+                    return Ok(TsType::Number);
+                }
+                if prop == "ok" {
+                    *http_response_member = Some(crate::ir::HttpResponseMember::Ok);
+                    return Ok(TsType::Boolean);
+                }
+                if prop == "body" {
+                    *http_response_member = Some(crate::ir::HttpResponseMember::Body);
+                    return Ok(TsType::ReadableStream);
+                }
+            } else if ot == TsType::StreamReadResult {
+                if prop == "done" {
+                    *stream_read_member = Some(crate::ir::StreamReadResultMember::Done);
+                    return Ok(TsType::Boolean);
+                }
+                if prop == "value" {
+                    *stream_read_member = Some(crate::ir::StreamReadResultMember::Value);
+                    return Ok(TsType::Uint8Array);
                 }
             } else if let TsType::ObjectNum(keys) = &ot {
                 if keys.iter().any(|k| k == prop) {
@@ -1691,7 +1961,7 @@ fn infer_expr_mut(
                 cm,
                 path,
                 *span,
-                "unsupported member access (supports `string.length`, `number[].length`, or object number fields)",
+                "unsupported member access (supports `string.length`, `number[].length`, `Uint8Array.length`, object number fields, `Response.status` / `ok` / `body`, or stream read result `done` / `value`)",
             ))
         }
         IRExpr::OptionalMember {
@@ -1699,6 +1969,8 @@ fn infer_expr_mut(
             prop,
             span,
             length_dispatch,
+            http_response_member,
+            stream_read_member,
         } => {
             match &**obj {
                 IRExpr::Null(_) | IRExpr::Undefined(_) => return Ok(TsType::Undefined),
@@ -1717,11 +1989,37 @@ fn infer_expr_mut(
                     *length_dispatch = Some(MemberLengthDispatch::VecLen);
                     return Ok(TsType::Number);
                 }
+                if ot == TsType::Uint8Array {
+                    *length_dispatch = Some(MemberLengthDispatch::Uint8ArrayLen);
+                    return Ok(TsType::Number);
+                }
                 if let TsType::ObjectNum(keys) = &ot {
                     if keys.iter().any(|k| k == prop) {
                         *length_dispatch = None;
                         return Ok(TsType::Number);
                     }
+                }
+            } else if ot == TsType::HttpResponse {
+                if prop == "status" {
+                    *http_response_member = Some(crate::ir::HttpResponseMember::Status);
+                    return Ok(TsType::Number);
+                }
+                if prop == "ok" {
+                    *http_response_member = Some(crate::ir::HttpResponseMember::Ok);
+                    return Ok(TsType::Boolean);
+                }
+                if prop == "body" {
+                    *http_response_member = Some(crate::ir::HttpResponseMember::Body);
+                    return Ok(TsType::ReadableStream);
+                }
+            } else if ot == TsType::StreamReadResult {
+                if prop == "done" {
+                    *stream_read_member = Some(crate::ir::StreamReadResultMember::Done);
+                    return Ok(TsType::Boolean);
+                }
+                if prop == "value" {
+                    *stream_read_member = Some(crate::ir::StreamReadResultMember::Value);
+                    return Ok(TsType::Uint8Array);
                 }
             } else if let TsType::ObjectNum(keys) = &ot {
                 if keys.iter().any(|k| k == prop) {
@@ -1758,97 +2056,88 @@ fn infer_expr_mut(
             }
             Ok(TsType::Number)
         }
-        IRExpr::NumberBuiltin { kind, args, span } => {
-            match kind {
-                NumberBuiltinKind::ParseInt => {
-                    if args.is_empty() || args.len() > 2 {
+        IRExpr::NumberBuiltin { kind, args, span } => match kind {
+            NumberBuiltinKind::ParseInt => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(diag(cm, path, *span, "internal: Number.parseInt arity"));
+                }
+                let t0 = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                if !is_stringish(&t0) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`Number.parseInt` first argument must be `string`",
+                    ));
+                }
+                if args.len() == 2 {
+                    let t1 = infer_expr_mut(&mut args[1], stack, globals, cm, path)?;
+                    if !is_numberish(&t1) {
                         return Err(diag(
                             cm,
                             path,
                             *span,
-                            "internal: Number.parseInt arity",
+                            "`Number.parseInt` radix must be `number`",
                         ));
                     }
-                    let t0 = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
-                    if !is_stringish(&t0) {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "`Number.parseInt` first argument must be `string`",
-                        ));
-                    }
-                    if args.len() == 2 {
-                        let t1 = infer_expr_mut(&mut args[1], stack, globals, cm, path)?;
-                        if !is_numberish(&t1) {
+                    if let IRExpr::Number(r, _) = &args[1] {
+                        if *r < 2 || *r > 36 {
                             return Err(diag(
                                 cm,
                                 path,
                                 *span,
-                                "`Number.parseInt` radix must be `number`",
+                                "`Number.parseInt` radix must be between 2 and 36",
                             ));
                         }
-                        if let IRExpr::Number(r, _) = &args[1] {
-                            if *r < 2 || *r > 36 {
-                                return Err(diag(
-                                    cm,
-                                    path,
-                                    *span,
-                                    "`Number.parseInt` radix must be between 2 and 36",
-                                ));
-                            }
-                        }
                     }
-                    Ok(TsType::Number)
                 }
-                NumberBuiltinKind::ParseFloat => {
-                    let t0 = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
-                    if !is_stringish(&t0) {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "`Number.parseFloat` argument must be `string`",
-                        ));
-                    }
-                    Ok(TsType::Number)
-                }
+                Ok(TsType::Number)
             }
-        }
+            NumberBuiltinKind::ParseFloat => {
+                let t0 = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                if !is_stringish(&t0) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`Number.parseFloat` argument must be `string`",
+                    ));
+                }
+                Ok(TsType::Number)
+            }
+        },
         IRExpr::JsonBuiltin {
             kind,
             args,
             span,
             stringify_inferred_ty,
-        } => {
-            match kind {
-                JsonBuiltinKind::Stringify => {
-                    let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
-                    if !is_stringish(&t) && !is_numberish(&t) && !is_booleanish(&t) {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "`JSON.stringify` supports only `string`, `number`, or `boolean`",
-                        ));
-                    }
-                    *stringify_inferred_ty = Some(t.clone());
-                    Ok(TsType::String)
+        } => match kind {
+            JsonBuiltinKind::Stringify => {
+                let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                if !is_stringish(&t) && !is_numberish(&t) && !is_booleanish(&t) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`JSON.stringify` supports only `string`, `number`, or `boolean`",
+                    ));
                 }
-                JsonBuiltinKind::Parse => {
-                    let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
-                    if !is_stringish(&t) {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "`JSON.parse` argument must be `string`",
-                        ));
-                    }
-                    Ok(TsType::Number)
-                }
+                *stringify_inferred_ty = Some(t.clone());
+                Ok(TsType::String)
             }
-        }
+            JsonBuiltinKind::Parse => {
+                let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                if !is_stringish(&t) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`JSON.parse` argument must be `string`",
+                    ));
+                }
+                Ok(TsType::Number)
+            }
+        },
         IRExpr::StringMethodBuiltin {
             kind,
             receiver,
@@ -1867,41 +2156,21 @@ fn infer_expr_mut(
             match kind {
                 StringMethodKind::CharAt => {
                     if args.len() != 1 {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "internal: charAt arity",
-                        ));
+                        return Err(diag(cm, path, *span, "internal: charAt arity"));
                     }
                     let at = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
                     if !is_numberish(&at) {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "argument must be `number`",
-                        ));
+                        return Err(diag(cm, path, *span, "argument must be `number`"));
                     }
                     Ok(TsType::String)
                 }
                 StringMethodKind::CharCodeAt => {
                     if args.len() != 1 {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "internal: charCodeAt arity",
-                        ));
+                        return Err(diag(cm, path, *span, "internal: charCodeAt arity"));
                     }
                     let at = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
                     if !is_numberish(&at) {
-                        return Err(diag(
-                            cm,
-                            path,
-                            *span,
-                            "argument must be `number`",
-                        ));
+                        return Err(diag(cm, path, *span, "argument must be `number`"));
                     }
                     Ok(TsType::Number)
                 }
@@ -2034,6 +2303,7 @@ fn infer_expr_mut(
                 )?;
             }
             let mut reaches_end = true;
+            let mut arrow_reader_slot = 0u32;
             check_stmts(
                 body,
                 &mut local_stack,
@@ -2044,6 +2314,7 @@ fn infer_expr_mut(
                 path,
                 &mut local_warnings,
                 &mut reaches_end,
+                &mut arrow_reader_slot,
             )?;
             if *ret != TsType::Void && reaches_end {
                 return Err(diag(
@@ -2084,6 +2355,16 @@ fn infer_expr_mut(
             if ot == TsType::ArrayNumber {
                 *index_kind = Some(IndexKind::ArrayNumber);
                 Ok(TsType::Number)
+            } else if ot == TsType::ArrayString {
+                *index_kind = Some(IndexKind::ArrayStringElem);
+                Ok(TsType::String)
+            } else if ot == TsType::ArrayHttpResponse {
+                Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "indexing `Promise.all` of `fetch` responses is not supported (responses are not `Clone`)",
+                ))
             } else if is_stringish(&ot) {
                 *index_kind = Some(IndexKind::StringUtf16);
                 Ok(TsType::String)
@@ -2092,7 +2373,7 @@ fn infer_expr_mut(
                     cm,
                     path,
                     *span,
-                    "index access supports only `number[]` or `string`",
+                    "index access supports only `number[]`, `string[]`, or `string`",
                 ))
             }
         }
@@ -2108,18 +2389,147 @@ fn infer_expr_mut(
             }
             Ok(TsType::Promise(Box::new(TsType::String)))
         }
-        IRExpr::Await { arg, span } => {
-            match &**arg {
-                IRExpr::FetchText { .. } | IRExpr::Call { .. } => {}
-                _ => {
-                    return Err(diag(
-                        cm,
-                        path,
-                        *span,
-                        "async MVP: `await` only supports `fetchText(...)` or an async function call",
-                    ));
+        IRExpr::Fetch { url, init, span } => {
+            let t = infer_expr_mut(url, stack, globals, cm, path)?;
+            if !is_stringish(&t) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`fetch` url argument must be `string`",
+                ));
+            }
+            if let Some(ref mut init_obj) = init {
+                if let Some(b) = init_obj.body.as_mut() {
+                    let bt = infer_expr_mut(b, stack, globals, cm, path)?;
+                    if !is_stringish(&bt) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`fetch` init `body` must be `string` when present",
+                        ));
+                    }
                 }
             }
+            Ok(TsType::Promise(Box::new(TsType::HttpResponse)))
+        }
+        IRExpr::HttpResponseMethodBuiltin {
+            kind,
+            receiver,
+            span,
+        } => {
+            let rt = infer_expr_mut(receiver, stack, globals, cm, path)?;
+            if rt != TsType::HttpResponse {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`response.text` / `response.json` require a `fetch` Response value",
+                ));
+            }
+            mark_http_response_body_buffer(stack, receiver, *span, cm, path)?;
+            match kind {
+                crate::ir::HttpResponseMethodKind::Text => {
+                    Ok(TsType::Promise(Box::new(TsType::String)))
+                }
+                crate::ir::HttpResponseMethodKind::Json => {
+                    Ok(TsType::Promise(Box::new(TsType::Number)))
+                }
+            }
+        }
+        IRExpr::HttpResponseBodyGetReader {
+            response,
+            span,
+            stream_slot: _,
+        } => {
+            let rt = infer_expr_mut(response, stack, globals, cm, path)?;
+            if rt != TsType::HttpResponse {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`body.getReader()` requires a `fetch` Response value before `.body`",
+                ));
+            }
+            mark_http_response_body_stream(stack, response, *span, cm, path)?;
+            Ok(TsType::ReadableStreamDefaultReader)
+        }
+        IRExpr::ReaderRead {
+            reader_name,
+            span,
+            reader_slot,
+        } => {
+            let b = lookup(stack, reader_name).ok_or_else(|| {
+                diag(
+                    cm,
+                    path,
+                    *span,
+                    format!("unknown identifier `{reader_name}` for `reader.read()`"),
+                )
+            })?;
+            if b.ty != TsType::ReadableStreamDefaultReader {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`read()` is only valid on a value from `response.body.getReader()`",
+                ));
+            }
+            let slot = b.reader_stream_slot.ok_or_else(|| {
+                diag(
+                    cm,
+                    path,
+                    *span,
+                    "internal error: reader stream slot not assigned",
+                )
+            })?;
+            *reader_slot = Some(slot);
+            Ok(TsType::Promise(Box::new(TsType::StreamReadResult)))
+        }
+        IRExpr::PromiseAll { elems, span } => {
+            if elems.is_empty() {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`Promise.all` requires at least one promise",
+                ));
+            }
+            let mut inners = Vec::with_capacity(elems.len());
+            for e in elems {
+                let t = infer_expr_mut(e, stack, globals, cm, path)?;
+                match t {
+                    TsType::Promise(inner) => inners.push(*inner),
+                    _ => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`Promise.all` elements must be `Promise<T>`",
+                        ));
+                    }
+                }
+            }
+            let all_num = inners.iter().all(|t| is_numberish(t));
+            let all_str = inners.iter().all(|t| is_stringish(t));
+            let all_http = inners.iter().all(|t| *t == TsType::HttpResponse);
+            if all_num {
+                Ok(TsType::Promise(Box::new(TsType::ArrayNumber)))
+            } else if all_str {
+                Ok(TsType::Promise(Box::new(TsType::ArrayString)))
+            } else if all_http {
+                Ok(TsType::Promise(Box::new(TsType::ArrayHttpResponse)))
+            } else {
+                Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`Promise.all` requires all promises to have the same element kind (`number`, `string`, or `Response` from `fetch`)",
+                ))
+            }
+        }
+        IRExpr::Await { arg, span } => {
             let inner = infer_expr_mut(arg, stack, globals, cm, path)?;
             match inner {
                 TsType::Promise(t) => Ok(*t),

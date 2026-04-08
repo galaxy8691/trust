@@ -96,7 +96,7 @@ fn rewrite_calls_and_collect(
     body: &mut [IRStmt],
     templates: &HashMap<String, IRFunction>,
     queue: &mut VecDeque<Req>,
-    cm: &swc_common::sync::Lrc<swc_common::SourceMap>,
+    cm: &crate::ir::SendSourceMap,
     path: &str,
     fn_span: swc_common::Span,
 ) -> Result<(), CompileError> {
@@ -110,7 +110,7 @@ fn rewrite_stmt(
     s: &mut IRStmt,
     templates: &HashMap<String, IRFunction>,
     queue: &mut VecDeque<Req>,
-    cm: &swc_common::sync::Lrc<swc_common::SourceMap>,
+    cm: &crate::ir::SendSourceMap,
     path: &str,
     fn_span: swc_common::Span,
 ) -> Result<(), CompileError> {
@@ -168,7 +168,7 @@ fn rewrite_expr(
     e: &mut IRExpr,
     templates: &HashMap<String, IRFunction>,
     queue: &mut VecDeque<Req>,
-    cm: &swc_common::sync::Lrc<swc_common::SourceMap>,
+    cm: &crate::ir::SendSourceMap,
     path: &str,
     fn_span: swc_common::Span,
 ) -> Result<(), CompileError> {
@@ -295,6 +295,26 @@ fn rewrite_expr(
         }
         IRExpr::Await { arg, .. } => rewrite_expr(arg, templates, queue, cm, path, fn_span)?,
         IRExpr::FetchText { url, .. } => rewrite_expr(url, templates, queue, cm, path, fn_span)?,
+        IRExpr::Fetch { url, init, .. } => {
+            rewrite_expr(url, templates, queue, cm, path, fn_span)?;
+            if let Some(i) = init {
+                if let Some(b) = &mut i.body {
+                    rewrite_expr(b, templates, queue, cm, path, fn_span)?;
+                }
+            }
+        }
+        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => {
+            rewrite_expr(receiver, templates, queue, cm, path, fn_span)?;
+        }
+        IRExpr::HttpResponseBodyGetReader { response, .. } => {
+            rewrite_expr(response, templates, queue, cm, path, fn_span)?;
+        }
+        IRExpr::ReaderRead { .. } => {}
+        IRExpr::PromiseAll { elems, .. } => {
+            for a in elems {
+                rewrite_expr(a, templates, queue, cm, path, fn_span)?;
+            }
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -509,6 +529,22 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
         }
         IRExpr::Await { arg, .. } => subst_expr(arg, subst),
         IRExpr::FetchText { url, .. } => subst_expr(url, subst),
+        IRExpr::Fetch { url, init, .. } => {
+            subst_expr(url, subst);
+            if let Some(i) = init {
+                if let Some(b) = &mut i.body {
+                    subst_expr(b, subst);
+                }
+            }
+        }
+        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => subst_expr(receiver, subst),
+        IRExpr::HttpResponseBodyGetReader { response, .. } => subst_expr(response, subst),
+        IRExpr::ReaderRead { .. } => {}
+        IRExpr::PromiseAll { elems, .. } => {
+            for a in elems {
+                subst_expr(a, subst);
+            }
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -557,6 +593,13 @@ fn type_key(t: &TsType) -> String {
         TsType::Null => "null".to_string(),
         TsType::Undefined => "undef".to_string(),
         TsType::ArrayNumber => "arrn".to_string(),
+        TsType::ArrayString => "arrs".to_string(),
+        TsType::ArrayHttpResponse => "arrhr".to_string(),
+        TsType::HttpResponse => "httpres".to_string(),
+        TsType::ReadableStream => "rstream".to_string(),
+        TsType::ReadableStreamDefaultReader => "rsreader".to_string(),
+        TsType::StreamReadResult => "sreadres".to_string(),
+        TsType::Uint8Array => "u8arr".to_string(),
         TsType::ObjectNum(fields) => format!("obj{}", fields.join("_")),
         TsType::Union(m) => format!("u{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
         TsType::TypeParam(n) => format!("tp{n}"),

@@ -176,6 +176,123 @@ fn compile_async_mvp_writes_tokio_and_await() {
     assert!(body.contains("__ts2rs_fetch_text"), "{body}");
 }
 
+#[test]
+fn compile_async_control_flow_if_while_await_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("async_control_flow_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("#[tokio::main]"), "{body}");
+    assert!(body.contains("async fn ts_main"), "{body}");
+    assert!(body.contains(".await"), "{body}");
+    assert!(body.contains("if ("), "{body}");
+    assert!(body.contains("while "), "{body}");
+    assert!(body.contains("__ts2rs_fetch_text"), "{body}");
+}
+
+#[test]
+fn compile_promise_all_fetch_alias_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("promise_all_fetch_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("vec!["), "{body}");
+    assert!(body.contains("__ts2rs_fetch("), "{body}");
+    assert!(body.contains(".await"), "{body}");
+}
+
+#[test]
+fn compile_promise_then_fails() {
+    assert_compile_fails_stderr("promise_then_fail.ts", "Promise.prototype.then");
+}
+
+#[test]
+fn compile_fetch_response_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("fetch_response_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("__ts2rs_fetch("), "{body}");
+    assert!(body.contains(".status()"), "{body}");
+    assert!(body.contains(".text()"), "{body}");
+}
+
+#[test]
+fn compile_fetch_stream_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("fetch_stream_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("bytes_stream()"), "{body}");
+    assert!(body.contains("__Ts2rsStreamReadResult"), "{body}");
+    assert!(body.contains("futures_util"), "{body}");
+}
+
+#[test]
+fn compile_fetch_post_init_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("fetch_post_init_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("__Ts2rsFetchInit"), "{body}");
+    assert!(body.contains("\"POST\""), "{body}");
+}
+
 // --- §3.1 符号表 / void+log 分支 ---
 
 #[test]

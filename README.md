@@ -58,6 +58,7 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 - **Single error**: [`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) report the **first** error only ([`CompileError`](crates/ts2rs-hir/src/error.rs)). On success, multiple [`CompileWarning`](crates/ts2rs-hir/src/error.rs) may be returned (same shape in [`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs)).
 - **`export` shapes**: anything other than `export function …` and top-level `function …` is rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs)); negative fixtures `export_*_fail.ts` and [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
 - **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/ts2rs-parser/src/lib.rs) includes `source_map` for locations. Reflecting TS comments in Rust is **not** implemented.
+- **Follow-up backlog** (multi-error reporting, TS comments in generated Rust, project-scale tooling): see [PROJECT-TODO.md §14 — Toolchain and UX](PROJECT-TODO.md).
 
 ## Control flow and return (§3.4)
 
@@ -107,7 +108,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
 | Generics / type args | Partial | Monomorphization subset: explicit type args required at generic call sites; generic declarations are allowed; unsupported broad shapes still rejected |
 | Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` closure codegen path); variable-call `f(...)`, function args/returns covered by e2e fixtures |
-| `async` / `await` / `Promise` / `fetchText` | Partial | MVP: `async function` with return `Promise<T>` (`T` is `number` \| `string` \| `void`); `await fetchText(url: string)` and `await` other **async** top-level functions; **no** `if` / loops / nested `function` in async bodies; temp crates get `tokio` + `reqwest` (rustls); see `async_mvp_compile_ok.ts`, `compile_async_mvp_writes_tokio_and_await` |
+| `async` / `await` / `Promise` / `fetch` / `fetchText` | Partial | `async function` with return `Promise<T>` (`T` is `number` \| `string` \| `void`); **`fetchText(url)`** → `Promise<string>` (`__ts2rs_fetch_text`); **`fetch(url, init?)`** → `Promise<Response>` (`reqwest::Response`: `status`, `ok`, `await .text()`, `await .json()` integer-only JSON body); **`response.body.getReader()`** + **`await reader.read()`** → `{ done, value }` with **`Uint8Array`** as `Vec<u8>` (`bytes_stream()` + `futures-util` `StreamExt`); optional **`init`** with string-literal `method`, `headers` map (string literal values), optional `body` string; **`Promise.all([...])`** homogeneous `number` / `string` / `fetch` responses (sequential `.await`); **`.then`** rejected; TLS via **rustls**; HTTP/2 when negotiated — **not** byte-parity with a specific Node release; full WHATWG `fetch` (`Headers`, duplex, etc.) still backlog; see `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, and other `compile_async_*` / `promise_*` tests |
 | Class / this / extends / super | Partial | Class subset is lowered to constructor/method functions, with sem checks for extends graph, `super(...)` placement, and baseline `override`; e2e: `class_*` fixtures |
 | Full TypeScript / `tsc` | Not implemented | Long-term |
 
@@ -134,6 +135,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Class subset | `class_basic_ok.ts`, `class_this_method_ok.ts`, `class_extends_ok.ts`, `class_super_ctor_ok.ts`, `class_*_fail.ts` | `run_class_basic_ok_prints_five`, `run_class_extends_ok_prints_seven`, `compile_class_super_invalid_fails`, `compile_class_override_mismatch_fails` |
 | Nested function | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
+| Async / `Promise` / HTTP | `async_mvp_compile_ok.ts`, `async_control_flow_ok.ts`, `promise_all_fetch_ok.ts`, `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`, `compile_async_control_flow_if_while_await_ok`, `compile_promise_all_fetch_alias_ok`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, `compile_promise_then_fails` |
 | CLI `check` / `--emit-ir` | `sample.ts`, `switch_fail.ts` | `check_sample_ok`, `compile_emit_ir_stderr_contains_ir_module` |
 | Negative optional / nullish / object | `optional_chain_fail.ts`, `nullish_fail.ts`, `object_fail.ts` | `compile_optional_call_not_supported_fails`, … |
 | Regression anchor | [`tests/regression/switch_fallthrough_regression.ts`](crates/ts2rs-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |

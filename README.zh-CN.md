@@ -55,9 +55,10 @@ flowchart LR
 
 ## 诊断与前端健壮性（§1.1）
 
-- **单条错误**：[`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) 在失败时**只报告第一条**错误（[`CompileError`](crates/ts2rs-hir/src/error.rs)），同一次运行不会继续收集后续错误；若需「一屏多条」错误诊断，见 [PROJECT-TODO.zh-CN.md](PROJECT-TODO.zh-CN.md) 长期条目。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（返回 `(String, Vec<CompileWarning>)`；[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
+- **单条错误**：[`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) 在失败时**只报告第一条**错误（[`CompileError`](crates/ts2rs-hir/src/error.rs)），同一次运行不会继续收集后续错误。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（返回 `(String, Vec<CompileWarning>)`；[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
 - **`export` 形态**：除 `export function …` 与顶层 `function …` 外，其余 `export`（如 `export { … }`、`export default`、`export * from`、`export const` / `class` 等）均**显式报错**（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；负例样例见 `export_*_fail.ts`（与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)）。
 - **注释**：swc 产出的 `Program` **不携带**注释节点；[`ParsedSource`](crates/ts2rs-parser/src/lib.rs) 已含 `source_map` 供行列号。若要将 TS 注释反映到生成的 Rust，需在 parser 侧保留注释或扫描 token，并在 IR/codegen 中单独设计；**当前未实现**。
+- **后续与 backlog**（多条编译错误、TS 原文注释进入生成物、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
 
 ## 控制流与 return（简化语义 + §3.4）
 
@@ -112,7 +113,7 @@ flowchart LR
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types`](crates/ts2rs-hir/src/build.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化子集：泛型调用需显式类型实参；泛型声明可解析；更宽泛语义仍拒绝 |
 | 高阶函数 | 部分支持 | 当前支持函数类型注解与带类型箭头闭包（codegen 子集为 `(number) => number`）；支持变量调用 `f(...)`、函数作参数与返回值 |
-| `async` / `await` / `Promise` / `fetchText` | 部分支持 | MVP：`async function` 且返回 `Promise<T>`（`T` 为 `number` \| `string` \| `void`）；`await fetchText(url)` 与 `await` 其他 **async** 顶层函数；async 函数体内**不允许** `if` / 循环 / 嵌套 `function`；临时 crate 注入 `tokio` 与 `reqwest`（rustls）；见 `async_mvp_compile_ok.ts`、`compile_async_mvp_writes_tokio_and_await` |
+| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` 整数 JSON）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
 
@@ -139,6 +140,7 @@ flowchart LR
 | class 子集 | `class_basic_ok.ts`、`class_this_method_ok.ts`、`class_extends_ok.ts`、`class_super_ctor_ok.ts`、`class_*_fail.ts` | `run_class_basic_ok_prints_five`、`run_class_extends_ok_prints_seven`、`compile_class_super_invalid_fails`、`compile_class_override_mismatch_fails` |
 | 嵌套函数 | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | 极简 tsconfig / `--project` | `multi_entry_tsconfig.json` + `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
+| async / `Promise` / HTTP | `async_mvp_compile_ok.ts`、`async_control_flow_ok.ts`、`promise_all_fetch_ok.ts`、`fetch_response_ok.ts`、`fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`、`compile_async_control_flow_if_while_await_ok`、`compile_promise_all_fetch_alias_ok`、`compile_fetch_response_ok`、`compile_fetch_post_init_ok`、`compile_promise_then_fails` |
 | CLI：`check` / `--emit-ir` | `sample.ts`、`switch_fail.ts` | `check_sample_ok`、`compile_emit_ir_stderr_contains_ir_module` |
 | 可选链 / `??` / 对象字段（负例边界） | `optional_chain_fail.ts`、`nullish_fail.ts`、`object_fail.ts` | `compile_optional_call_not_supported_fails` 等 |
 | 回归锚点（与 fixture 重复语义） | [`tests/regression/switch_fallthrough_regression.ts`](crates/ts2rs-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |

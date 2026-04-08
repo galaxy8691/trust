@@ -77,6 +77,7 @@ pub(crate) fn cmd_run(
     let opts = RustBuildOptions {
         link_ts2rs_rt,
         release,
+        ..Default::default()
     };
     let (_dir, exe) = match build_rust_to_executable_with_options(&rust, &opts) {
         Ok(x) => x,

@@ -15,6 +15,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use tempfile::TempDir;
 use thiserror::Error;
@@ -36,6 +37,17 @@ pub enum DriverError {
     #[error("cargo build failed (status {status}):\n{combined}")]
     CargoBuild { status: String, combined: String },
 
+    #[error("cargo build exceeded time limit of {limit:?}")]
+    CargoTimeout { limit: Duration },
+
+    #[error(
+        "cargo subprocess output exceeded max capture of {max_bytes} bytes (stream: {stream})"
+    )]
+    CargoOutputTruncated {
+        max_bytes: usize,
+        stream: &'static str,
+    },
+
     #[error("built binary not found at {0}")]
     MissingBinary(PathBuf),
 
@@ -56,6 +68,10 @@ pub struct RustBuildOptions {
     pub link_ts2rs_rt: bool,
     /// When true (default), runs `cargo build --release` and uses `target/release/`; when false, `cargo build` and `target/debug/`.
     pub release: bool,
+    /// When set, `cargo build` is killed after this duration. When `None`, wait until the process exits (same as before these options existed).
+    pub cargo_timeout: Option<Duration>,
+    /// When set, each of stdout and stderr is capped at this many bytes when captured (bounds host memory). When `None`, read the full streams.
+    pub max_cargo_output_bytes: Option<usize>,
 }
 
 impl Default for RustBuildOptions {
@@ -63,6 +79,8 @@ impl Default for RustBuildOptions {
         Self {
             link_ts2rs_rt: false,
             release: true,
+            cargo_timeout: None,
+            max_cargo_output_bytes: None,
         }
     }
 }

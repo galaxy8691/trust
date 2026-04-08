@@ -70,12 +70,14 @@ pub(super) fn ts_type_from_ast(
             let elem = ts_type_from_ast(&a.elem_type, cm, path, iface, type_params)?;
             if elem == TsType::Number {
                 Ok(TsType::ArrayNumber)
+            } else if elem == TsType::String {
+                Ok(TsType::ArrayString)
             } else {
                 Err(diag(
                     cm,
                     path,
                     a.span,
-                    "only `number[]` is supported for array type annotation (not numeric literal types)",
+                    "only `number[]` and `string[]` are supported for array type annotations",
                 ))
             }
         }
@@ -138,6 +140,61 @@ pub(super) fn ts_type_from_ast(
             match &r.type_name {
                 TsEntityName::Ident(id) => {
                     let name = id.sym.to_string();
+                    if name == "HttpResponse" {
+                        if r.type_params.is_some() {
+                            return Err(diag(
+                                cm,
+                                path,
+                                r.span,
+                                "`HttpResponse` does not take type parameters",
+                            ));
+                        }
+                        return Ok(TsType::HttpResponse);
+                    }
+                    if name == "ReadableStream" {
+                        if r.type_params.is_some() {
+                            return Err(diag(
+                                cm,
+                                path,
+                                r.span,
+                                "`ReadableStream` does not take type parameters",
+                            ));
+                        }
+                        return Ok(TsType::ReadableStream);
+                    }
+                    if name == "ReadableStreamDefaultReader" {
+                        if r.type_params.is_some() {
+                            return Err(diag(
+                                cm,
+                                path,
+                                r.span,
+                                "`ReadableStreamDefaultReader` does not take type parameters",
+                            ));
+                        }
+                        return Ok(TsType::ReadableStreamDefaultReader);
+                    }
+                    if name == "StreamReadResult" {
+                        if r.type_params.is_some() {
+                            return Err(diag(
+                                cm,
+                                path,
+                                r.span,
+                                "`StreamReadResult` does not take type parameters",
+                            ));
+                        }
+                        return Ok(TsType::StreamReadResult);
+                    }
+                    if name == "Uint8Array" {
+                        if r.type_params.is_some() {
+                            return Err(diag(
+                                cm,
+                                path,
+                                r.span,
+                                "`Uint8Array` does not take type parameters",
+                            ));
+                        }
+                        return Ok(TsType::Uint8Array);
+                    }
                     if name == "Promise" {
                         let Some(args) = &r.type_params else {
                             return Err(diag(

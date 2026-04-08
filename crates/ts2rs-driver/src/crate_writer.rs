@@ -9,12 +9,19 @@ pub(crate) fn write_minimal_crate(
     opts: &RustBuildOptions,
 ) -> Result<(), DriverError> {
     let needs_async = rust_source.contains("#[tokio::main]");
+    let needs_futures_util = rust_source.contains("futures_util");
     let async_deps = if needs_async {
-        r#"tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+        let mut s = String::from(
+            r#"tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-"#
+"#,
+        );
+        if needs_futures_util {
+            s.push_str("futures-util = { version = \"0.3\", default-features = false, features = [\"std\"] }\n");
+        }
+        s
     } else {
-        ""
+        String::new()
     };
 
     let cargo_toml = if opts.link_ts2rs_rt {

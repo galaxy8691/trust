@@ -6,6 +6,8 @@
 
 **相关代码入口**：[`README.zh-CN.md`](README.zh-CN.md) · [`crates/ts2rs-hir`](crates/ts2rs-hir)（`build.rs` / `sem.rs` / `codegen.rs` / `ir.rs`）· [`crates/ts2rs-parser`](crates/ts2rs-parser) · [`crates/ts2rs-driver`](crates/ts2rs-driver) · [`crates/ts2rs-cli`](crates/ts2rs-cli) · [`test-ts/main.ts`](test-ts/main.ts)（多文件：`test-ts/math.ts`） · [`crates/ts2rs-cli/tests/fixtures/`](crates/ts2rs-cli/tests/fixtures/)
 
+**后续/backlog 总表**：见 **[§14 后续工作（backlog）](#14-后续工作backlog)**（与英文 [`PROJECT-TODO.md`](PROJECT-TODO.md) §14 对应）。
+
 ### 规划约束：硬类型（trust）
 
 **trust 为硬类型，不允许软类型。** 长期条目与 PR 取舍须与此一致：只扩展能在 HIR / [`sem.rs`](crates/ts2rs-hir/src/sem.rs) 中给出**静态**规则的语法；**不**把「隐式 any、运行期改型、无注解宽进」等软类型能力列入本仓库目标。详细表述见 [README「类型立场：硬类型」](README.zh-CN.md)。  
@@ -42,7 +44,7 @@
 
 ### 1.3 表达式扩展
 
-- [~] **`async` / `await` / `Promise` / `fetchText`（MVP）**：已实现受限子集；完整异步控制流、`Promise` 组合子、与 Node/browser `fetch` 对齐等仍属后续工作。
+- [~] **`async` / `await` / `Promise` / `fetch` / `fetchText`（MVP）**：**`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（受限 `status` / `ok` / `await .text()` / `await .json()` 整数子集；**`response.body.getReader()`** + **`await reader.read()`** 分块 body；`init` 支持字面量 `method`、`headers`（值为字符串字面量）、可选 `body` 字符串）；**`Promise.all`**、**`.then`** 拒绝与 §async 条目一致；生成代码若含 **`futures_util`** 则 driver 注入 **`futures-util`**；**完整 WHATWG `fetch`（浏览器级 `ReadableStream`/`Headers` 等）/ 与某版本 Node 字节级 TLS·HTTP2 对齐**仍属后续。
 - [x] **成员访问与调用链**：受限子集；当前仅 `string` 的 `.length`（见 `member_length_ok.ts`）；一般 `obj.m()` / 链式调用待扩展。
 - [x] **可选链 / 空值合并**：受限子集已支持（`obj?.prop`、`??`；见 `optional_ok.ts`、`nullish_ok.ts`）；完整语义依赖 §3.3。
 - [x] **逻辑与短路**：`&&`、`||`；`boolean` 与 `number` 真值（`!= 0`）已支持，结果类型为 `boolean`（见 `logical_bool.ts`、`logical_truthy_ok.ts`）；与 TypeScript 值保留式 `&&`/`||` 仍不同；**硬类型下**结果类型固定为 `boolean`，更复杂真值或联合操作数仍受限。
@@ -293,6 +295,59 @@
 - [x] **sem**：沿用 `if` 条件与 `Binary` `Eq` 推断；无单独 `switch` 分支。
 - [x] **codegen**：沿用 `If`/`Eq` 发射；`switch` 专用 `match` 未做。
 - [x] **测试**：正例 [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts)（`run_switch_ok_prints_seven`、`compile_switch_ok_writes_rust`）；负例 [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts)（`compile_switch_fallthrough_fails`，穿透诊断）。
+
+---
+
+## 14. 后续工作（backlog）
+
+汇总「接下来要做什么」，可能与 §1.3 附注、§10–§11、README「部分支持/不支持」、§1.3 follow-ups 重复；**以代码为准**，落地后同步删改旧句。
+
+### 工具链与体验
+
+**多条诊断收集**（见 [README.zh-CN.md](README.zh-CN.md) §1.1「单条错误」）
+
+- [ ] **编译管线**为 **遇错即停**：[`build_module`](crates/ts2rs-hir/src/lib.rs) / [`check_module`](crates/ts2rs-hir/src/sem.rs) / [`emit_rust_with_options`](crates/ts2rs-hir/src/codegen.rs) 遇首条 [`CompileError`](crates/ts2rs-hir/src/error.rs) 即返回。
+- [ ] **解析器**：[`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 仅从 [`take_errors()`](crates/ts2rs-parser/src/lib.rs) 取出**一条**错误；是否汇总 swc 全部解析诊断留待后续。
+
+**注释与生成 Rust**（见 [README.zh-CN.md](README.zh-CN.md) §1.1「注释」）
+
+- [x] **位置锚点（已支持）**：`ts2rs compile --span-comments` 设置 [`CodegenOptions::span_comments`](crates/ts2rs-hir/src/codegen.rs)，在每条语句前生成 `// ts: path:line:col`（§4.3；映射 TS **位置**，非 TS 注释正文；用法见 README「Usage」中 `compile`）。
+- [ ] **TS 源码注释**反映到生成 Rust：解析管线须保留注释/token（swc `Program` 无注释节点）；**尚未**实现。
+
+**工程级工具链**（见 [README.zh-CN.md](README.zh-CN.md)「非 1.0」与「不支持」边界）
+
+- [ ] **完整 `tsconfig`**：`extends`、`include` glob，不止于极简 `--project` JSON（仅 `files`）。
+- [ ] **包解析**（如 `node_modules`、`paths` 映射等典型 TS 工程行为）。
+- [ ] **`export * from`** 及**更多 `export` 形态**（相对当前支持子集）。
+- [ ] 随 README「非 1.0」/ 不支持表调整时同步更新本列表。
+
+### 性能与安全（亦见 §10–§11）
+
+- [ ] **增量编译**（多文件、仅重编变更模块）。
+- [x] **并行**多文件语义检查。（各函数的 [`check_function`](crates/ts2rs-hir/src/sem.rs) 经 **`rayon`** `par_iter_mut` 并行；[`SendSourceMap`](crates/ts2rs-hir/src/ir.rs) 使 [`IRFunction`](crates/ts2rs-hir/src/ir.rs) 在 `swc` `Lrc` 下仍可 `Send`；警告顺序与 `module.fns` 一致。）
+- [x] **生成代码安全**：字符串转义、`println!` 注入等审计。（类 `__class_name` 字符串字面量用 `Debug` 转义；[`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) 标明格式串为固定模板；模板字面量在 [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs) 中已对 `{`/`}` 转义。）
+- [x] **Driver 资源限制**：对子进程 `cargo` 的可选超时/内存上限。（[`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs)、[`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs)；[`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) 使用 [`wait_timeout::ChildExt`]。）
+
+### async / HTTP（MVP 缺口；见 §1.3 [~]）
+
+- [x] **任意控制流中的 `await`**（不限于当前 async MVP 体约束）。（已移除 [`check_async_mvp_stmts`](crates/ts2rs-hir/src/sem.rs)；[`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) 中 `Await` 接受任意推断为 `Promise<T>` 的操作数；[`async_control_flow_ok.ts`](crates/ts2rs-cli/tests/fixtures/async_control_flow_ok.ts)、`compile_async_control_flow_if_while_await_ok`。）
+- [x] **`Promise.all([...])`**（仅数组字面量；同质 `Promise<number>` / `Promise<string>` / `fetch` 的 `Promise<Response>`）。见 [`IRExpr::PromiseAll`](crates/ts2rs-hir/src/ir.rs)、[`promise_all_fetch_ok.ts`](crates/ts2rs-cli/tests/fixtures/promise_all_fetch_ok.ts)、`compile_promise_all_fetch_alias_ok`。
+- [x] **`fetchText`** → `__ts2rs_fetch_text`；**`fetch`** → `__ts2rs_fetch`（见上 §1.3）。
+- [x] **流式响应 body（M3）**：`response.body.getReader()` / `await reader.read()` → `StreamReadResult`；与 `.text()` / `.json()` 互斥；[`fetch_stream_ok.ts`](crates/ts2rs-cli/tests/fixtures/fetch_stream_ok.ts)、`compile_fetch_stream_ok`。
+- [x] **拒绝 `.then`**（明确诊断，建议用 `async`/`await`）。见 [`promise_then_fail.ts`](crates/ts2rs-cli/tests/fixtures/promise_then_fail.ts)、`compile_promise_then_fails`。
+- [x] **TLS / HTTP 说明（非「与 Node 完全一致」）**：临时 crate 使用 **reqwest** + **rustls-tls**；**TLS 1.2+** 与 **HTTP/2**（ALPN 协商成功时）由该栈提供；**根证书、cipher、HTTP/2 细节不保证与某一 Node 或浏览器版本逐字节一致**。**仍为 backlog**：完整 **WHATWG `fetch`**（浏览器级 `ReadableStream`、`Request`/`Headers` 对象、duplex、在非浏览器宿主下的 CORS 等）；trust 子集已支持 **`getReader`/`read` 分块读 body**（见上条）。
+
+### 语言与类型（trust 硬子集）
+
+- [ ] **可选调用** `f?.()`；**`??` / `?.` 的完整静态收窄**（须与 §3.3 可判定规则一致）。
+- [ ] **链式调用** `f().g()`、更一般的实例方法类型（§1.3 follow-ups）。
+- [ ] **数值模型**：`number` 超出 `i32`（如 `f64`）或显式策略 — 大范围改动。
+- [ ] **HIR 标准库 / JSON / 字符串**：更完整的 `JSON.parse`、非整数 JSON、URI 类内建 — 仅在 trust 下类型可闭合时。
+
+### 文档与示例
+
+- [ ] **README + 本清单**：定期对照实现扫一遍（矩阵、§1.3、§2.1 等），避免与已交付特性（如 stdlib、`string[i]`、`Math` 扩展）矛盾。
+- [ ] **[`test-ts/main.ts`](test-ts/main.ts)**：保持在支持子集内，或写明有意不支持的用法。
 
 ---
 

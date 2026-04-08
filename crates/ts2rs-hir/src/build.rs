@@ -6,9 +6,10 @@ use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, ClassDecl, ClassMember, Decl,
     EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, KeyValueProp, Lit,
-    MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, OptChainBase, OptChainExpr, Param,
-    ParamOrTsParamProp, Pat, Program, Prop, PropName, PropOrSpread, SimpleAssignTarget, Stmt,
-    SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
+    MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, ObjectLit, OptChainBase,
+    OptChainExpr, Param, ParamOrTsParamProp, Pat, Program, Prop, PropName, PropOrSpread,
+    SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind,
+    VarDeclOrExpr,
 };
 
 use crate::error::{diag, diag_spanned, CompileError};
@@ -228,7 +229,7 @@ fn collect_class_decls(
             ctor,
             methods,
             span: c.class.span,
-            cm: cm.clone(),
+            cm: SendSourceMap(cm.clone()),
             source_path: path.to_string(),
         });
         Ok(())
@@ -367,7 +368,7 @@ fn lower_classes_to_functions(
                 ret: self_ty.clone(),
                 body,
                 span: c.span,
-                cm: cm.clone(),
+                cm: SendSourceMap(cm.clone()),
                 source_path: path.to_string(),
                 is_async: false,
                 mono_origin: None,
@@ -394,7 +395,7 @@ fn lower_classes_to_functions(
                     span: cls.span,
                 }],
                 span: cls.span,
-                cm: cm.clone(),
+                cm: SendSourceMap(cm.clone()),
                 source_path: path.to_string(),
                 is_async: false,
                 mono_origin: None,
@@ -419,7 +420,7 @@ fn lower_classes_to_functions(
                 ret: m.ret.clone(),
                 body,
                 span: m.span,
-                cm: cm.clone(),
+                cm: SendSourceMap(cm.clone()),
                 source_path: path.to_string(),
                 is_async: false,
                 mono_origin: None,
@@ -533,6 +534,21 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
         IRExpr::Member { obj, .. } | IRExpr::OptionalMember { obj, .. } => {
             rewrite_this_in_expr(obj, span)
         }
+        IRExpr::Fetch { url, init, .. } => {
+            rewrite_this_in_expr(url, span);
+            if let Some(i) = init {
+                if let Some(b) = &mut i.body {
+                    rewrite_this_in_expr(b.as_mut(), span);
+                }
+            }
+        }
+        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => {
+            rewrite_this_in_expr(receiver, span);
+        }
+        IRExpr::HttpResponseBodyGetReader { response, .. } => {
+            rewrite_this_in_expr(response, span);
+        }
+        IRExpr::ReaderRead { .. } => {}
         IRExpr::NullishCoalesce { left, right, .. } => {
             rewrite_this_in_expr(left, span);
             rewrite_this_in_expr(right, span);
@@ -554,6 +570,11 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
         IRExpr::ArrowFn { body, .. } => rewrite_this_in_stmts(body, span),
         IRExpr::Await { arg, .. } => rewrite_this_in_expr(arg, span),
         IRExpr::FetchText { url, .. } => rewrite_this_in_expr(url, span),
+        IRExpr::PromiseAll { elems, .. } => {
+            for a in elems {
+                rewrite_this_in_expr(a, span);
+            }
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -823,7 +844,7 @@ fn build_fn(
         ret,
         body: body_ir,
         span: f.span(),
-        cm: cm.clone(),
+        cm: SendSourceMap(cm.clone()),
         source_path: path.to_string(),
         is_async: is_async_fn,
         mono_origin: None,
@@ -1722,6 +1743,18 @@ fn build_expr(
                 });
             }
             if let Callee::Expr(ce) = &c.callee {
+                if let Expr::Member(m) = &**ce {
+                    if let MemberProp::Ident(prop) = &m.prop {
+                        if prop.sym == "then" {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`Promise.prototype.then` is not supported; use `async`/`await` instead",
+                            ));
+                        }
+                    }
+                }
                 if let Expr::Ident(fname) = &**ce {
                     if fname.sym == "fetchText" {
                         if !type_args.is_empty() {
@@ -1757,9 +1790,109 @@ fn build_expr(
                             span: c.span,
                         });
                     }
+                    if fname.sym == "fetch" {
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`fetch` does not take type arguments",
+                            ));
+                        }
+                        if c.args.is_empty() || c.args.len() > 2 {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`fetch` expects one argument (url: string) or two (url, init object)",
+                            ));
+                        }
+                        let a0 = match &c.args[0] {
+                            ExprOrSpread { spread: None, expr } => expr,
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "spread arguments are not supported",
+                                ));
+                            }
+                        };
+                        let url = build_expr(a0, cm, path, iface, in_async)?;
+                        let init = if c.args.len() == 2 {
+                            let a1 = match &c.args[1] {
+                                ExprOrSpread { spread: None, expr } => expr,
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "spread arguments are not supported",
+                                    ));
+                                }
+                            };
+                            Some(build_fetch_init(a1, cm, path, iface, in_async)?)
+                        } else {
+                            None
+                        };
+                        return Ok(IRExpr::Fetch {
+                            url: Box::new(url),
+                            init,
+                            span: c.span,
+                        });
+                    }
                 }
                 if let Expr::Member(m) = &**ce {
                     if let Expr::Ident(obj) = &*m.obj {
+                        if obj.sym == "Promise" {
+                            if let MemberProp::Ident(prop) = &m.prop {
+                                if prop.sym == "all" {
+                                    if !type_args.is_empty() {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`Promise.all` does not take type arguments",
+                                        ));
+                                    }
+                                    if c.args.len() != 1 {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`Promise.all` expects exactly one argument",
+                                        ));
+                                    }
+                                    let a0 = match &c.args[0] {
+                                        ExprOrSpread { spread: None, expr } => expr,
+                                        _ => {
+                                            return Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                c,
+                                                "spread arguments are not supported",
+                                            ));
+                                        }
+                                    };
+                                    let inner = build_expr(a0, cm, path, iface, in_async)?;
+                                    let elems = match inner {
+                                        IRExpr::ArrayLit { elems, .. } => elems,
+                                        _ => {
+                                            return Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                c,
+                                                "`Promise.all` requires an array literal `[...]` argument",
+                                            ));
+                                        }
+                                    };
+                                    return Ok(IRExpr::PromiseAll {
+                                        elems,
+                                        span: c.span,
+                                    });
+                                }
+                            }
+                        }
                         if obj.sym == "console" {
                             if let MemberProp::Ident(prop) = &m.prop {
                                 let stderr = match prop.sym.as_ref() {
@@ -2007,6 +2140,101 @@ fn build_expr(
                                 span: c.span,
                             });
                         }
+                        // `expr.body.getReader()`
+                        if prop.sym == "getReader" {
+                            if !type_args.is_empty() {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`body.getReader` does not take type arguments",
+                                ));
+                            }
+                            if !c.args.is_empty() {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`body.getReader()` expects no arguments",
+                                ));
+                            }
+                            if let Expr::Member(inner) = &*m.obj {
+                                if let MemberProp::Ident(ip) = &inner.prop {
+                                    if ip.sym == "body" {
+                                        let response =
+                                            build_expr(&inner.obj, cm, path, iface, in_async)?;
+                                        return Ok(IRExpr::HttpResponseBodyGetReader {
+                                            response: Box::new(response),
+                                            span: c.span,
+                                            stream_slot: None,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        // `reader.read()` — streaming body
+                        if prop.sym == "read" {
+                            if !type_args.is_empty() {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`reader.read` does not take type arguments",
+                                ));
+                            }
+                            if !c.args.is_empty() {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`reader.read()` expects no arguments",
+                                ));
+                            }
+                            if let Expr::Ident(rid) = &*m.obj {
+                                return Ok(IRExpr::ReaderRead {
+                                    reader_name: rid.sym.to_string(),
+                                    span: c.span,
+                                    reader_slot: None,
+                                });
+                            }
+                        }
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`response.text` / `response.json` do not take type arguments",
+                            ));
+                        }
+                        match prop.sym.as_ref() {
+                            "text" if c.args.is_empty() => {
+                                let receiver =
+                                    Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);
+                                return Ok(IRExpr::HttpResponseMethodBuiltin {
+                                    kind: HttpResponseMethodKind::Text,
+                                    receiver,
+                                    span: c.span,
+                                });
+                            }
+                            "json" if c.args.is_empty() => {
+                                let receiver =
+                                    Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);
+                                return Ok(IRExpr::HttpResponseMethodBuiltin {
+                                    kind: HttpResponseMethodKind::Json,
+                                    receiver,
+                                    span: c.span,
+                                });
+                            }
+                            "text" | "json" => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`response.text()` / `response.json()` expect no arguments",
+                                ));
+                            }
+                            _ => {}
+                        }
                         let mut args = Vec::new();
                         for a in &c.args {
                             match a {
@@ -2151,6 +2379,210 @@ fn build_tpl(
     })
 }
 
+fn allowed_http_method(m: &str) -> bool {
+    matches!(
+        m,
+        "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+    )
+}
+
+fn build_fetch_init(
+    expr: &Expr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+) -> Result<FetchInit, CompileError> {
+    let o: &ObjectLit = match expr {
+        Expr::Object(ol) => ol,
+        _ => {
+            return Err(diag_spanned(
+                cm,
+                path,
+                expr,
+                "`fetch` second argument must be an object literal `{ ... }`",
+            ));
+        }
+    };
+    let mut method: Option<String> = None;
+    let mut headers: Vec<(String, String)> = Vec::new();
+    let mut body: Option<Box<IRExpr>> = None;
+    let mut saw_headers = false;
+    for p in &o.props {
+        match p {
+            PropOrSpread::Spread(_) => {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    o,
+                    "object spread is not supported in fetch init",
+                ));
+            }
+            PropOrSpread::Prop(pp) => match &**pp {
+                Prop::KeyValue(KeyValueProp { key, value }) => {
+                    let k = match key {
+                        PropName::Ident(i) => i.sym.to_string(),
+                        PropName::Str(s) => s.value.to_string_lossy().into_owned(),
+                        _ => {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                o,
+                                "fetch init: key must be identifier or string literal",
+                            ));
+                        }
+                    };
+                    match k.as_str() {
+                        "method" => {
+                            if method.is_some() {
+                                return Err(diag(cm, path, o.span, "duplicate `method` in fetch init"));
+                            }
+                            let s = match &**value {
+                                Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        value,
+                                        "`method` must be a string literal (e.g. `\"POST\"`)",
+                                    ));
+                                }
+                            };
+                            method = Some(s.to_uppercase());
+                        }
+                        "headers" => {
+                            if saw_headers {
+                                return Err(diag(cm, path, o.span, "duplicate `headers` in fetch init"));
+                            }
+                            saw_headers = true;
+                            let ho = match &**value {
+                                Expr::Object(hobj) => hobj,
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        value,
+                                        "`headers` must be an object literal `{ \"Key\": \"value\" }`",
+                                    ));
+                                }
+                            };
+                            for hp in &ho.props {
+                                match hp {
+                                    PropOrSpread::Spread(_) => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            ho,
+                                            "object spread is not supported in fetch headers",
+                                        ));
+                                    }
+                                    PropOrSpread::Prop(hpp) => match &**hpp {
+                                        Prop::KeyValue(KeyValueProp { key: hk, value: hv }) => {
+                                            let hn = match hk {
+                                                PropName::Ident(i) => i.sym.to_string(),
+                                                PropName::Str(s) => {
+                                                    s.value.to_string_lossy().into_owned()
+                                                }
+                                                _ => {
+                                                    return Err(diag_spanned(
+                                                        cm,
+                                                        path,
+                                                        ho,
+                                                        "header name must be identifier or string literal",
+                                                    ));
+                                                }
+                                            };
+                                            let hv_str = match &**hv {
+                                                Expr::Lit(Lit::Str(s)) => {
+                                                    s.value.to_string_lossy().into_owned()
+                                                }
+                                                _ => {
+                                                    return Err(diag_spanned(
+                                                        cm,
+                                                        path,
+                                                        hv,
+                                                        "header values must be string literals in this subset",
+                                                    ));
+                                                }
+                                            };
+                                            headers.push((hn, hv_str));
+                                        }
+                                        _ => {
+                                            return Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                ho,
+                                                "only `key: value` header entries are supported",
+                                            ));
+                                        }
+                                    },
+                                }
+                            }
+                            headers.sort_by(|a, b| a.0.cmp(&b.0));
+                            for w in headers.windows(2) {
+                                if w[0].0 == w[1].0 {
+                                    return Err(diag(
+                                        cm,
+                                        path,
+                                        ho.span,
+                                        format!("duplicate header `{}`", w[0].0),
+                                    ));
+                                }
+                            }
+                        }
+                        "body" => {
+                            if body.is_some() {
+                                return Err(diag(cm, path, o.span, "duplicate `body` in fetch init"));
+                            }
+                            body = Some(Box::new(build_expr(value, cm, path, iface, in_async)?));
+                        }
+                        _ => {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                o,
+                                format!(
+                                    "unknown fetch init field `{k}` (supported: method, headers, body)",
+                                ),
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(diag_spanned(
+                        cm,
+                        path,
+                        o,
+                        "only `key: value` properties are supported in fetch init",
+                    ));
+                }
+            },
+        }
+    }
+    let mut method_res = method;
+    if method_res.is_none() && body.is_some() {
+        method_res = Some("POST".to_string());
+    }
+    if let Some(ref m) = method_res {
+        if !allowed_http_method(m) {
+            return Err(diag(
+                cm,
+                path,
+                o.span,
+                format!(
+                    "unsupported HTTP `method` `{}` (supported: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS)",
+                    m
+                ),
+            ));
+        }
+    }
+    Ok(FetchInit {
+        method: method_res,
+        headers,
+        body,
+    })
+}
+
 fn build_member_expr(
     m: &MemberExpr,
     cm: &Lrc<SourceMap>,
@@ -2165,6 +2597,8 @@ fn build_member_expr(
             prop: id.sym.to_string(),
             span: m.span,
             length_dispatch: None,
+            http_response_member: None,
+            stream_read_member: None,
         }),
         MemberProp::Computed(c) => Ok(IRExpr::Index {
             obj,
@@ -2213,6 +2647,8 @@ fn build_opt_chain_expr(
                     prop,
                     span: o.span,
                     length_dispatch: None,
+                    http_response_member: None,
+                    stream_read_member: None,
                 })
             } else {
                 Ok(IRExpr::Member {
@@ -2220,6 +2656,8 @@ fn build_opt_chain_expr(
                     prop,
                     span: o.span,
                     length_dispatch: None,
+                    http_response_member: None,
+                    stream_read_member: None,
                 })
             }
         }

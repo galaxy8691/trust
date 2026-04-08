@@ -8,6 +8,8 @@ This document tracks compiler and toolchain work over time, grouped by theme. Us
 
 Chinese mirror: [`PROJECT-TODO.zh-CN.md`](PROJECT-TODO.zh-CN.md).
 
+**Follow-up backlog (what to do next)**: [§14 Next steps](#14-next-steps-follow-up-backlog) — consolidated; older sections may still mention the same work in passing.
+
 ### Planning constraint: trust (hard typing)
 
 **trust is hard-typed; there is no soft typing.** Long-term items and PR trade-offs must stay consistent: only extend syntax that can get **static** rules in HIR / [`sem.rs`](crates/ts2rs-hir/src/sem.rs). **Do not** target implicit `any`, runtime reshaping, or un-annotated widen-in as goals. See [README — Trust: hard typing](README.md).  
@@ -44,7 +46,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 1.3 Expressions
 
-- [~] **`async` / `await` / `Promise` / HTTP `fetchText` (MVP)**: [`IRFunction::is_async`](crates/ts2rs-hir/src/ir.rs), [`IRExpr::Await`](crates/ts2rs-hir/src/ir.rs) / [`FetchText`](crates/ts2rs-hir/src/ir.rs), [`#[tokio::main]`](crates/ts2rs-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/ts2rs-driver/src/crate_writer.rs). **Still out of scope for this milestone**: general `await` in arbitrary control flow, `Promise.all` / `.then`, full browser `fetch` / TLS parity with Node.
+- [~] **`async` / `await` / `Promise` / HTTP `fetch` / `fetchText` (MVP)**: [`IRFunction::is_async`](crates/ts2rs-hir/src/ir.rs), [`IRExpr::Await`](crates/ts2rs-hir/src/ir.rs) / [`FetchText`](crates/ts2rs-hir/src/ir.rs) / [`Fetch`](crates/ts2rs-hir/src/ir.rs) / [`PromiseAll`](crates/ts2rs-hir/src/ir.rs), [`#[tokio::main]`](crates/ts2rs-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/ts2rs-driver/src/crate_writer.rs) and **`futures-util`** when generated Rust uses streaming (`crate_writer` detects `futures_util` in source). **`await` in arbitrary control flow** is implemented (§14 follow-up); **`fetchText(url)`** → `Promise<string>`; **`fetch(url, init?)`** → `Promise<Response>` with **`status`**, **`ok`**, **`await .text()`**, **`await .json()`** (integer JSON subset), **`response.body.getReader()`** + **`await reader.read()`** (chunked body via `bytes_stream()`), and **optional `init`** (`method` string literal, `headers` object with string-literal values, optional `body` string); **`.then`** is rejected with a diagnostic; **`Headers` iteration / Web `Request` parity / byte-level TLS·HTTP2 parity with Node** remain out of scope (see §Async / HTTP backlog).
 - [x] **Member access and call chains**: limited subset; today only `string.length` (`member_length_ok.ts`); general `obj.m()` / chains TBD.
 - [x] **Optional chaining / nullish coalescing**: limited subset (`obj?.prop`, `??`; `optional_ok.ts`, `nullish_ok.ts`); full semantics tied to §3.3.
 - [x] **Logical short-circuit**: `&&`, `||`; `boolean` and `number` truthiness (`!= 0`), result type `boolean` (`logical_bool.ts`, `logical_truthy_ok.ts`); differs from TS value-preserving `&&`/`||`; under **hard typing** result is `boolean`; more complex truthiness or unions still limited.
@@ -295,6 +297,60 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 - [x] **sem**: reuses `if` conditions and `Binary` `Eq`; no dedicated `switch` arm analysis.
 - [x] **codegen**: same `If`/`Eq` emission; no dedicated `match` for `switch`.
 - [x] **Tests**: positive [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts) (`run_switch_ok_prints_seven`, `compile_switch_ok_writes_rust`); negative [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts) (`compile_switch_fallthrough_fails`).
+
+---
+
+## 14. Next steps (follow-up backlog)
+
+Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, README “Partial” / “Unsupported”, and §1.3 follow-ups — **code wins**; update stale bullets when landing features.
+
+### Toolchain and UX
+
+**Multi-diagnostic collection** (see [README §1.1 — Diagnostics and surface](README.md) “Single error”)
+
+- [ ] **Compile pipeline** is **fail-fast**: [`build_module`](crates/ts2rs-hir/src/lib.rs) / [`check_module`](crates/ts2rs-hir/src/sem.rs) / [`emit_rust_with_options`](crates/ts2rs-hir/src/codegen.rs) return on first [`CompileError`](crates/ts2rs-hir/src/error.rs).
+- [ ] **Parser**: [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) only reports **one** error from [`take_errors()`](crates/ts2rs-parser/src/lib.rs); surfacing every swc parse diagnostic is future work.
+
+**Comments vs generated Rust** (see [README §1.1 — Comments](README.md))
+
+- [x] **Span anchors (supported)**: `ts2rs compile --span-comments` sets [`CodegenOptions::span_comments`](crates/ts2rs-hir/src/codegen.rs) to emit `// ts: path:line:col` before statements (§4.3; maps TS **positions**, not TS comment text).
+- [ ] **TS source comments** reflected in generated Rust: needs comment/token preservation in the parse pipeline (swc `Program` has no comment nodes); still **not** implemented.
+
+**Project-scale tooling** (see [README — Scope (1.0)](README.md) “Not 1.0” and [Unsupported TypeScript](README.md))
+
+- [ ] **Full `tsconfig`**: `extends`, `include` glob, beyond minimal `--project` JSON with `files` only.
+- [ ] **Package resolution** (e.g. `node_modules`, `paths` mapping as in typical TS projects).
+- [ ] **`export *` from** and **more `export` shapes** than the supported subset.
+- [ ] Keep this list aligned with README “Not 1.0” / unsupported table when scope changes.
+
+### Performance and security (see §10–§11)
+
+- [ ] **Incremental compile** (multi-file, only rebuild changed modules).
+- [x] **Parallelize** multi-file semantic checks. (Per-function [`check_function`](crates/ts2rs-hir/src/sem.rs) runs under **`rayon`** `par_iter_mut`; [`SendSourceMap`](crates/ts2rs-hir/src/ir.rs) makes [`IRFunction`](crates/ts2rs-hir/src/ir.rs) `Send` despite `swc` `Lrc`; warning order matches `module.fns`.)
+- [x] **Generated-code safety**: string escaping / `println!` injection audit. (Class `__class_name` literal uses `Debug` escaping; [`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) documents fixed format templates; template literals already brace-escape in [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs).)
+- [x] **Driver resource limits**: optional timeout / memory around `cargo` subprocess. ([`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs) + [`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs); [`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) uses [`wait_timeout::ChildExt`].)
+
+### Async / HTTP (MVP gaps; see §1.3 [~])
+
+- [x] **`await` in arbitrary control flow** (not limited to current async MVP body rules). (Removed [`check_async_mvp_stmts`](crates/ts2rs-hir/src/sem.rs); [`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) `Await` accepts any `Promise<T>` operand; [`async_control_flow_ok.ts`](crates/ts2rs-cli/tests/fixtures/async_control_flow_ok.ts), `compile_async_control_flow_if_while_await_ok`.)
+- [x] **`Promise.all([...])`** (array literal only; homogeneous `Promise<number>` / `Promise<string>` / `Promise<Response>` from `fetch`). ([`IRExpr::PromiseAll`](crates/ts2rs-hir/src/ir.rs), [`promise_all_fetch_ok.ts`](crates/ts2rs-cli/tests/fixtures/promise_all_fetch_ok.ts), `compile_promise_all_fetch_alias_ok`.)
+- [x] **`fetchText(url)`** — `Promise<string>` via [`IRExpr::FetchText`](crates/ts2rs-hir/src/ir.rs) / `__ts2rs_fetch_text`.
+- [x] **`fetch(url, init?)`** — `Promise<Response>` via [`IRExpr::Fetch`](crates/ts2rs-hir/src/ir.rs) / `__ts2rs_fetch` + [`__Ts2rsFetchInit`](crates/ts2rs-hir/src/codegen.rs); Response members and `text`/`json` as above; fixtures [`fetch_response_ok.ts`](crates/ts2rs-cli/tests/fixtures/fetch_response_ok.ts), [`fetch_post_init_ok.ts`](crates/ts2rs-cli/tests/fixtures/fetch_post_init_ok.ts).
+- [x] **Streaming response body (M3)** — `response.body.getReader()` / `await reader.read()` → `StreamReadResult` (`done`, `value` as `Uint8Array`); `reqwest::Response::bytes_stream()`; semantic mutex with `.text()` / `.json()`; built-in type names `HttpResponse`, `ReadableStreamDefaultReader`, `StreamReadResult`, `Uint8Array`; fixture [`fetch_stream_ok.ts`](crates/ts2rs-cli/tests/fixtures/fetch_stream_ok.ts), test `compile_fetch_stream_ok`.
+- [x] **Reject `.then`** calls with a clear diagnostic (`Promise.prototype.then` is not supported). ([`build.rs`](crates/ts2rs-hir/src/build.rs) call lowering, [`promise_then_fail.ts`](crates/ts2rs-cli/tests/fixtures/promise_then_fail.ts), `compile_promise_then_fails`.)
+- [x] **TLS / HTTP stack (documented, not “Node parity”)**: generated crates use **reqwest** with **`rustls-tls`** ([`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs)). **TLS 1.2+** and **HTTP/2** (when the server and stack negotiate ALPN) are provided by that stack; **root stores, cipher suites, and HTTP/2 prioritization are not guaranteed to match any specific Node or browser version**. **Still backlog**: full **WHATWG** `fetch` (browser `ReadableStream` / `Request`/`Headers` objects, duplex, CORS in non-browser hosts, etc.); trust subset already supports **chunked body** via `getReader`/`read` (see streaming item above).
+
+### Language and typing (trust-hard subset)
+
+- [ ] **Optional call** `f?.()`; **full static narrowing** for `??` / `?.` consistent with §3.3 (decidable only).
+- [ ] **Chained member/calls** `f().g()`, general method-instance typing (§1.3 follow-ups).
+- [ ] **Numeric model**: `number` beyond `i32` (e.g. `f64`) or explicit policy — large cross-cutting change.
+- [ ] **HIR stdlib / JSON / strings**: fuller `JSON.parse`, non-integer JSON, URI builtins — only where result types stay closed under trust.
+
+### Documentation and examples
+
+- [ ] **README + this file**: periodic sweep so matrix / §1.3 / §2.1 lines match shipped features (e.g. stdlib, `string[i]`, `Math.*` extensions).
+- [ ] **[`test-ts/main.ts`](test-ts/main.ts)**: keep within supported subset or document intentional gaps.
 
 ---
 

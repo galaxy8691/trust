@@ -13,6 +13,27 @@ use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_common::Span;
 
+/// Wraps [`Lrc`]`<`[`SourceMap`]`>` so [`IRFunction`] / [`IRClass`] implement `std::marker::Send` for [`rayon`].
+/// `swc_common::sync::Lrc` does not implement `Send`, but a shared source map is only used for span lookup (like `Arc`).
+#[derive(Clone)]
+pub struct SendSourceMap(pub Lrc<SourceMap>);
+
+unsafe impl Send for SendSourceMap {}
+unsafe impl Sync for SendSourceMap {}
+
+impl std::ops::Deref for SendSourceMap {
+    type Target = Lrc<SourceMap>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<SourceMap> for SendSourceMap {
+    fn as_ref(&self) -> &SourceMap {
+        self.0.as_ref()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TsType {
     Number,
@@ -30,6 +51,20 @@ pub enum TsType {
     Undefined,
     /// 受限数组：`number[]`
     ArrayNumber,
+    /// 受限数组：`string[]`
+    ArrayString,
+    /// `Promise.all` 等元素为 `Response` 时的同质数组（`Vec<reqwest::Response>`）
+    ArrayHttpResponse,
+    /// `fetch()` 返回的 Response（受限子集：`status` / `ok` / `text()` / `json()` / `body.getReader()` 流式读）
+    HttpResponse,
+    /// `response.body` 链式占位（不可单独作为 `let` 右值，仅用于 `.getReader()`）
+    ReadableStream,
+    /// `response.body.getReader()` 的 reader（仅用于 `await reader.read()`）
+    ReadableStreamDefaultReader,
+    /// `await reader.read()` 的结果：`done` / `value`
+    StreamReadResult,
+    /// 流式字节块（`Vec<u8>`）
+    Uint8Array,
     /// 受限对象：`{ k: number, ... }`（字段名排序、唯一）
     ObjectNum(Vec<String>),
     /// 联合类型 `A | B`（成员已规范化：扁平化、去重、按 [`cmp_ts_type`] 排序）。
@@ -43,7 +78,7 @@ pub enum TsType {
     },
     /// 类实例（OO 子集）
     ClassInstance(String),
-    /// `Promise<T>`（async / `fetchText` 等）
+    /// `Promise<T>`（async / `fetch` / `fetchText` 等）
     Promise(Box<TsType>),
 }
 
@@ -63,6 +98,13 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
         (ObjectNum(x), ObjectNum(y)) => x.cmp(y),
         (TypeParam(x), TypeParam(y)) => x.cmp(y),
         (ClassInstance(x), ClassInstance(y)) => x.cmp(y),
+        (ArrayString, ArrayString) => Equal,
+        (ArrayHttpResponse, ArrayHttpResponse) => Equal,
+        (HttpResponse, HttpResponse) => Equal,
+        (ReadableStream, ReadableStream) => Equal,
+        (ReadableStreamDefaultReader, ReadableStreamDefaultReader) => Equal,
+        (StreamReadResult, StreamReadResult) => Equal,
+        (Uint8Array, Uint8Array) => Equal,
         (Promise(a), Promise(b)) => cmp_ts_type(a, b),
         (
             Fn {
@@ -119,12 +161,19 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::String => 7,
         TsType::StringLit(_) => 8,
         TsType::ArrayNumber => 9,
-        TsType::ObjectNum(_) => 10,
-        TsType::TypeParam(_) => 11,
-        TsType::Fn { .. } => 12,
-        TsType::ClassInstance(_) => 13,
-        TsType::Promise(_) => 14,
-        TsType::Union(_) => 15,
+        TsType::ArrayString => 10,
+        TsType::ArrayHttpResponse => 11,
+        TsType::HttpResponse => 12,
+        TsType::ReadableStream => 13,
+        TsType::ReadableStreamDefaultReader => 14,
+        TsType::StreamReadResult => 15,
+        TsType::Uint8Array => 16,
+        TsType::ObjectNum(_) => 17,
+        TsType::TypeParam(_) => 18,
+        TsType::Fn { .. } => 19,
+        TsType::ClassInstance(_) => 20,
+        TsType::Promise(_) => 21,
+        TsType::Union(_) => 22,
     }
 }
 
@@ -185,6 +234,15 @@ pub enum MemberLengthDispatch {
     JsStringUtf16,
     /// `number[]` → `Vec<i32>::len`
     VecLen,
+    /// `Uint8Array` → `Vec<u8>::len`
+    Uint8ArrayLen,
+}
+
+/// `StreamReadResult` 的 `.done` / `.value`（由 sem 填入）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamReadResultMember {
+    Done,
+    Value,
 }
 
 /// `Math.abs` / `Math.min` 等受限内建（整数 `number` 子集）。
@@ -232,11 +290,37 @@ pub enum StringMethodKind {
     Includes,
 }
 
+/// `Response.prototype.text` / `json`（由 sem 校验 receiver 为 [`TsType::HttpResponse`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpResponseMethodKind {
+    Text,
+    /// 与 `JSON.parse` 整数子集一致（读 body 后 `trim().parse::<i32>`）
+    Json,
+}
+
+/// `response.status` / `response.ok` / `response.body`（由 sem 填入）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpResponseMember {
+    Status,
+    Ok,
+    Body,
+}
+
+/// `fetch(url, init)` 的 `init`（第二参对象字面量）。
+#[derive(Debug, Clone)]
+pub struct FetchInit {
+    pub method: Option<String>,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Box<IRExpr>>,
+}
+
 /// `arr[i]` / `s[i]` 的下标语义（由 sem 填入）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexKind {
     /// `number[]` → `Vec<i32>`
     ArrayNumber,
+    /// `string[]` → `Vec<String>` 元素下标
+    ArrayStringElem,
     /// JS 字符串：下标为 UTF-16 码元索引
     StringUtf16,
 }
@@ -318,6 +402,10 @@ pub enum IRExpr {
         span: Span,
         /// `prop == "length"` 时由 `sem` 填入；`None` 表示对象数字字段等走 `HashMap::get`
         length_dispatch: Option<MemberLengthDispatch>,
+        /// `Response.status` / `Response.ok` / `Response.body` 时由 `sem` 填入
+        http_response_member: Option<HttpResponseMember>,
+        /// `StreamReadResult.done` / `value` 时由 `sem` 填入
+        stream_read_member: Option<StreamReadResultMember>,
     },
     /// 字面量 `null`
     Null(Span),
@@ -335,6 +423,8 @@ pub enum IRExpr {
         prop: String,
         span: Span,
         length_dispatch: Option<MemberLengthDispatch>,
+        http_response_member: Option<HttpResponseMember>,
+        stream_read_member: Option<StreamReadResultMember>,
     },
     /// `Math.abs` / `Math.min` / …（受限子集）
     MathBuiltin {
@@ -400,9 +490,38 @@ pub enum IRExpr {
         arg: Box<IRExpr>,
         span: Span,
     },
-    /// 内建 `fetchText(url: string)` → `Promise<string>`（须由 `await` 包裹）
+    /// 内建 `fetchText(url)` → `Promise<string>`（须由 `await` 包裹）
     FetchText {
         url: Box<IRExpr>,
+        span: Span,
+    },
+    /// 浏览器式 `fetch(url, init?)` → `Promise<HttpResponse>`（须由 `await` 包裹）
+    Fetch {
+        url: Box<IRExpr>,
+        init: Option<FetchInit>,
+        span: Span,
+    },
+    /// `response.text()` / `response.json()`（返回 `Promise`，须 `await`）
+    HttpResponseMethodBuiltin {
+        kind: HttpResponseMethodKind,
+        receiver: Box<IRExpr>,
+        span: Span,
+    },
+    /// `expr.body.getReader()`（`expr` 须为 `HttpResponse`；`stream_slot` 由 sem 填入，供 codegen）
+    HttpResponseBodyGetReader {
+        response: Box<IRExpr>,
+        span: Span,
+        stream_slot: Option<u32>,
+    },
+    /// `reader.read()`（返回 `Promise<StreamReadResult>`，须 `await`；`reader_slot` 由 sem 填入）
+    ReaderRead {
+        reader_name: String,
+        span: Span,
+        reader_slot: Option<u32>,
+    },
+    /// `Promise.all([...])`，元素须为同质 `Promise<T>`
+    PromiseAll {
+        elems: Vec<IRExpr>,
         span: Span,
     },
 }
@@ -523,7 +642,7 @@ pub struct IRClass {
     pub ctor: Option<IRClassMethod>,
     pub methods: Vec<IRClassMethod>,
     pub span: Span,
-    pub cm: Lrc<SourceMap>,
+    pub cm: SendSourceMap,
     pub source_path: String,
 }
 
@@ -553,7 +672,7 @@ pub struct IRFunction {
     pub body: Vec<IRStmt>,
     pub span: Span,
     /// 该函数所在文件的源映射（多文件时用于诊断）。
-    pub cm: Lrc<SourceMap>,
+    pub cm: SendSourceMap,
     /// 该函数所在文件路径（与 `entry_path` 比较以定位 `main`）。
     pub source_path: String,
     /// 单态化实例来源（如 `foo<number>`），用于诊断可读性。
