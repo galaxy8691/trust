@@ -4,6 +4,10 @@
 
 感谢关注本实验性 TypeScript→Rust 编译器。本文说明如何构建工作区、提 PR 前应运行的命令，以及工具链约定。
 
+## 项目路线图
+
+长期可验收项见 [`PROJECT-TODO.md`](PROJECT-TODO.md)（英文默认）与 [`PROJECT-TODO.zh-CN.md`](PROJECT-TODO.zh-CN.md)（中文版）。
+
 ## 构建
 
 在仓库根目录执行：

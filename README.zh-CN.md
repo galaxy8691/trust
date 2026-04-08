@@ -4,7 +4,7 @@
 
 将 **TypeScript** 编译为 **Rust 源码**，再经 **cargo/rustc** 生成可执行文件的实验性编译器（Rust 实现）。本仓库在工程上常作为 **trust** 子集使用。
 
-另见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 与 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
+另见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)、[CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)，以及长期路线图 [PROJECT-TODO.zh-CN.md](PROJECT-TODO.zh-CN.md)（[English](PROJECT-TODO.md)）。
 
 ## 类型立场：硬类型（trust）
 
@@ -55,7 +55,7 @@ flowchart LR
 
 ## 诊断与前端健壮性（§1.1）
 
-- **单条错误**：[`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) 在失败时**只报告第一条**错误（[`CompileError`](crates/ts2rs-hir/src/error.rs)），同一次运行不会继续收集后续错误；若需「一屏多条」错误诊断，见 [PROJECT-TODO.md](PROJECT-TODO.md) 长期条目。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（返回 `(String, Vec<CompileWarning>)`；[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
+- **单条错误**：[`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) 在失败时**只报告第一条**错误（[`CompileError`](crates/ts2rs-hir/src/error.rs)），同一次运行不会继续收集后续错误；若需「一屏多条」错误诊断，见 [PROJECT-TODO.zh-CN.md](PROJECT-TODO.zh-CN.md) 长期条目。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（返回 `(String, Vec<CompileWarning>)`；[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
 - **`export` 形态**：除 `export function …` 与顶层 `function …` 外，其余 `export`（如 `export { … }`、`export default`、`export * from`、`export const` / `class` 等）均**显式报错**（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；负例样例见 `export_*_fail.ts`（与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)）。
 - **注释**：swc 产出的 `Program` **不携带**注释节点；[`ParsedSource`](crates/ts2rs-parser/src/lib.rs) 已含 `source_map` 供行列号。若要将 TS 注释反映到生成的 Rust，需在 parser 侧保留注释或扫描 token，并在 IR/codegen 中单独设计；**当前未实现**。
 
@@ -139,7 +139,7 @@ flowchart LR
 
 ## 类型层路线（§1.4）
 
-**字面量类型**、**联合类型**、**受限 `interface`**、**受限 `type` 别名**与**泛型边界文档**子项已勾选（见 [PROJECT-TODO.md §1.4](PROJECT-TODO.md)）。与已实现子集（如注解中的 `number[]`、仅 `number` 字段的对象类型）的边界与拆分里程碑见 [PROJECT-TODO.md §1.4](PROJECT-TODO.md)。空值与收窄与下文「语义与类型路线（§3.3）」及 [PROJECT-TODO.md §3.3](PROJECT-TODO.md) 交叉：联合与 `??` / `?.` 的**完整**收窄仍待后续；当前 `??` 仍为受限子集（见 `nullish_ok.ts`），含 `null`/`undefined` 与非 primitive 的联合若无法映射到单一 Rust 类型会在 codegen 阶段拒绝。
+**字面量类型**、**联合类型**、**受限 `interface`**、**受限 `type` 别名**与**泛型边界文档**子项已勾选（见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)）。与已实现子集（如注解中的 `number[]`、仅 `number` 字段的对象类型）的边界与拆分里程碑见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)。空值与收窄与下文「语义与类型路线（§3.3）」及 [PROJECT-TODO.zh-CN.md §3.3](PROJECT-TODO.zh-CN.md) 交叉：联合与 `??` / `?.` 的**完整**收窄仍待后续；当前 `??` 仍为受限子集（见 `nullish_ok.ts`），含 `null`/`undefined` 与非 primitive 的联合若无法映射到单一 Rust 类型会在 codegen 阶段拒绝。
 
 ### 泛型与类型参数（当前仍拒绝）
 
@@ -156,7 +156,7 @@ flowchart LR
 
 ## 语义与类型路线（§3.3）
 
-与 [PROJECT-TODO.md §3.3](PROJECT-TODO.md) 对应；本小节描述**当前**边界与后续方向（矩阵中 `?.` / `??` 一行「完整语义」指本节）。
+与 [PROJECT-TODO.zh-CN.md §3.3](PROJECT-TODO.zh-CN.md) 对应；本小节描述**当前**边界与后续方向（矩阵中 `?.` / `??` 一行「完整语义」指本节）。
 
 ### 与 §1.4 的衔接
 
@@ -174,13 +174,13 @@ flowchart LR
 
 仅支持 **`function` 声明**与调用；**无**「函数作为一等值」的类型（无箭头函数类型表达式作值、无函数类型注解传播到值）。高阶函数需后续扩展 IR 与 [`codegen.rs`](crates/ts2rs-hir/src/codegen.rs)。
 
-更多进阶条目见 [PROJECT-TODO.md §3.3–3.4](PROJECT-TODO.md)。
+更多进阶条目见 [PROJECT-TODO.zh-CN.md §3.3–3.4](PROJECT-TODO.zh-CN.md)。
 
 ## 算术、`/` 与溢出（codegen，§4.1）
 
 - **`number` → `i32`**：`+`、`-`、`*` 为 `i32` 上的运算。
 - **除法 `/`**：生成 Rust 整数除法，**向零截断**（与 `i32` / `/` 一致）。**与 TypeScript 不同**：TS 中 `number` 的 `/` 为 IEEE-754 **浮点**除法（例如 `1 / 2 === 0.5`），本子集不复现该行为。
-- **范围与溢出**：可表示范围即 `i32`，与 TS `number` 双精度全集不一致。算术溢出遵循 **Rust** 对 `i32` 的语义（如在 Release 配置下溢出可为未定义行为）；**默认不**插入 `checked_*` 或运行时 panic；若需可检测溢出，属后续可选工作（见 [PROJECT-TODO.md §4.1](PROJECT-TODO.md)）。
+- **范围与溢出**：可表示范围即 `i32`，与 TS `number` 双精度全集不一致。算术溢出遵循 **Rust** 对 `i32` 的语义（如在 Release 配置下溢出可为未定义行为）；**默认不**插入 `checked_*` 或运行时 panic；若需可检测溢出，属后续可选工作（见 [PROJECT-TODO.zh-CN.md §4.1](PROJECT-TODO.zh-CN.md)）。
 - **`console.log` / `console.error` / `console.debug`**：多参数时格式串为 `"{}"` 之间带**空格**（如 `println!("{} {}", …)` / `eprintln!(…)`），与 [`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) 实现一致。
 
 ## 构建
