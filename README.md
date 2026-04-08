@@ -104,6 +104,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | `interface` | Partial | Top-level; `TsType::ObjectNum`; `interface_ok.ts`, negatives |
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
 | Generics / type args | Partial | Monomorphization subset: explicit type args required at generic call sites; generic declarations are allowed; unsupported broad shapes still rejected |
+| Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` closure codegen path); variable-call `f(...)`, function args/returns covered by e2e fixtures |
 | Full TypeScript / `tsc` | Not implemented | Long-term |
 
 ### Matrix vs integration tests
@@ -145,7 +146,7 @@ Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJ
 
 ## Semantics roadmap (§3.3)
 
-See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). `??` / `?.` full narrowing is future work; `null` / `undefined` have no `strictNullChecks` switch; nominal `interface`/`type` vs structural TS; no first-class function types / HOCs.
+See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). `??` / `?.` full narrowing is future work; `null` / `undefined` have no `strictNullChecks` switch; nominal `interface`/`type` vs structural TS; higher-order functions are currently a restricted typed subset.
 
 ## Arithmetic, `/`, overflow (§4.1)
 

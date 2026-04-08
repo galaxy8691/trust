@@ -830,6 +830,44 @@ fn call_type_args(
     Ok(out)
 }
 
+fn build_arrow_expr(
+    a: &swc_ecma_ast::ArrowExpr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    next_id: &mut u32,
+    iface: &HashMap<String, TsType>,
+) -> Result<IRExpr, CompileError> {
+    let mut params = Vec::with_capacity(a.params.len());
+    for p in &a.params {
+        let Pat::Ident(BindingIdent { id, type_ann, .. }) = p else {
+            return Err(diag_spanned(
+                cm,
+                path,
+                p,
+                "only simple identifier parameters are supported in arrow functions",
+            ));
+        };
+        let ty = ts_type_from_ann(type_ann, cm, path, id.span, iface, None)?;
+        params.push((id.sym.to_string(), ty));
+    }
+    let ret = ts_type_from_ann(&a.return_type, cm, path, a.span, iface, None)?;
+    let body = match &*a.body {
+        swc_ecma_ast::BlockStmtOrExpr::BlockStmt(b) => {
+            build_block_stmts(&b.stmts, cm, path, next_id, iface)?
+        }
+        swc_ecma_ast::BlockStmtOrExpr::Expr(e) => vec![IRStmt::Return {
+            arg: Some(build_expr(e, cm, path, iface)?),
+            span: e.span(),
+        }],
+    };
+    Ok(IRExpr::ArrowFn {
+        params,
+        ret,
+        body,
+        span: a.span,
+    })
+}
+
 fn build_expr(
     expr: &Expr,
     cm: &Lrc<SourceMap>,
@@ -959,6 +997,10 @@ fn build_expr(
         Expr::OptChain(o) => build_opt_chain_expr(o, cm, path, iface),
         Expr::Array(a) => build_array_expr(a, cm, path, iface),
         Expr::Object(o) => build_object_expr(o, cm, path, iface),
+        Expr::Arrow(a) => {
+            let mut tmp_id = 0u32;
+            build_arrow_expr(a, cm, path, &mut tmp_id, iface)
+        }
         Expr::Call(c) => {
             let type_args = call_type_args(c, cm, path, iface)?;
             if let Callee::Expr(ce) = &c.callee {

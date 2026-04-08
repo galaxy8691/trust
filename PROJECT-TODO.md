@@ -264,11 +264,11 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 
 ### 13.2 Higher-order functions (first-class functions, types, calls)
 
-- [ ] **Design**: capture strategy, stack closures vs extending no-capture subset, `fn` types in HIR.
-- [ ] **HIR**: function types, `Callee` for member/var call paths.
-- [ ] **build + sem**: arrow functions and function values, call/assign typing.
-- [ ] **codegen**: `Fn`/`fn` pointers or struct closures (per design).
-- [ ] **Tests**: minimal HOF + relation to existing `nested_fn` no-capture semantics.
+- [x] **Design**: capture strategy, stack closures vs extending no-capture subset, `fn` types in HIR. (Current implementation uses typed arrow closures with `Rc<dyn Fn(i32) -> i32>` codegen path.)
+- [x] **HIR**: function types, `Callee` for member/var call paths. (Added `TsType::Fn` and `IRExpr::ArrowFn`; variable call path `f(...)` is type-checked as callable function value.)
+- [x] **build + sem**: arrow functions and function values, call/assign typing. (Build parses arrow functions and function type annotations; sem checks function-value assign/call and function-typed arguments/returns.)
+- [x] **codegen**: `Fn`/`fn` pointers or struct closures (per design). (Codegen emits typed Rust closures via `Rc<dyn Fn(i32) -> i32>` for the current hard-typed subset.)
+- [x] **Tests**: minimal HOF + relation to existing `nested_fn` no-capture semantics. (Added `hof_apply_ok.ts` and `hof_return_closure_ok.ts` plus corresponding `cli_e2e` tests; existing `nested_fn` remains valid.)
 
 ### 13.3 Full OO (`class`, `this`, ctor/inheritance)
 

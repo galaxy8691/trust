@@ -48,6 +48,29 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
     if let TsType::Union(members) = got {
         return members.iter().all(|g| type_assignable(expected, g));
     }
+    if let (
+        TsType::Fn {
+            params: ep,
+            ret: er,
+        },
+        TsType::Fn {
+            params: gp,
+            ret: gr,
+        },
+    ) = (expected, got)
+    {
+        if ep.len() != gp.len() {
+            return false;
+        }
+        if ep
+            .iter()
+            .zip(gp.iter())
+            .any(|(e, g)| !type_assignable(e, g))
+        {
+            return false;
+        }
+        return type_assignable(er, gr);
+    }
     matches!(
         (expected, got),
         (TsType::Number, TsType::NumberLit(_))

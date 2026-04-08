@@ -389,6 +389,37 @@ fn emit_expr(e: &IRExpr, f: &IRFunction, stmt_level: usize) -> Result<String, Co
             }
             Ok(format!("{}({})", name, a.join(", ")))
         }
+        IRExpr::ArrowFn {
+            params, ret, body, ..
+        } => {
+            if params.len() != 1 || !is_numberish(&params[0].1) || !is_numberish(ret) {
+                return Err(diag(
+                    f.cm.as_ref(),
+                    &f.source_path,
+                    f.span,
+                    "current closure codegen supports only `(number) => number`",
+                ));
+            }
+            let (pname, pty) = &params[0];
+            let mut body_out = String::new();
+            for s in body {
+                emit_stmt(
+                    &mut body_out,
+                    s,
+                    stmt_level + 1,
+                    f,
+                    &CodegenOptions::default(),
+                )?;
+            }
+            Ok(format!(
+                "std::rc::Rc::new(move |{}: {}| -> {} {{\n{}{} }})",
+                pname,
+                rust_ty(pty, f)?,
+                rust_ty(ret, f)?,
+                body_out,
+                indent(stmt_level)
+            ))
+        }
         IRExpr::MethodCall {
             receiver,
             method,

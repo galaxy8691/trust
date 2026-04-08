@@ -64,6 +64,10 @@ fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
     match t {
         TsType::TypeParam(n) => subst.get(n).cloned().unwrap_or_else(|| t.clone()),
         TsType::Union(v) => normalize_union(v.iter().map(|x| subst_type_local(x, subst)).collect()),
+        TsType::Fn { params, ret } => TsType::Fn {
+            params: params.iter().map(|x| subst_type_local(x, subst)).collect(),
+            ret: Box::new(subst_type_local(ret, subst)),
+        },
         _ => t.clone(),
     }
 }
@@ -827,13 +831,11 @@ fn infer_expr_mut(
                 }
                 return Ok(b.ty.clone());
             }
-            if globals.contains_key(name) {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    format!("`{name}` is a function; did you mean to call it?"),
-                ));
+            if let Some(sig) = globals.get(name) {
+                return Ok(TsType::Fn {
+                    params: sig.params.clone(),
+                    ret: Box::new(sig.ret.clone()),
+                });
             }
             Err(diag(
                 cm,
@@ -930,27 +932,43 @@ fn infer_expr_mut(
             type_args,
             span,
         } => {
-            let sig = globals.get(callee).ok_or_else(|| {
-                diag(
+            let from_global = globals.get(callee).map(|sig| {
+                (
+                    sig.params.clone(),
+                    sig.ret.clone(),
+                    sig.type_params.clone(),
+                    true,
+                )
+            });
+            let from_local = lookup(stack, callee).and_then(|b| match &b.ty {
+                TsType::Fn { params, ret } => {
+                    Some((params.clone(), (**ret).clone(), Vec::<String>::new(), false))
+                }
+                _ => None,
+            });
+            let Some((sig_params, sig_ret, sig_type_params, allow_type_args)) =
+                from_global.or(from_local)
+            else {
+                return Err(diag(
                     cm,
                     path,
                     *span,
                     format!("call to unknown function `{callee}`"),
-                )
-            })?;
-            if sig.params.len() != args.len() {
+                ));
+            };
+            if sig_params.len() != args.len() {
                 return Err(diag(
                     cm,
                     path,
                     *span,
                     format!(
                         "wrong argument count for `{callee}`: expected {}, got {}",
-                        sig.params.len(),
+                        sig_params.len(),
                         args.len()
                     ),
                 ));
             }
-            if sig.type_params.is_empty() {
+            if !allow_type_args || sig_type_params.is_empty() {
                 if !type_args.is_empty() {
                     return Err(diag(
                         cm,
@@ -959,23 +977,23 @@ fn infer_expr_mut(
                         format!("non-generic function `{callee}` does not accept type arguments"),
                     ));
                 }
-            } else if sig.type_params.len() != type_args.len() {
+            } else if sig_type_params.len() != type_args.len() {
                 return Err(diag(
                     cm,
                     path,
                     *span,
                     format!(
                         "wrong type argument count for `{callee}`: expected {}, got {}",
-                        sig.type_params.len(),
+                        sig_type_params.len(),
                         type_args.len()
                     ),
                 ));
             }
             let mut subst = HashMap::new();
-            for (n, t) in sig.type_params.iter().zip(type_args.iter()) {
+            for (n, t) in sig_type_params.iter().zip(type_args.iter()) {
                 subst.insert(n.clone(), t.clone());
             }
-            for (a, pt) in args.iter_mut().zip(sig.params.iter()) {
+            for (a, pt) in args.iter_mut().zip(sig_params.iter()) {
                 let at = infer_expr_mut(a, stack, globals, cm, path)?;
                 let expected = subst_type_local(pt, &subst);
                 if !type_assignable(&expected, &at) {
@@ -987,7 +1005,7 @@ fn infer_expr_mut(
                     ));
                 }
             }
-            Ok(subst_type_local(&sig.ret, &subst))
+            Ok(subst_type_local(&sig_ret, &subst))
         }
         IRExpr::MethodCall {
             receiver,
@@ -1241,6 +1259,52 @@ fn infer_expr_mut(
                 }
             }
             Ok(TsType::ObjectNum(keys))
+        }
+        IRExpr::ArrowFn {
+            params,
+            ret,
+            body,
+            span,
+        } => {
+            let mut local_stack = stack.to_vec();
+            let mut local_warnings = Vec::new();
+            push_scope(&mut local_stack);
+            for (name, ty) in params.iter() {
+                insert_let(
+                    &mut local_stack,
+                    name,
+                    ty.clone(),
+                    false,
+                    true,
+                    *span,
+                    cm,
+                    path,
+                )?;
+            }
+            let mut reaches_end = true;
+            check_stmts(
+                body,
+                &mut local_stack,
+                globals,
+                ret,
+                0,
+                cm,
+                path,
+                &mut local_warnings,
+                &mut reaches_end,
+            )?;
+            if *ret != TsType::Void && reaches_end {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "arrow function must return on all control-flow paths",
+                ));
+            }
+            Ok(TsType::Fn {
+                params: params.iter().map(|(_, t)| t.clone()).collect(),
+                ret: Box::new(ret.clone()),
+            })
         }
         IRExpr::Index { obj, index, span } => {
             let ot = infer_expr_mut(obj, stack, globals, cm, path)?;

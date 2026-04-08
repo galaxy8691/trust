@@ -109,6 +109,7 @@ flowchart LR
 | `interface`（受限） | 部分支持 | 顶层 `interface` / `export interface`；声明体与 `{ k: number }` 相同规则，解析为 [`TsType::ObjectNum`](crates/ts2rs-hir/src/ir.rs)（`build.rs` 中具名表）；类型位置用 `Point` 形式引用；**单文件**内按出现顺序声明，引用尚未声明的接口名会报错；**不**从依赖模块导入接口名；`extends`、泛型、可选属性拒绝；见 `interface_ok.ts`、`export_interface_ok.ts`、负例 `interface_extends_fail.ts`、`interface_generic_fail.ts` |
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types`](crates/ts2rs-hir/src/build.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化子集：泛型调用需显式类型实参；泛型声明可解析；更宽泛语义仍拒绝 |
+| 高阶函数 | 部分支持 | 当前支持函数类型注解与带类型箭头闭包（codegen 子集为 `(number) => number`）；支持变量调用 `f(...)`、函数作参数与返回值 |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
 
 ### 矩阵与集成测试对照
@@ -166,7 +167,7 @@ flowchart LR
 
 ### 函数类型与高阶函数
 
-仅支持 **`function` 声明**与调用；**无**「函数作为一等值」的类型（无箭头函数类型表达式作值、无函数类型注解传播到值）。高阶函数需后续扩展 IR 与 [`codegen.rs`](crates/ts2rs-hir/src/codegen.rs)。
+当前已支持受限高阶函数子集：函数类型注解、箭头函数值、变量调用 `f(...)`、函数参数传递与返回函数；codegen 侧闭包路径目前限制为 `(number) => number` 的硬类型子集。
 
 更多进阶条目见 [PROJECT-TODO.zh-CN.md §3.3–3.4](PROJECT-TODO.zh-CN.md)。
 

@@ -36,6 +36,11 @@ pub enum TsType {
     Union(Vec<TsType>),
     /// 类型参数（泛型）
     TypeParam(String),
+    /// 函数类型（高阶函数子集）
+    Fn {
+        params: Vec<TsType>,
+        ret: Box<TsType>,
+    },
 }
 
 /// 稳定全序，用于联合类型规范化与 `B | A` 与 `A | B` 相等。
@@ -53,6 +58,28 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
         (StringLit(x), StringLit(y)) => x.cmp(y),
         (ObjectNum(x), ObjectNum(y)) => x.cmp(y),
         (TypeParam(x), TypeParam(y)) => x.cmp(y),
+        (
+            Fn {
+                params: ap,
+                ret: ar,
+            },
+            Fn {
+                params: bp,
+                ret: br,
+            },
+        ) => {
+            let c = ap.len().cmp(&bp.len());
+            if c != Equal {
+                return c;
+            }
+            for (x, y) in ap.iter().zip(bp.iter()) {
+                let cc = cmp_ts_type(x, y);
+                if cc != Equal {
+                    return cc;
+                }
+            }
+            cmp_ts_type(ar, br)
+        }
         (Union(x), Union(y)) => {
             let mut ita = x.iter();
             let mut itb = y.iter();
@@ -88,7 +115,8 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::ArrayNumber => 9,
         TsType::ObjectNum(_) => 10,
         TsType::TypeParam(_) => 11,
-        TsType::Union(_) => 12,
+        TsType::Fn { .. } => 12,
+        TsType::Union(_) => 13,
     }
 }
 
@@ -276,6 +304,13 @@ pub enum IRExpr {
     Index {
         obj: Box<IRExpr>,
         index: Box<IRExpr>,
+        span: Span,
+    },
+    /// 箭头函数表达式（函数值）
+    ArrowFn {
+        params: Vec<(String, TsType)>,
+        ret: TsType,
+        body: Vec<IRStmt>,
         span: Span,
     },
 }

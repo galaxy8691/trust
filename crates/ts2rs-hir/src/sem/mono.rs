@@ -275,6 +275,9 @@ fn rewrite_expr(
             rewrite_expr(obj, templates, queue, cm, path, fn_span)?;
             rewrite_expr(index, templates, queue, cm, path, fn_span)?;
         }
+        IRExpr::ArrowFn { body, .. } => {
+            rewrite_calls_and_collect(body, templates, queue, cm, path, fn_span)?;
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -445,6 +448,15 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
             subst_expr(obj, subst);
             subst_expr(index, subst);
         }
+        IRExpr::ArrowFn {
+            params, ret, body, ..
+        } => {
+            for (_, t) in params {
+                *t = subst_type(t, subst);
+            }
+            *ret = subst_type(ret, subst);
+            subst_stmts(body, subst);
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -458,6 +470,10 @@ fn subst_type(t: &TsType, subst: &BTreeMap<String, TsType>) -> TsType {
     match t {
         TsType::TypeParam(n) => subst.get(n).cloned().unwrap_or_else(|| t.clone()),
         TsType::Union(v) => normalize_union(v.iter().map(|x| subst_type(x, subst)).collect()),
+        TsType::Fn { params, ret } => TsType::Fn {
+            params: params.iter().map(|x| subst_type(x, subst)).collect(),
+            ret: Box::new(subst_type(ret, subst)),
+        },
         _ => t.clone(),
     }
 }
@@ -487,5 +503,10 @@ fn type_key(t: &TsType) -> String {
         TsType::ObjectNum(fields) => format!("obj{}", fields.join("_")),
         TsType::Union(m) => format!("u{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
         TsType::TypeParam(n) => format!("tp{n}"),
+        TsType::Fn { params, ret } => format!(
+            "fn{}_r{}",
+            params.iter().map(type_key).collect::<Vec<_>>().join("_"),
+            type_key(ret)
+        ),
     }
 }

@@ -491,6 +491,16 @@ fn run_nested_fn_prints_nine() {
 }
 
 #[test]
+fn run_hof_apply_ok_prints_five() {
+    assert_run_stdout("hof_apply_ok.ts", "5\n");
+}
+
+#[test]
+fn run_hof_return_closure_ok_prints_seven() {
+    assert_run_stdout("hof_return_closure_ok.ts", "7\n");
+}
+
+#[test]
 fn run_for_loop_prints_four() {
     assert_run_stdout("for_loop.ts", "4\n");
 }

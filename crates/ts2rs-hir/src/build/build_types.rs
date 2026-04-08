@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     BindingIdent, Decl, ExportDecl, Expr, Lit, ModuleDecl, ModuleItem, Pat, Program, Stmt,
-    TsEntityName, TsInterfaceDecl, TsIntersectionType, TsKeywordTypeKind, TsLit,
-    TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsUnionOrIntersectionType,
-    TsUnionType,
+    TsEntityName, TsFnOrConstructorType, TsFnParam, TsInterfaceDecl, TsIntersectionType,
+    TsKeywordTypeKind, TsLit, TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement,
+    TsUnionOrIntersectionType, TsUnionType,
 };
 
 use crate::error::{diag, CompileError};
@@ -166,6 +166,28 @@ pub(super) fn ts_type_from_ast(
                     "qualified type names are not supported",
                 )),
             }
+        }
+        AstTsType::TsFnOrConstructorType(TsFnOrConstructorType::TsFnType(ft)) => {
+            let mut params = Vec::with_capacity(ft.params.len());
+            for p in &ft.params {
+                let pt = match p {
+                    TsFnParam::Ident(i) => ts_type_from_ann(&i.type_ann, cm, path, i.span, iface, type_params)?,
+                    _ => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            p.span(),
+                            "only identifier parameters are supported in function type",
+                        ))
+                    }
+                };
+                params.push(pt);
+            }
+            let ret = ts_type_from_ast(&ft.type_ann.type_ann, cm, path, iface, type_params)?;
+            Ok(TsType::Fn {
+                params,
+                ret: Box::new(ret),
+            })
         }
         AstTsType::TsUnionOrIntersectionType(u) => match u {
             TsUnionOrIntersectionType::TsUnionType(TsUnionType { types, span }) => {
