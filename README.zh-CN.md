@@ -6,9 +6,9 @@
 
 另见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)、[CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)，以及长期路线图 [PROJECT-TODO.zh-CN.md](PROJECT-TODO.zh-CN.md)（[English](PROJECT-TODO.md)）。
 
-## 类型立场：硬类型（trust）
+## 类型立场：强类型（strong typing，trust）
 
-**trust 是硬类型，不允许软类型。** 受支持的程序必须在编译期内具备**静态、确定**的类型信息：参数与返回值须注解（或本子集内等价地可判定）；`let` / `const` 须带类型注解（或明确初始化且类型可推断）；**不**提供隐式 `any`、运行期随意改型、或「先写后推断全局放宽」等软类型语义。路线与验收以**静态类型检查**为准，与完整 TypeScript / `tsc` 的渐进式宽松模式**不一致**。
+**trust 采用强类型（strong typing）：** 与隐式 `any`、运行期随意改型等宽松语义相对，受支持的程序必须在编译期内具备**静态、确定**的类型信息：参数与返回值须注解（或本子集内等价地可判定）；`let` / `const` 须带类型注解（或明确初始化且类型可推断）；**不**提供隐式 `any`、运行期随意改型、或「先写后推断全局放宽」等软类型语义。路线与验收以**静态类型检查**为准，与完整 TypeScript / `tsc` 的渐进式宽松模式**不一致**。
 
 ## 架构
 
@@ -32,7 +32,7 @@ flowchart LR
 
 [`ts2rs-lower`](crates/ts2rs-lower) 串联 HIR 构建、语义与代码生成。[`ts2rs-driver`](crates/ts2rs-driver) 负责临时 crate 与 `cargo`（`ts2rs run` 使用）。
 
-## 不支持的 TypeScript 特性（trust 硬类型拒斥边界）
+## 不支持的 TypeScript 特性（trust 强类型拒斥边界）
 
 以下为常见**显式拒绝**形态（诊断为英文；详见 [`build.rs`](crates/ts2rs-hir/src/build.rs) / [`sem.rs`](crates/ts2rs-hir/src/sem.rs)）。与下文「泛型与类型参数」表及语言矩阵**互补**；矩阵中已标为支持/部分支持的特性（如受限 **`?.`**、单态化泛型、顶层 `class` 子集）**不在此列**。
 
@@ -174,7 +174,7 @@ flowchart LR
 
 ### 函数类型与高阶函数
 
-当前已支持受限高阶函数子集：函数类型注解、箭头函数值、变量调用 `f(...)`、函数参数传递与返回函数；codegen 侧闭包路径目前限制为 `(number) => number` 的硬类型子集。
+当前已支持受限高阶函数子集：函数类型注解、箭头函数值、变量调用 `f(...)`、函数参数传递与返回函数；codegen 侧闭包路径目前限制为 `(number) => number` 的严格子集。
 
 更多进阶条目见 [PROJECT-TODO.zh-CN.md §3.3–3.4](PROJECT-TODO.zh-CN.md)。
 
