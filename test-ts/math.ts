@@ -101,3 +101,17 @@ export function len_label_twice(): number {
   let n: number = utf16_len(s);
   return n + n;
 }
+
+// --- 泛型（须在调用点写显式类型实参，见 generic_function_ok.ts）---
+export function identity<T>(x: T): T {
+  return x;
+}
+
+// --- 高阶函数：函数类型参数 + 返回闭包（见 hof_apply_ok / hof_return_closure_ok）---
+export function apply_num(f: (x: number) => number, x: number): number {
+  return f(x);
+}
+
+export function make_adder(n: number): (x: number) => number {
+  return (x: number): number => x + n;
+}

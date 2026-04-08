@@ -1,12 +1,15 @@
 // test-ts：多文件手工回归 — 入口须为 `export function main`；依赖 `./math.ts`（math 再依赖 `./strutil.ts`）。
 // 运行：`cargo run -p ts2rs-cli -- run test-ts/main.ts`
-// stdout 依次：`ok 1`、`cmp 1`、`void_fn 1`；随后一行 `out= 15 5 50 2`（空格分隔）；最后一行 stdout 为 main 返回值（当前实现为 13808）。
+// 覆盖：控制流、字面量/联合、`interface`/`type`、多文件 import、`Math`/工具函数、**泛型**（显式 `identity<number>(…)`）、**高阶函数**（`apply_num`、返回闭包的 `make_adder`）、**class / extends / super / 实例方法**（见下文 `OOBase`/`OOChild`）。
+// **仍不覆盖**（由 fixtures 或仍为 backlog）：`async`/`await`、`fetch`、`export class` 跨文件、完整 discriminated 收窄等 — 见 README 矩阵与 PROJECT-TODO。
+// stdout 依次：`ok 1`、`cmp 1`、`void_fn 1`；随后一行 `out= 15 5 50 2`（空格分隔）；最后一行 stdout 为 main 返回值（当前 **13847**；以 `cargo run -p ts2rs-cli -- run test-ts/main.ts` 为准）。
 // stderr：`err 1` 与单独一行 `2`（console.debug）。
 // 类型 `interface` / `type` 仅在本文件使用（具名表不跨模块合并，见 README）。
 
 import {
   abs_diff,
   add,
+  apply_num,
   clamp,
   div,
   early,
@@ -14,8 +17,10 @@ import {
   fib,
   fib_loop,
   greater,
+  identity,
   ipow,
   len_label_twice,
+  make_adder,
   math_builtin_sum,
   mul,
   sign,
@@ -28,6 +33,29 @@ interface Point {
 }
 
 type P = Point;
+
+// OO 子集：单文件内 class（与 class_extends_ok / class_this_method_ok 同模式；跨文件 `export class` 未支持）。
+class OOBase {
+  seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
+}
+
+class OOChild extends OOBase {
+  k: number;
+
+  constructor(seed: number, k: number) {
+    super(seed);
+    this.k = k;
+  }
+
+  // 避免与 main 内局部变量 `sum`（两数之和）脱糖后的全局名冲突，故不用方法名 `sum`。
+  oo_sum(): number {
+    return this.seed + this.k;
+  }
+}
 
 function void_log_once(): void {
   console.log("void_fn", 1);
@@ -168,7 +196,17 @@ export function main(): number {
   acc = acc + len_label_twice();
 
   acc = acc + fib(20);
-  acc = acc + fib_loop(20);
+  acc = acc + fib_loop(100);
+
+  // 泛型 + 高阶函数（自 math 模块导入）
+  acc = acc + identity<number>(11);
+  acc = acc + apply_num((x: number): number => x * 2, 4);
+  let add3: (x: number) => number = make_adder(3);
+  acc = acc + add3(10);
+
+  // class 实例
+  let oo: OOChild = new OOChild(3, 4);
+  acc = acc + oo.oo_sum();
 
   return acc;
 }

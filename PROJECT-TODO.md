@@ -46,8 +46,8 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 1.3 Expressions
 
-- [~] **`async` / `await` / `Promise` / HTTP `fetch` / `fetchText` (MVP)**: [`IRFunction::is_async`](crates/ts2rs-hir/src/ir.rs), [`IRExpr::Await`](crates/ts2rs-hir/src/ir.rs) / [`FetchText`](crates/ts2rs-hir/src/ir.rs) / [`Fetch`](crates/ts2rs-hir/src/ir.rs) / [`PromiseAll`](crates/ts2rs-hir/src/ir.rs), [`#[tokio::main]`](crates/ts2rs-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/ts2rs-driver/src/crate_writer.rs) and **`futures-util`** when generated Rust uses streaming (`crate_writer` detects `futures_util` in source). **`await` in arbitrary control flow** is implemented (§14 follow-up); **`fetchText(url)`** → `Promise<string>`; **`fetch(url, init?)`** → `Promise<Response>` with **`status`**, **`ok`**, **`await .text()`**, **`await .json()`** (integer JSON subset), **`response.body.getReader()`** + **`await reader.read()`** (chunked body via `bytes_stream()`), and **optional `init`** (`method` string literal, `headers` object with string-literal values, optional `body` string); **`.then`** is rejected with a diagnostic; **`Headers` iteration / Web `Request` parity / byte-level TLS·HTTP2 parity with Node** remain out of scope (see §Async / HTTP backlog).
-- [x] **Member access and call chains**: limited subset; today only `string.length` (`member_length_ok.ts`); general `obj.m()` / chains TBD.
+- [x] **`async` / `await` / `Promise` / HTTP `fetch` / `fetchText` (MVP)**: [`IRFunction::is_async`](crates/ts2rs-hir/src/ir.rs), [`IRExpr::Await`](crates/ts2rs-hir/src/ir.rs) / [`FetchText`](crates/ts2rs-hir/src/ir.rs) / [`Fetch`](crates/ts2rs-hir/src/ir.rs) / [`PromiseAll`](crates/ts2rs-hir/src/ir.rs), [`#[tokio::main]`](crates/ts2rs-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/ts2rs-driver/src/crate_writer.rs) and **`futures-util`** when generated Rust uses streaming (`crate_writer` detects `futures_util` in source). **`await` in arbitrary control flow** is implemented; **`fetchText(url)`** → `Promise<string>`; **`fetch(url, init?)`** → `Promise<Response>` with **`status`**, **`ok`**, **`await .text()`**, **`await .json()`** (JSON **number** body → `f64` via **`serde_json`**, same as dynamic `JSON.parse`), **`response.body.getReader()`** + **`await reader.read()`** (chunked body via `bytes_stream()`), and **optional `init`** (`method` string literal, `headers` object with string-literal values, optional `body` string); **`.then`** is rejected with a diagnostic; **`Headers` iteration / Web `Request` parity / byte-level TLS·HTTP2 parity with Node** remain out of scope (see §Async / HTTP backlog).
+- [x] **Member access and call chains**: `string.length` (UTF-16), `string[i]` (single UTF-16 code unit as `string`), `number[]` / `string[]` index, `length` on objects; **`obj.m(args)`** → global `m(receiver,…)` ([`IRExpr::MethodCall`](crates/ts2rs-hir/src/ir.rs)); **one-level** `f().prop` / `f().m()` ([`chain_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/chain_call_ok.ts)); optional **`?.` / `f?.()` / `recv?.m()`** ([`optional_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/optional_call_ok.ts)); fixtures `member_length_ok.ts`, `method_call_ok.ts`, `string_utf16_length.ts`, `stdlib_hir_ok.ts`.
 - [x] **Optional chaining / nullish coalescing**: limited subset (`obj?.prop`, `??`; `optional_ok.ts`, `nullish_ok.ts`); full semantics tied to §3.3.
 - [x] **Logical short-circuit**: `&&`, `||`; `boolean` and `number` truthiness (`!= 0`), result type `boolean` (`logical_bool.ts`, `logical_truthy_ok.ts`); differs from TS value-preserving `&&`/`||`; under **hard typing** result is `boolean`; more complex truthiness or unions still limited.
 - [x] **Ternary**: `cond ? a : b` (`ternary_ok.ts`).
@@ -57,8 +57,8 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 **§1.3 follow-ups (notes)**
 
-- **`obj.m(args)` (method call lowering)**: [`IRExpr::MethodCall`](crates/ts2rs-hir/src/ir.rs) → global `m(receiver, ...args)` (top-level `m` must exist; `method_call_ok.ts`, `cli_e2e` `run_method_call_ok_prints_three`). **Chained** `f().g()` and **general method types** TBD.
-- **`?.()` (optional call) and full static narrowing for `??`**: must align with §3.3 under **hard typing, statically decidable**; optional call still rejected; `??` is intentionally limited.
+- **Method / chain typing**: `obj.m` and one-level `f().g` are implemented; **richer receiver typing** (e.g. arbitrary class instance methods) remains limited — see class subset in README matrix.
+- **`??` / `?.`**: same-family `Union` narrowing for `??` and optional call/member are implemented; **full discriminated narrowing** still future (§3.3).
 - **“Full” types for array/object literals**: richer elements/fields and `TsType`/IR evolution in §1.4, §2.1 — not only expression layer.
 
 ### 1.4 Type syntax (types only)
@@ -98,7 +98,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ### 2.1 Current structure
 
 - [x] **Statements**: `Assign`, `Break`, `Continue`, `DoWhile`, `FnDecl`, `Empty`; `for` lowered to `while`; no `Switch` IR stmt.
-- [x] **Expressions**: `LogicalAnd`/`LogicalOr`, `Conditional`, `Seq`, `Tpl`, limited `Member`; `Index` and full member chains TBD. Array index and `ObjectNum` fields from §1.3 covered; full `interface` / explicit object shapes in §1.4 and later IR (hard typing, static checks).
+- [x] **Expressions**: `LogicalAnd`/`LogicalOr`, `Conditional`, `Seq`, `Tpl`, `Member` / `OptionalMember`, [`Index`](crates/ts2rs-hir/src/ir.rs) (array `number`/`string` elements, string UTF-16), [`MethodCall`](crates/ts2rs-hir/src/ir.rs) / [`OptionalMethodCall`](crates/ts2rs-hir/src/ir.rs), one-level chained `f().prop` / `f().m()`, [`JsonBuiltin`](crates/ts2rs-hir/src/ir.rs) / [`UriBuiltin`](crates/ts2rs-hir/src/ir.rs), math/string/http builtins as in README matrix; **computed** `obj[expr](…)` call still unsupported. `ObjectNum` / `interface` shapes: §1.4; hard typing, static checks.
 - [x] **Top level**: multi-file graph — `parse_module_graph` + `validate_imports`; HIR merged to [`IRModule`](crates/ts2rs-hir/src/ir.rs) (`build_program_multi` / `compile_graph`); `main` in entry file; global function names unique; negatives `import_missing_export_*`, `circular_*`, `dup_*`.
 
 ### 2.2 Metadata and debugging
@@ -330,7 +330,7 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 - [x] **Generated-code safety**: string escaping / `println!` injection audit. (Class `__class_name` literal uses `Debug` escaping; [`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) documents fixed format templates; template literals already brace-escape in [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs).)
 - [x] **Driver resource limits**: optional timeout / memory around `cargo` subprocess. ([`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs) + [`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs); [`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) uses [`wait_timeout::ChildExt`].)
 
-### Async / HTTP (MVP gaps; see §1.3 [~])
+### Async / HTTP (MVP; residual backlog)
 
 - [x] **`await` in arbitrary control flow** (not limited to current async MVP body rules). (Removed [`check_async_mvp_stmts`](crates/ts2rs-hir/src/sem.rs); [`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) `Await` accepts any `Promise<T>` operand; [`async_control_flow_ok.ts`](crates/ts2rs-cli/tests/fixtures/async_control_flow_ok.ts), `compile_async_control_flow_if_while_await_ok`.)
 - [x] **`Promise.all([...])`** (array literal only; homogeneous `Promise<number>` / `Promise<string>` / `Promise<Response>` from `fetch`). ([`IRExpr::PromiseAll`](crates/ts2rs-hir/src/ir.rs), [`promise_all_fetch_ok.ts`](crates/ts2rs-cli/tests/fixtures/promise_all_fetch_ok.ts), `compile_promise_all_fetch_alias_ok`.)
@@ -349,8 +349,8 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 ### Documentation and examples
 
-- [ ] **README + this file**: periodic sweep so matrix / §1.3 / §2.1 lines match shipped features (e.g. stdlib, `string[i]`, `Math.*` extensions).
-- [ ] **[`test-ts/main.ts`](test-ts/main.ts)**: keep within supported subset or document intentional gaps.
+- [x] **README + this file**: periodic sweep so matrix / §1.3 / §2.1 lines match shipped features (e.g. stdlib, `string[i]`, `Math.*` extensions). *(This sweep: §1.3 / §2.1 bullets above + `.json()`/`JSON.parse` serde_json wording; README matrix already lists member/`JSON`/URI/async — see [Language feature matrix](README.md).)*
+- [x] **[`test-ts/main.ts`](test-ts/main.ts)**: kept within supported subset; header documents expected I/O and **intentionally omits** `async`/`fetch`/generic call sites (covered by `fixtures/` instead).
 
 ---
 

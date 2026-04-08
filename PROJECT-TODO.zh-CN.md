@@ -44,8 +44,8 @@
 
 ### 1.3 表达式扩展
 
-- [~] **`async` / `await` / `Promise` / `fetch` / `fetchText`（MVP）**：**`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（受限 `status` / `ok` / `await .text()` / `await .json()` 整数子集；**`response.body.getReader()`** + **`await reader.read()`** 分块 body；`init` 支持字面量 `method`、`headers`（值为字符串字面量）、可选 `body` 字符串）；**`Promise.all`**、**`.then`** 拒绝与 §async 条目一致；生成代码若含 **`futures_util`** 则 driver 注入 **`futures-util`**；**完整 WHATWG `fetch`（浏览器级 `ReadableStream`/`Headers` 等）/ 与某版本 Node 字节级 TLS·HTTP2 对齐**仍属后续。
-- [x] **成员访问与调用链**：受限子集；当前仅 `string` 的 `.length`（见 `member_length_ok.ts`）；一般 `obj.m()` / 链式调用待扩展。
+- [x] **`async` / `await` / `Promise` / `fetch` / `fetchText`（MVP）**：**`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()`：**JSON number** → `f64`，**`serde_json`**，与动态 `JSON.parse` 一致）；**`response.body.getReader()`** + **`await reader.read()`** 分块 body；`init` 支持字面量 `method`、`headers`（值为字符串字面量）、可选 `body` 字符串）；**`Promise.all`**、**`.then`** 拒绝与 §async 条目一致；生成代码若含 **`futures_util`** 则 driver 注入 **`futures-util`**；**完整 WHATWG `fetch`（浏览器级 `ReadableStream`/`Headers` 等）/ 与某版本 Node 字节级 TLS·HTTP2 对齐**仍属后续。
+- [x] **成员访问与调用链**：`string.length`（UTF-16）、`string[i]`、`number[]`/`string[]` 下标、对象 `length`；**`obj.m(args)`** → 全局 `m(receiver,…)`；**一层** `f().prop` / `f().m()`（`chain_call_ok.ts`）；可选 **`?.` / `f?.()` / `recv?.m()`**（`optional_call_ok.ts`）；见 `member_length_ok.ts`、`method_call_ok.ts`、`string_utf16_length.ts`、`stdlib_hir_ok.ts` 等。
 - [x] **可选链 / 空值合并**：受限子集已支持（`obj?.prop`、`??`；见 `optional_ok.ts`、`nullish_ok.ts`）；完整语义依赖 §3.3。
 - [x] **逻辑与短路**：`&&`、`||`；`boolean` 与 `number` 真值（`!= 0`）已支持，结果类型为 `boolean`（见 `logical_bool.ts`、`logical_truthy_ok.ts`）；与 TypeScript 值保留式 `&&`/`||` 仍不同；**硬类型下**结果类型固定为 `boolean`，更复杂真值或联合操作数仍受限。
 - [x] **三元运算符**：`cond ? a : b`（见 `ternary_ok.ts`）。
@@ -55,8 +55,8 @@
 
 **§1.3 仍待后续（原因备忘）**
 
-- **`obj.m(args)`（成员调用脱糖）**：已实现 [`IRExpr::MethodCall`](crates/ts2rs-hir/src/ir.rs) → 全局函数 `m(receiver, ...args)`（须存在对应顶层函数；验收：`method_call_ok.ts`、`cli_e2e` `run_method_call_ok_prints_three`）。**链式方法调用** `f().g()`、**一般方法类型**仍待。
-- **`?.()`（可选调用）与 `??` 的完整静态收窄**：须在 **硬类型、可静态判定** 前提下与 §3.3 对齐；可选调用仍显式拒绝；`??` 为受限实现。
+- **方法 / 链式类型**：`obj.m` 与一层 `f().g` 已实现；**更一般的实例方法类型**（任意 class 实例）仍受 class 子集限制 — 见 README 矩阵。
+- **`??` / `?.`**：同族 `Union` 与可选调用/成员已支持；**完整 discriminated 收窄**仍属 §3.3 后续。
 - **数组/对象字面量的「完整」类型**：更丰富的元素与字段类型、`TsType`/IR 演进见 §1.4、§2.1，不单属表达式扩展层。
 
 ### 1.4 类型语法（仅类型层）
@@ -96,7 +96,7 @@
 ### 2.1 当前结构补强
 
 - [x] **语句**：已含 `Assign`、`Break`、`Continue`、`DoWhile`、`FnDecl`、`Empty`；`for` 展开为 `while`；`Switch` 未实现。
-- [x] **表达式**：已含 `LogicalAnd` / `LogicalOr`、`Conditional`（三元）、`Seq`（逗号）、`Tpl`（模板）、受限 `Member`；`Index` 与完整成员链待扩展。由 §1.3 引入的数组下标与 `ObjectNum` 字段访问已覆盖；**完整** `interface` / **显式形状**对象类型见 §1.4 与后续 IR 扩展（硬类型、静态检查）。
+- [x] **表达式**：已含 `LogicalAnd` / `LogicalOr`、`Conditional`、`Seq`、`Tpl`、`Member` / `OptionalMember`、`Index`（数组与 UTF-16 字符串下标）、`MethodCall` / `OptionalMethodCall`、一层链式 `f().prop` / `f().m()`、`JsonBuiltin` / `UriBuiltin` 及 README 矩阵所列内建；**计算属性调用** `obj[expr](…)` 仍不支持。`ObjectNum` / `interface` 见 §1.4（硬类型、静态检查）。
 - [x] **顶层**：多文件模块图 — `parse_module_graph` + `validate_imports`；HIR 合并为 [`IRModule`](crates/ts2rs-hir/src/ir.rs)（`build_program_multi` / `compile_graph`）；`main` 须在入口文件；全局函数名唯一；负例见 `import_missing_export_*`、`circular_*`、`dup_*` fixtures。
 
 ### 2.2 元数据与调试
@@ -328,7 +328,7 @@
 - [x] **生成代码安全**：字符串转义、`println!` 注入等审计。（类 `__class_name` 字符串字面量用 `Debug` 转义；[`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) 标明格式串为固定模板；模板字面量在 [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs) 中已对 `{`/`}` 转义。）
 - [x] **Driver 资源限制**：对子进程 `cargo` 的可选超时/内存上限。（[`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs)、[`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs)；[`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) 使用 [`wait_timeout::ChildExt`]。）
 
-### async / HTTP（MVP 缺口；见 §1.3 [~]）
+### async / HTTP（MVP；残余 backlog）
 
 - [x] **任意控制流中的 `await`**（不限于当前 async MVP 体约束）。（已移除 [`check_async_mvp_stmts`](crates/ts2rs-hir/src/sem.rs)；[`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) 中 `Await` 接受任意推断为 `Promise<T>` 的操作数；[`async_control_flow_ok.ts`](crates/ts2rs-cli/tests/fixtures/async_control_flow_ok.ts)、`compile_async_control_flow_if_while_await_ok`。）
 - [x] **`Promise.all([...])`**（仅数组字面量；同质 `Promise<number>` / `Promise<string>` / `fetch` 的 `Promise<Response>`）。见 [`IRExpr::PromiseAll`](crates/ts2rs-hir/src/ir.rs)、[`promise_all_fetch_ok.ts`](crates/ts2rs-cli/tests/fixtures/promise_all_fetch_ok.ts)、`compile_promise_all_fetch_alias_ok`。
@@ -346,8 +346,8 @@
 
 ### 文档与示例
 
-- [ ] **README + 本清单**：定期对照实现扫一遍（矩阵、§1.3、§2.1 等），避免与已交付特性（如 stdlib、`string[i]`、`Math` 扩展）矛盾。
-- [ ] **[`test-ts/main.ts`](test-ts/main.ts)**：保持在支持子集内，或写明有意不支持的用法。
+- [x] **README + 本清单**：定期对照实现扫一遍（矩阵、§1.3、§2.1 等），避免与已交付特性（如 stdlib、`string[i]`、`Math` 扩展）矛盾。*（本次已对齐 §1.3 / §2.1 与 `.json` 语义；README 矩阵见 [语言功能矩阵](README.zh-CN.md)。）*
+- [x] **[`test-ts/main.ts`](test-ts/main.ts)**：保持在支持子集内；文件头注明预期 I/O，并**刻意不包含** `async`/`fetch`/泛型调用等（由 `fixtures/` 覆盖）。
 
 ---
 
