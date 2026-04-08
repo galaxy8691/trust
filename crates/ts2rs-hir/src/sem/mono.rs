@@ -283,6 +283,8 @@ fn rewrite_expr(
         IRExpr::ArrowFn { body, .. } => {
             rewrite_calls_and_collect(body, templates, queue, cm, path, fn_span)?;
         }
+        IRExpr::Await { arg, .. } => rewrite_expr(arg, templates, queue, cm, path, fn_span)?,
+        IRExpr::FetchText { url, .. } => rewrite_expr(url, templates, queue, cm, path, fn_span)?,
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -475,6 +477,8 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
             *ret = subst_type(ret, subst);
             subst_stmts(body, subst);
         }
+        IRExpr::Await { arg, .. } => subst_expr(arg, subst),
+        IRExpr::FetchText { url, .. } => subst_expr(url, subst),
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -494,6 +498,7 @@ fn subst_type(t: &TsType, subst: &BTreeMap<String, TsType>) -> TsType {
             params: params.iter().map(|x| subst_type(x, subst)).collect(),
             ret: Box::new(subst_type(ret, subst)),
         },
+        TsType::Promise(inner) => TsType::Promise(Box::new(subst_type(inner, subst))),
         TsType::ClassInstance(_) => t.clone(),
         _ => t.clone(),
     }
@@ -530,5 +535,6 @@ fn type_key(t: &TsType) -> String {
             params.iter().map(type_key).collect::<Vec<_>>().join("_"),
             type_key(ret)
         ),
+        TsType::Promise(inner) => format!("P{}", type_key(inner)),
     }
 }

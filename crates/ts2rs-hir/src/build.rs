@@ -155,7 +155,7 @@ fn collect_class_decls(
                         params.push(param_binding(pp, cm, path, iface, None)?);
                     }
                     let body = match &cons.body {
-                        Some(b) => build_block_stmts(&b.stmts, cm, path, &mut 0u32, iface)?,
+                        Some(b) => build_block_stmts(&b.stmts, cm, path, &mut 0u32, iface, false)?,
                         None => Vec::new(),
                     };
                     ctor = Some(IRClassMethod {
@@ -195,7 +195,7 @@ fn collect_class_decls(
                     let ret =
                         ts_type_from_ann(&m.function.return_type, cm, path, m.span, iface, None)?;
                     let body = match &m.function.body {
-                        Some(b) => build_block_stmts(&b.stmts, cm, path, &mut 0u32, iface)?,
+                        Some(b) => build_block_stmts(&b.stmts, cm, path, &mut 0u32, iface, false)?,
                         None => {
                             return Err(diag_spanned(cm, path, m, "method body is required"));
                         }
@@ -369,6 +369,7 @@ fn lower_classes_to_functions(
                 span: c.span,
                 cm: cm.clone(),
                 source_path: path.to_string(),
+                is_async: false,
                 mono_origin: None,
             }
         } else {
@@ -395,6 +396,7 @@ fn lower_classes_to_functions(
                 span: cls.span,
                 cm: cm.clone(),
                 source_path: path.to_string(),
+                is_async: false,
                 mono_origin: None,
             }
         };
@@ -419,6 +421,7 @@ fn lower_classes_to_functions(
                 span: m.span,
                 cm: cm.clone(),
                 source_path: path.to_string(),
+                is_async: false,
                 mono_origin: None,
             });
         }
@@ -539,6 +542,8 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
             rewrite_this_in_expr(index, span);
         }
         IRExpr::ArrowFn { body, .. } => rewrite_this_in_stmts(body, span),
+        IRExpr::Await { arg, .. } => rewrite_this_in_expr(arg, span),
+        IRExpr::FetchText { url, .. } => rewrite_this_in_expr(url, span),
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -704,14 +709,6 @@ fn build_fn(
     iface: &HashMap<String, TsType>,
 ) -> Result<IRFunction, CompileError> {
     let func = &f.function;
-    if func.is_async {
-        return Err(diag_spanned(
-            cm,
-            path,
-            f,
-            "async functions are not supported",
-        ));
-    }
     if func.is_generator {
         return Err(diag_spanned(
             cm,
@@ -737,7 +734,7 @@ fn build_fn(
         }
     }
 
-    let ret = ts_type_from_ann(
+    let ret_ann = ts_type_from_ann(
         &func.return_type,
         cm,
         path,
@@ -749,6 +746,39 @@ fn build_fn(
             Some(&fn_type_params)
         },
     )?;
+    let (ret, is_async_fn) = if func.is_async {
+        match ret_ann {
+            TsType::Promise(inner) => match *inner {
+                TsType::Number | TsType::String | TsType::Void => (*inner, true),
+                _ => {
+                    return Err(diag_spanned(
+                        cm,
+                        path,
+                        f,
+                        "async function `Promise<T>` requires `T` to be `number`, `string`, or `void`",
+                    ));
+                }
+            },
+            _ => {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    f,
+                    "async function must have explicit return type `Promise<...>`",
+                ));
+            }
+        }
+    } else {
+        if matches!(ret_ann, TsType::Promise(_)) {
+            return Err(diag_spanned(
+                cm,
+                path,
+                f,
+                "only `async function` may return `Promise<...>`",
+            ));
+        }
+        (ret_ann, false)
+    };
     let mut params = Vec::new();
     for p in &func.params {
         let (name, ty) = param_binding(
@@ -773,7 +803,7 @@ fn build_fn(
     let ir_id = *next_id;
     *next_id = next_id.saturating_add(1);
 
-    let body_ir = build_block_stmts(&body.stmts, cm, path, next_id, iface)?;
+    let body_ir = build_block_stmts(&body.stmts, cm, path, next_id, iface, is_async_fn)?;
 
     Ok(IRFunction {
         ir_id,
@@ -785,6 +815,7 @@ fn build_fn(
         span: f.span(),
         cm: cm.clone(),
         source_path: path.to_string(),
+        is_async: is_async_fn,
         mono_origin: None,
     })
 }
@@ -795,13 +826,14 @@ fn build_block_stmts(
     path: &str,
     next_id: &mut u32,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<Vec<IRStmt>, CompileError> {
     let mut v = Vec::new();
     for s in stmts {
         if let Stmt::For(f) = s {
-            v.extend(build_for_stmt(f, cm, path, next_id, iface)?);
+            v.extend(build_for_stmt(f, cm, path, next_id, iface, in_async)?);
         } else {
-            v.push(build_stmt(s, cm, path, next_id, iface)?);
+            v.push(build_stmt(s, cm, path, next_id, iface, in_async)?);
         }
     }
     Ok(v)
@@ -813,29 +845,30 @@ fn build_for_stmt(
     path: &str,
     next_id: &mut u32,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<Vec<IRStmt>, CompileError> {
     let mut out = Vec::new();
     if let Some(init) = &f.init {
         match init {
             VarDeclOrExpr::VarDecl(vd) => {
-                out.push(build_var_decl_from_vardecl(vd, cm, path, iface)?);
+                out.push(build_var_decl_from_vardecl(vd, cm, path, iface, in_async)?);
             }
             VarDeclOrExpr::Expr(e) => {
                 out.push(IRStmt::Expr {
-                    expr: build_expr(e, cm, path, iface)?,
+                    expr: build_expr(e, cm, path, iface, in_async)?,
                     span: e.span(),
                 });
             }
         }
     }
     let cond = if let Some(t) = &f.test {
-        build_expr(t, cm, path, iface)?
+        build_expr(t, cm, path, iface, in_async)?
     } else {
         IRExpr::Number(1, f.span)
     };
     let mut body = match &*f.body {
-        Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface)?,
-        s => vec![build_stmt(s, cm, path, next_id, iface)?],
+        Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
+        s => vec![build_stmt(s, cm, path, next_id, iface, in_async)?],
     };
     if let Some(up) = &f.update {
         match &**up {
@@ -850,7 +883,7 @@ fn build_for_stmt(
                 }
                 match &ax.left {
                     AssignTarget::Simple(SimpleAssignTarget::Ident(i)) => {
-                        let rhs = build_expr(&ax.right, cm, path, iface)?;
+                        let rhs = build_expr(&ax.right, cm, path, iface, in_async)?;
                         body.push(IRStmt::Assign {
                             name: i.id.sym.to_string(),
                             rhs,
@@ -869,7 +902,7 @@ fn build_for_stmt(
             }
             _ => {
                 body.push(IRStmt::Expr {
-                    expr: build_expr(up, cm, path, iface)?,
+                    expr: build_expr(up, cm, path, iface, in_async)?,
                     span: up.span(),
                 });
             }
@@ -889,6 +922,7 @@ fn build_var_decl_from_vardecl(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRStmt, CompileError> {
     if v.decls.len() != 1 {
         return Err(diag_spanned(
@@ -913,7 +947,7 @@ fn build_var_decl_from_vardecl(
     let ty = ts_type_from_pat_ann(&d.name, cm, path, iface)?;
     let mutable = matches!(v.kind, VarDeclKind::Let | VarDeclKind::Var);
     let init = match &d.init {
-        Some(init_expr) => Some(build_expr(init_expr, cm, path, iface)?),
+        Some(init_expr) => Some(build_expr(init_expr, cm, path, iface, in_async)?),
         None => {
             if !mutable {
                 return Err(diag_spanned(cm, path, v, "`const` requires an initializer"));
@@ -985,6 +1019,7 @@ fn build_switch_stmt(
     path: &str,
     next_id: &mut u32,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRStmt, CompileError> {
     if sw.cases.is_empty() {
         return Err(diag_spanned(
@@ -1018,7 +1053,7 @@ fn build_switch_stmt(
         ));
     }
 
-    let disc = build_expr(&sw.discriminant, cm, path, iface)?;
+    let disc = build_expr(&sw.discriminant, cm, path, iface, in_async)?;
 
     let mut labeled: Vec<(IRExpr, Vec<IRStmt>, Span)> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -1044,7 +1079,9 @@ fn build_switch_stmt(
                     "`default` clause cannot be empty after trailing `break` removal",
                 ));
             }
-            default_body = Some(build_block_stmts(&trimmed, cm, path, next_id, iface)?);
+            default_body = Some(build_block_stmts(
+                &trimmed, cm, path, next_id, iface, in_async,
+            )?);
             break;
         }
 
@@ -1074,7 +1111,7 @@ fn build_switch_stmt(
             ));
         }
 
-        let then_b = build_block_stmts(&trimmed, cm, path, next_id, iface)?;
+        let then_b = build_block_stmts(&trimmed, cm, path, next_id, iface, in_async)?;
         labeled.push((lit_ir, then_b, case.span));
     }
 
@@ -1124,6 +1161,7 @@ fn build_for_in_stmt(
     path: &str,
     next_id: &mut u32,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRStmt, CompileError> {
     let (key, key_ty) = match &fi.left {
         ForHead::VarDecl(v) => {
@@ -1153,7 +1191,7 @@ fn build_for_in_stmt(
                 ));
             };
             let ty = if type_ann.is_some() {
-                ts_type_from_ann(&type_ann, cm, path, id.span, iface, None)?
+                ts_type_from_ann(type_ann, cm, path, id.span, iface, None)?
             } else {
                 TsType::String
             };
@@ -1169,7 +1207,7 @@ fn build_for_in_stmt(
                 ));
             };
             let ty = if type_ann.is_some() {
-                ts_type_from_ann(&type_ann, cm, path, id.span, iface, None)?
+                ts_type_from_ann(type_ann, cm, path, id.span, iface, None)?
             } else {
                 TsType::String
             };
@@ -1184,10 +1222,10 @@ fn build_for_in_stmt(
             ));
         }
     };
-    let target = build_expr(&fi.right, cm, path, iface)?;
+    let target = build_expr(&fi.right, cm, path, iface, in_async)?;
     let body = match &*fi.body {
-        Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface)?,
-        s => vec![build_stmt(s, cm, path, next_id, iface)?],
+        Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
+        s => vec![build_stmt(s, cm, path, next_id, iface, in_async)?],
     };
     Ok(IRStmt::ForIn {
         key,
@@ -1205,16 +1243,17 @@ fn build_stmt(
     path: &str,
     next_id: &mut u32,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRStmt, CompileError> {
     match stmt {
         Stmt::Empty(EmptyStmt { span }) => Ok(IRStmt::Empty { span: *span }),
         Stmt::Block(b) => Ok(IRStmt::Block {
-            stmts: build_block_stmts(&b.stmts, cm, path, next_id, iface)?,
+            stmts: build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
             span: b.span,
         }),
         Stmt::Return(r) => Ok(IRStmt::Return {
             arg: match &r.arg {
-                Some(e) => Some(build_expr(e, cm, path, iface)?),
+                Some(e) => Some(build_expr(e, cm, path, iface, in_async)?),
                 None => None,
             },
             span: r.span,
@@ -1231,7 +1270,7 @@ fn build_stmt(
                 }
                 match &ax.left {
                     AssignTarget::Simple(SimpleAssignTarget::Ident(i)) => {
-                        let rhs = build_expr(&ax.right, cm, path, iface)?;
+                        let rhs = build_expr(&ax.right, cm, path, iface, in_async)?;
                         Ok(IRStmt::Assign {
                             name: i.id.sym.to_string(),
                             rhs,
@@ -1262,7 +1301,7 @@ fn build_stmt(
                                 ));
                             }
                         };
-                        let rhs = build_expr(&ax.right, cm, path, iface)?;
+                        let rhs = build_expr(&ax.right, cm, path, iface, in_async)?;
                         Ok(IRStmt::MemberAssign {
                             obj,
                             prop,
@@ -1279,22 +1318,24 @@ fn build_stmt(
                 }
             }
             _ => Ok(IRStmt::Expr {
-                expr: build_expr(&e.expr, cm, path, iface)?,
+                expr: build_expr(&e.expr, cm, path, iface, in_async)?,
                 span: e.span,
             }),
         },
         Stmt::If(i) => {
-            let cond = build_expr(&i.test, cm, path, iface)?;
+            let cond = build_expr(&i.test, cm, path, iface, in_async)?;
             let then_b = match &*i.cons {
-                Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface)?,
-                s => vec![build_stmt(s, cm, path, next_id, iface)?],
+                Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
+                s => vec![build_stmt(s, cm, path, next_id, iface, in_async)?],
             };
             let else_b = i
                 .alt
                 .as_ref()
                 .map(|alt| match &**alt {
-                    Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface),
-                    s => Ok(vec![build_stmt(s, cm, path, next_id, iface)?]),
+                    Stmt::Block(b) => {
+                        build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)
+                    }
+                    s => Ok(vec![build_stmt(s, cm, path, next_id, iface, in_async)?]),
                 })
                 .transpose()?;
             Ok(IRStmt::If {
@@ -1306,10 +1347,10 @@ fn build_stmt(
             })
         }
         Stmt::While(w) => {
-            let cond = build_expr(&w.test, cm, path, iface)?;
+            let cond = build_expr(&w.test, cm, path, iface, in_async)?;
             let body = match &*w.body {
-                Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface)?,
-                s => vec![build_stmt(s, cm, path, next_id, iface)?],
+                Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
+                s => vec![build_stmt(s, cm, path, next_id, iface, in_async)?],
             };
             Ok(IRStmt::While {
                 cond,
@@ -1320,10 +1361,10 @@ fn build_stmt(
         }
         Stmt::DoWhile(dw) => {
             let body_ir = match &*dw.body {
-                Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface)?,
-                s => vec![build_stmt(s, cm, path, next_id, iface)?],
+                Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
+                s => vec![build_stmt(s, cm, path, next_id, iface, in_async)?],
             };
-            let cond = build_expr(&dw.test, cm, path, iface)?;
+            let cond = build_expr(&dw.test, cm, path, iface, in_async)?;
             Ok(IRStmt::DoWhile {
                 body: body_ir,
                 cond,
@@ -1333,7 +1374,7 @@ fn build_stmt(
         }
         Stmt::Break(b) => Ok(IRStmt::Break { span: b.span }),
         Stmt::Continue(c) => Ok(IRStmt::Continue { span: c.span }),
-        Stmt::Decl(Decl::Var(v)) => build_var_decl_from_vardecl(v, cm, path, iface),
+        Stmt::Decl(Decl::Var(v)) => build_var_decl_from_vardecl(v, cm, path, iface, in_async),
         Stmt::Decl(Decl::Fn(f)) => {
             if f.declare {
                 return Err(diag_spanned(
@@ -1349,8 +1390,8 @@ fn build_stmt(
                 span: f.span(),
             })
         }
-        Stmt::Switch(sw) => build_switch_stmt(sw, cm, path, next_id, iface),
-        Stmt::ForIn(fi) => build_for_in_stmt(fi, cm, path, next_id, iface),
+        Stmt::Switch(sw) => build_switch_stmt(sw, cm, path, next_id, iface, in_async),
+        Stmt::ForIn(fi) => build_for_in_stmt(fi, cm, path, next_id, iface, in_async),
         Stmt::ForOf(_) => Err(diag_spanned(
             cm,
             path,
@@ -1447,10 +1488,10 @@ fn build_arrow_expr(
     let ret = ts_type_from_ann(&a.return_type, cm, path, a.span, iface, None)?;
     let body = match &*a.body {
         swc_ecma_ast::BlockStmtOrExpr::BlockStmt(b) => {
-            build_block_stmts(&b.stmts, cm, path, next_id, iface)?
+            build_block_stmts(&b.stmts, cm, path, next_id, iface, false)?
         }
         swc_ecma_ast::BlockStmtOrExpr::Expr(e) => vec![IRStmt::Return {
-            arg: Some(build_expr(e, cm, path, iface)?),
+            arg: Some(build_expr(e, cm, path, iface, false)?),
             span: e.span(),
         }],
     };
@@ -1467,8 +1508,23 @@ fn build_expr(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRExpr, CompileError> {
     match expr {
+        Expr::Await(a) => {
+            if !in_async {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    a,
+                    "`await` is only allowed inside `async function` bodies",
+                ));
+            }
+            Ok(IRExpr::Await {
+                arg: Box::new(build_expr(&a.arg, cm, path, iface, in_async)?),
+                span: a.span,
+            })
+        }
         Expr::Lit(ref l) => match l {
             Lit::Num(n) => {
                 let v = n.value;
@@ -1496,7 +1552,7 @@ fn build_expr(
             _ => Err(diag_spanned(cm, path, l, "unsupported literal")),
         },
         Expr::Ident(i) => Ok(IRExpr::Ident(i.sym.to_string(), i.span)),
-        Expr::Paren(p) => build_expr(&p.expr, cm, path, iface),
+        Expr::Paren(p) => build_expr(&p.expr, cm, path, iface, in_async),
         Expr::Unary(u) => {
             let op = match u.op {
                 UnaryOp::Minus => IRUnaryOp::Neg,
@@ -1513,7 +1569,7 @@ fn build_expr(
                     ));
                 }
             };
-            let arg = build_expr(&u.arg, cm, path, iface)?;
+            let arg = build_expr(&u.arg, cm, path, iface, in_async)?;
             Ok(IRExpr::Unary {
                 op,
                 arg: Box::new(arg),
@@ -1523,8 +1579,8 @@ fn build_expr(
         Expr::Bin(b) => {
             if b.op == BinaryOp::NullishCoalescing {
                 return Ok(IRExpr::NullishCoalesce {
-                    left: Box::new(build_expr(&b.left, cm, path, iface)?),
-                    right: Box::new(build_expr(&b.right, cm, path, iface)?),
+                    left: Box::new(build_expr(&b.left, cm, path, iface, in_async)?),
+                    right: Box::new(build_expr(&b.right, cm, path, iface, in_async)?),
                     span: b.span,
                 });
             }
@@ -1545,8 +1601,8 @@ fn build_expr(
                     return Err(diag_spanned(cm, path, b, "unsupported binary operator"));
                 }
             };
-            let left = build_expr(&b.left, cm, path, iface)?;
-            let right = build_expr(&b.right, cm, path, iface)?;
+            let left = build_expr(&b.left, cm, path, iface, in_async)?;
+            let right = build_expr(&b.right, cm, path, iface, in_async)?;
             Ok(IRExpr::Binary {
                 op,
                 left: Box::new(left),
@@ -1556,9 +1612,9 @@ fn build_expr(
             })
         }
         Expr::Cond(c) => Ok(IRExpr::Conditional {
-            test: Box::new(build_expr(&c.test, cm, path, iface)?),
-            cons: Box::new(build_expr(&c.cons, cm, path, iface)?),
-            alt: Box::new(build_expr(&c.alt, cm, path, iface)?),
+            test: Box::new(build_expr(&c.test, cm, path, iface, in_async)?),
+            cons: Box::new(build_expr(&c.cons, cm, path, iface, in_async)?),
+            alt: Box::new(build_expr(&c.alt, cm, path, iface, in_async)?),
             span: c.span,
             cond_ty: None,
         }),
@@ -1573,24 +1629,24 @@ fn build_expr(
             }
             let mut exprs = Vec::with_capacity(s.exprs.len());
             for e in &s.exprs {
-                exprs.push(build_expr(e, cm, path, iface)?);
+                exprs.push(build_expr(e, cm, path, iface, in_async)?);
             }
             Ok(IRExpr::Seq {
                 exprs,
                 span: s.span,
             })
         }
-        Expr::Tpl(t) => build_tpl(t, cm, path, iface),
+        Expr::Tpl(t) => build_tpl(t, cm, path, iface, in_async),
         Expr::TaggedTpl(t) => Err(diag_spanned(
             cm,
             path,
             t,
             "tagged template literals are not supported in this compiler version",
         )),
-        Expr::Member(m) => build_member_expr(m, cm, path, iface),
-        Expr::OptChain(o) => build_opt_chain_expr(o, cm, path, iface),
-        Expr::Array(a) => build_array_expr(a, cm, path, iface),
-        Expr::Object(o) => build_object_expr(o, cm, path, iface),
+        Expr::Member(m) => build_member_expr(m, cm, path, iface, in_async),
+        Expr::OptChain(o) => build_opt_chain_expr(o, cm, path, iface, in_async),
+        Expr::Array(a) => build_array_expr(a, cm, path, iface, in_async),
+        Expr::Object(o) => build_object_expr(o, cm, path, iface, in_async),
         Expr::This(t) => Ok(IRExpr::This(t.span)),
         Expr::New(n) => {
             let callee = match &*n.callee {
@@ -1615,7 +1671,7 @@ fn build_expr(
                             "spread arguments are not supported",
                         ));
                     }
-                    args.push(build_expr(&x.expr, cm, path, iface)?);
+                    args.push(build_expr(&x.expr, cm, path, iface, in_async)?);
                 }
             }
             Ok(IRExpr::Call {
@@ -1636,7 +1692,7 @@ fn build_expr(
                 for a in &c.args {
                     match a {
                         ExprOrSpread { spread: None, expr } => {
-                            args.push(build_expr(expr, cm, path, iface)?);
+                            args.push(build_expr(expr, cm, path, iface, in_async)?);
                         }
                         _ => {
                             return Err(diag_spanned(
@@ -1656,6 +1712,42 @@ fn build_expr(
                 });
             }
             if let Callee::Expr(ce) = &c.callee {
+                if let Expr::Ident(fname) = &**ce {
+                    if fname.sym == "fetchText" {
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`fetchText` does not take type arguments",
+                            ));
+                        }
+                        if c.args.len() != 1 {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`fetchText` expects exactly one argument (url: string)",
+                            ));
+                        }
+                        let a0 = match &c.args[0] {
+                            ExprOrSpread { spread: None, expr } => expr,
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "spread arguments are not supported",
+                                ));
+                            }
+                        };
+                        let url = build_expr(a0, cm, path, iface, in_async)?;
+                        return Ok(IRExpr::FetchText {
+                            url: Box::new(url),
+                            span: c.span,
+                        });
+                    }
+                }
                 if let Expr::Member(m) = &**ce {
                     if let Expr::Ident(obj) = &*m.obj {
                         if obj.sym == "console" {
@@ -1676,7 +1768,7 @@ fn build_expr(
                                 for a in &c.args {
                                     match a {
                                         ExprOrSpread { spread: None, expr } => {
-                                            args.push(build_expr(expr, cm, path, iface)?);
+                                            args.push(build_expr(expr, cm, path, iface, in_async)?);
                                         }
                                         _ => {
                                             return Err(diag_spanned(
@@ -1732,7 +1824,7 @@ fn build_expr(
                                 for a in &c.args {
                                     match a {
                                         ExprOrSpread { spread: None, expr } => {
-                                            args.push(build_expr(expr, cm, path, iface)?);
+                                            args.push(build_expr(expr, cm, path, iface, in_async)?);
                                         }
                                         _ => {
                                             return Err(diag_spanned(
@@ -1757,7 +1849,7 @@ fn build_expr(
                         for a in &c.args {
                             match a {
                                 ExprOrSpread { spread: None, expr } => {
-                                    args.push(build_expr(expr, cm, path, iface)?);
+                                    args.push(build_expr(expr, cm, path, iface, in_async)?);
                                 }
                                 _ => {
                                     return Err(diag_spanned(
@@ -1769,7 +1861,7 @@ fn build_expr(
                                 }
                             }
                         }
-                        let receiver = Box::new(build_expr(&m.obj, cm, path, iface)?);
+                        let receiver = Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);
                         return Ok(IRExpr::MethodCall {
                             receiver,
                             method: prop.sym.to_string(),
@@ -1790,7 +1882,7 @@ fn build_expr(
                     for a in &c.args {
                         match a {
                             ExprOrSpread { spread: None, expr } => {
-                                args.push(build_expr(expr, cm, path, iface)?);
+                                args.push(build_expr(expr, cm, path, iface, in_async)?);
                             }
                             _ => {
                                 return Err(diag_spanned(
@@ -1826,6 +1918,7 @@ fn build_tpl(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRExpr, CompileError> {
     if t.quasis.len() != t.exprs.len() + 1 {
         return Err(diag_spanned(
@@ -1845,6 +1938,7 @@ fn build_tpl(
                 cm,
                 path,
                 iface,
+                in_async,
             )?)));
         }
     }
@@ -1859,8 +1953,9 @@ fn build_member_expr(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRExpr, CompileError> {
-    let obj = Box::new(build_expr(&m.obj, cm, path, iface)?);
+    let obj = Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);
     match &m.prop {
         MemberProp::Ident(id) => Ok(IRExpr::Member {
             obj,
@@ -1870,7 +1965,7 @@ fn build_member_expr(
         }),
         MemberProp::Computed(c) => Ok(IRExpr::Index {
             obj,
-            index: Box::new(build_expr(&c.expr, cm, path, iface)?),
+            index: Box::new(build_expr(&c.expr, cm, path, iface, in_async)?),
             span: m.span,
         }),
         _ => Err(diag_spanned(
@@ -1887,6 +1982,7 @@ fn build_opt_chain_expr(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRExpr, CompileError> {
     match &*o.base {
         OptChainBase::Call(_) => Err(diag_spanned(
@@ -1909,14 +2005,14 @@ fn build_opt_chain_expr(
             };
             if o.optional {
                 Ok(IRExpr::OptionalMember {
-                    obj: Box::new(build_expr(&m.obj, cm, path, iface)?),
+                    obj: Box::new(build_expr(&m.obj, cm, path, iface, in_async)?),
                     prop,
                     span: o.span,
                     length_dispatch: None,
                 })
             } else {
                 Ok(IRExpr::Member {
-                    obj: Box::new(build_expr(&m.obj, cm, path, iface)?),
+                    obj: Box::new(build_expr(&m.obj, cm, path, iface, in_async)?),
                     prop,
                     span: o.span,
                     length_dispatch: None,
@@ -1931,6 +2027,7 @@ fn build_array_expr(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRExpr, CompileError> {
     let mut elems = Vec::with_capacity(a.elems.len());
     for it in &a.elems {
@@ -1950,7 +2047,7 @@ fn build_array_expr(
                 "array spread elements are not supported in this compiler version",
             ));
         }
-        elems.push(build_expr(&e.expr, cm, path, iface)?);
+        elems.push(build_expr(&e.expr, cm, path, iface, in_async)?);
     }
     Ok(IRExpr::ArrayLit {
         elems,
@@ -1963,6 +2060,7 @@ fn build_object_expr(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    in_async: bool,
 ) -> Result<IRExpr, CompileError> {
     let mut fields: Vec<(String, IRExpr)> = Vec::new();
     for p in &o.props {
@@ -1989,7 +2087,7 @@ fn build_object_expr(
                             ));
                         }
                     };
-                    fields.push((k, build_expr(value, cm, path, iface)?));
+                    fields.push((k, build_expr(value, cm, path, iface, in_async)?));
                 }
                 _ => {
                     return Err(diag_spanned(

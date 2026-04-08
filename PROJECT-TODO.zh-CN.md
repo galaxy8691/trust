@@ -42,6 +42,7 @@
 
 ### 1.3 表达式扩展
 
+- [~] **`async` / `await` / `Promise` / `fetchText`（MVP）**：已实现受限子集；完整异步控制流、`Promise` 组合子、与 Node/browser `fetch` 对齐等仍属后续工作。
 - [x] **成员访问与调用链**：受限子集；当前仅 `string` 的 `.length`（见 `member_length_ok.ts`）；一般 `obj.m()` / 链式调用待扩展。
 - [x] **可选链 / 空值合并**：受限子集已支持（`obj?.prop`、`??`；见 `optional_ok.ts`、`nullish_ok.ts`）；完整语义依赖 §3.3。
 - [x] **逻辑与短路**：`&&`、`||`；`boolean` 与 `number` 真值（`!= 0`）已支持，结果类型为 `boolean`（见 `logical_bool.ts`、`logical_truthy_ok.ts`）；与 TypeScript 值保留式 `&&`/`||` 仍不同；**硬类型下**结果类型固定为 `boolean`，更复杂真值或联合操作数仍受限。

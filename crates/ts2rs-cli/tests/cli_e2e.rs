@@ -153,6 +153,29 @@ fn compile_void_main_has_no_println_value() {
     assert!(!body.contains("println!(\"{}\", ts_main())"));
 }
 
+#[test]
+fn compile_async_mvp_writes_tokio_and_await() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("async_mvp_compile_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("#[tokio::main]"), "{body}");
+    assert!(body.contains("async fn ts_main"), "{body}");
+    assert!(body.contains(".await"), "{body}");
+    assert!(body.contains("__ts2rs_fetch_text"), "{body}");
+}
+
 // --- §3.1 符号表 / void+log 分支 ---
 
 #[test]

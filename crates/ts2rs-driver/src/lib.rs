@@ -132,6 +132,19 @@ mod tests {
     }
 
     #[test]
+    fn write_minimal_crate_injects_tokio_reqwest_when_generated_rust_has_tokio_main() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = "#[tokio::main]\nasync fn main() {}\n";
+        crate_writer::write_minimal_crate(dir.path(), src, &RustBuildOptions::default())
+            .expect("write crate");
+        let toml = fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            toml.contains("tokio =") && toml.contains("reqwest ="),
+            "{toml}"
+        );
+    }
+
+    #[test]
     fn debug_build_writes_binary_under_target_debug() {
         let (_dir, exe) = build_rust_to_executable_with_options(
             "fn main() { println!(\"ok\"); }",

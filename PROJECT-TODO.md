@@ -44,6 +44,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 1.3 Expressions
 
+- [~] **`async` / `await` / `Promise` / HTTP `fetchText` (MVP)**: [`IRFunction::is_async`](crates/ts2rs-hir/src/ir.rs), [`IRExpr::Await`](crates/ts2rs-hir/src/ir.rs) / [`FetchText`](crates/ts2rs-hir/src/ir.rs), [`#[tokio::main]`](crates/ts2rs-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/ts2rs-driver/src/crate_writer.rs). **Still out of scope for this milestone**: general `await` in arbitrary control flow, `Promise.all` / `.then`, full browser `fetch` / TLS parity with Node.
 - [x] **Member access and call chains**: limited subset; today only `string.length` (`member_length_ok.ts`); general `obj.m()` / chains TBD.
 - [x] **Optional chaining / nullish coalescing**: limited subset (`obj?.prop`, `??`; `optional_ok.ts`, `nullish_ok.ts`); full semantics tied to §3.3.
 - [x] **Logical short-circuit**: `&&`, `||`; `boolean` and `number` truthiness (`!= 0`), result type `boolean` (`logical_bool.ts`, `logical_truthy_ok.ts`); differs from TS value-preserving `&&`/`||`; under **hard typing** result is `boolean`; more complex truthiness or unions still limited.

@@ -111,6 +111,7 @@ flowchart LR
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types`](crates/ts2rs-hir/src/build.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化子集：泛型调用需显式类型实参；泛型声明可解析；更宽泛语义仍拒绝 |
 | 高阶函数 | 部分支持 | 当前支持函数类型注解与带类型箭头闭包（codegen 子集为 `(number) => number`）；支持变量调用 `f(...)`、函数作参数与返回值 |
+| `async` / `await` / `Promise` / `fetchText` | 部分支持 | MVP：`async function` 且返回 `Promise<T>`（`T` 为 `number` \| `string` \| `void`）；`await fetchText(url)` 与 `await` 其他 **async** 顶层函数；async 函数体内**不允许** `if` / 循环 / 嵌套 `function`；临时 crate 注入 `tokio` 与 `reqwest`（rustls）；见 `async_mvp_compile_ok.ts`、`compile_async_mvp_writes_tokio_and_await` |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
 

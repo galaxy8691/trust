@@ -15,6 +15,7 @@ struct FnSig {
     type_params: Vec<String>,
     params: Vec<TsType>,
     ret: TsType,
+    is_async: bool,
 }
 
 #[derive(Clone)]
@@ -68,6 +69,7 @@ fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
             params: params.iter().map(|x| subst_type_local(x, subst)).collect(),
             ret: Box::new(subst_type_local(ret, subst)),
         },
+        TsType::Promise(inner) => TsType::Promise(Box::new(subst_type_local(inner, subst))),
         _ => t.clone(),
     }
 }
@@ -85,6 +87,7 @@ pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, Compil
                     type_params: f.type_params.clone(),
                     params: f.params.iter().map(|(_, t)| t.clone()).collect(),
                     ret: f.ret.clone(),
+                    is_async: f.is_async,
                 },
             )
             .is_some()
@@ -250,6 +253,7 @@ fn collect_fn_sigs_in_stmts(stmts: &[IRStmt]) -> HashMap<String, FnSig> {
                     type_params: func.type_params.clone(),
                     params: func.params.iter().map(|(_, t)| t.clone()).collect(),
                     ret: func.ret.clone(),
+                    is_async: func.is_async,
                 },
             )
             .is_some()
@@ -289,6 +293,11 @@ fn check_function(
         }
     }
     stack.push(root);
+
+    if f.is_async {
+        check_async_mvp_stmts(&f.body, cm, path, f.span)?;
+        reject_naked_fetchtext_in_stmts(&f.body, cm, path)?;
+    }
 
     let mut reachable = true;
     check_stmts(
@@ -481,6 +490,173 @@ fn stmt_span(s: &IRStmt) -> Span {
         | IRStmt::Continue { span }
         | IRStmt::FnDecl { span, .. } => *span,
     }
+}
+
+fn check_async_mvp_stmts(
+    stmts: &[IRStmt],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    _fn_span: Span,
+) -> Result<(), CompileError> {
+    for s in stmts {
+        match s {
+            IRStmt::If { span, .. }
+            | IRStmt::While { span, .. }
+            | IRStmt::ForIn { span, .. }
+            | IRStmt::DoWhile { span, .. } => {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "async MVP: `if` / `while` / `for..in` / `do..while` are not allowed",
+                ));
+            }
+            IRStmt::Break { span } | IRStmt::Continue { span } => {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "async MVP: `break` / `continue` are not allowed",
+                ));
+            }
+            IRStmt::FnDecl { span, .. } => {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "async MVP: nested `function` declarations are not allowed",
+                ));
+            }
+            IRStmt::Block { stmts: inner, .. } => {
+                check_async_mvp_stmts(inner, cm, path, _fn_span)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn reject_naked_fetchtext_in_stmts(
+    stmts: &[IRStmt],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+) -> Result<(), CompileError> {
+    for s in stmts {
+        match s {
+            IRStmt::Let { init, span, .. } => {
+                if let Some(e) = init {
+                    if matches!(e, IRExpr::FetchText { .. }) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`fetchText(...)` must be used as `await fetchText(...)`",
+                        ));
+                    }
+                }
+            }
+            IRStmt::Return { arg: Some(e), span } => {
+                if matches!(e, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+            }
+            IRStmt::Expr { expr, span } => {
+                if matches!(expr, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+            }
+            IRStmt::Assign { rhs, span, .. } => {
+                if matches!(rhs, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+            }
+            IRStmt::MemberAssign { rhs, span, .. } => {
+                if matches!(rhs, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+            }
+            IRStmt::Block { stmts: inner, .. } => {
+                reject_naked_fetchtext_in_stmts(inner, cm, path)?;
+            }
+            IRStmt::If {
+                cond,
+                then_b,
+                else_b,
+                ..
+            } => {
+                if matches!(cond, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        stmt_span(s),
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+                reject_naked_fetchtext_in_stmts(then_b, cm, path)?;
+                if let Some(eb) = else_b {
+                    reject_naked_fetchtext_in_stmts(eb, cm, path)?;
+                }
+            }
+            IRStmt::While { cond, body, .. } => {
+                if matches!(cond, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        stmt_span(s),
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+                reject_naked_fetchtext_in_stmts(body, cm, path)?;
+            }
+            IRStmt::ForIn { target, body, .. } => {
+                if matches!(target, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        stmt_span(s),
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+                reject_naked_fetchtext_in_stmts(body, cm, path)?;
+            }
+            IRStmt::DoWhile { body, cond, .. } => {
+                reject_naked_fetchtext_in_stmts(body, cm, path)?;
+                if matches!(cond, IRExpr::FetchText { .. }) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        stmt_span(s),
+                        "`fetchText(...)` must be used as `await fetchText(...)`",
+                    ));
+                }
+            }
+            IRStmt::FnDecl { func, .. } => {
+                reject_naked_fetchtext_in_stmts(&func.body, cm, path)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// 当前语句执行后，同一块内后续语句是否均不可达（用于不可达警告）。
@@ -1024,9 +1200,14 @@ fn infer_expr_mut(
                 return Ok(b.ty.clone());
             }
             if let Some(sig) = globals.get(name) {
+                let ret = if sig.is_async {
+                    TsType::Promise(Box::new(sig.ret.clone()))
+                } else {
+                    sig.ret.clone()
+                };
                 return Ok(TsType::Fn {
                     params: sig.params.clone(),
-                    ret: Box::new(sig.ret.clone()),
+                    ret: Box::new(ret),
                 });
             }
             Err(diag(
@@ -1130,15 +1311,20 @@ fn infer_expr_mut(
                     sig.ret.clone(),
                     sig.type_params.clone(),
                     true,
+                    sig.is_async,
                 )
             });
             let from_local = lookup(stack, callee).and_then(|b| match &b.ty {
-                TsType::Fn { params, ret } => {
-                    Some((params.clone(), (**ret).clone(), Vec::<String>::new(), false))
-                }
+                TsType::Fn { params, ret } => Some((
+                    params.clone(),
+                    (**ret).clone(),
+                    Vec::<String>::new(),
+                    false,
+                    false,
+                )),
                 _ => None,
             });
-            let Some((sig_params, sig_ret, sig_type_params, allow_type_args)) =
+            let Some((sig_params, sig_ret, sig_type_params, allow_type_args, callee_is_async)) =
                 from_global.or(from_local)
             else {
                 return Err(diag(
@@ -1197,7 +1383,12 @@ fn infer_expr_mut(
                     ));
                 }
             }
-            Ok(subst_type_local(&sig_ret, &subst))
+            let ret = subst_type_local(&sig_ret, &subst);
+            if callee_is_async {
+                Ok(TsType::Promise(Box::new(ret)))
+            } else {
+                Ok(ret)
+            }
         }
         IRExpr::MethodCall {
             receiver,
@@ -1525,6 +1716,41 @@ fn infer_expr_mut(
                     *span,
                     "index access currently supports only `number[]`",
                 ))
+            }
+        }
+        IRExpr::FetchText { url, span } => {
+            let t = infer_expr_mut(url, stack, globals, cm, path)?;
+            if !is_stringish(&t) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`fetchText` argument must be `string`",
+                ));
+            }
+            Ok(TsType::Promise(Box::new(TsType::String)))
+        }
+        IRExpr::Await { arg, span } => {
+            match &**arg {
+                IRExpr::FetchText { .. } | IRExpr::Call { .. } => {}
+                _ => {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "async MVP: `await` only supports `fetchText(...)` or an async function call",
+                    ));
+                }
+            }
+            let inner = infer_expr_mut(arg, stack, globals, cm, path)?;
+            match inner {
+                TsType::Promise(t) => Ok(*t),
+                _ => Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`await` expects a `Promise<T>` value",
+                )),
             }
         }
     }

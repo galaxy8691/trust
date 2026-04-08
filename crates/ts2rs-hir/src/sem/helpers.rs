@@ -71,6 +71,9 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
         }
         return type_assignable(er, gr);
     }
+    if let (TsType::Promise(e), TsType::Promise(g)) = (expected, got) {
+        return type_assignable(e, g);
+    }
     if let (TsType::ClassInstance(a), TsType::ClassInstance(b)) = (expected, got) {
         return a == b;
     }

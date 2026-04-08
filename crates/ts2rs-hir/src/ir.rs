@@ -43,6 +43,8 @@ pub enum TsType {
     },
     /// 类实例（OO 子集）
     ClassInstance(String),
+    /// `Promise<T>`（async / `fetchText` 等）
+    Promise(Box<TsType>),
 }
 
 /// 稳定全序，用于联合类型规范化与 `B | A` 与 `A | B` 相等。
@@ -61,6 +63,7 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
         (ObjectNum(x), ObjectNum(y)) => x.cmp(y),
         (TypeParam(x), TypeParam(y)) => x.cmp(y),
         (ClassInstance(x), ClassInstance(y)) => x.cmp(y),
+        (Promise(a), Promise(b)) => cmp_ts_type(a, b),
         (
             Fn {
                 params: ap,
@@ -120,7 +123,8 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::TypeParam(_) => 11,
         TsType::Fn { .. } => 12,
         TsType::ClassInstance(_) => 13,
-        TsType::Union(_) => 14,
+        TsType::Promise(_) => 14,
+        TsType::Union(_) => 15,
     }
 }
 
@@ -321,6 +325,16 @@ pub enum IRExpr {
     This(Span),
     /// `super`
     Super(Span),
+    /// `await expr`（`arg` 须为 `Promise<T>`，整体类型为 `T`）
+    Await {
+        arg: Box<IRExpr>,
+        span: Span,
+    },
+    /// 内建 `fetchText(url: string)` → `Promise<string>`（须由 `await` 包裹）
+    FetchText {
+        url: Box<IRExpr>,
+        span: Span,
+    },
 }
 
 /// 模板字面量片段
@@ -474,6 +488,8 @@ pub struct IRFunction {
     pub source_path: String,
     /// 单态化实例来源（如 `foo<number>`），用于诊断可读性。
     pub mono_origin: Option<String>,
+    /// `async function`；`ret` 存 **兑现类型** `T`（`Promise<T>` 已剥开）。
+    pub is_async: bool,
 }
 
 impl fmt::Debug for IRFunction {
@@ -488,6 +504,7 @@ impl fmt::Debug for IRFunction {
             .field("span", &self.span)
             .field("source_path", &self.source_path)
             .field("mono_origin", &self.mono_origin)
+            .field("is_async", &self.is_async)
             .finish()
     }
 }

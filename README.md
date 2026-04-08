@@ -106,6 +106,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
 | Generics / type args | Partial | Monomorphization subset: explicit type args required at generic call sites; generic declarations are allowed; unsupported broad shapes still rejected |
 | Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` closure codegen path); variable-call `f(...)`, function args/returns covered by e2e fixtures |
+| `async` / `await` / `Promise` / `fetchText` | Partial | MVP: `async function` with return `Promise<T>` (`T` is `number` \| `string` \| `void`); `await fetchText(url: string)` and `await` other **async** top-level functions; **no** `if` / loops / nested `function` in async bodies; temp crates get `tokio` + `reqwest` (rustls); see `async_mvp_compile_ok.ts`, `compile_async_mvp_writes_tokio_and_await` |
 | Class / this / extends / super | Partial | Class subset is lowered to constructor/method functions, with sem checks for extends graph, `super(...)` placement, and baseline `override`; e2e: `class_*` fixtures |
 | Full TypeScript / `tsc` | Not implemented | Long-term |
 

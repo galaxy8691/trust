@@ -138,6 +138,27 @@ pub(super) fn ts_type_from_ast(
             match &r.type_name {
                 TsEntityName::Ident(id) => {
                     let name = id.sym.to_string();
+                    if name == "Promise" {
+                        let Some(args) = &r.type_params else {
+                            return Err(diag(
+                                cm,
+                                path,
+                                r.span,
+                                "`Promise` requires one type argument: `Promise<T>`",
+                            ));
+                        };
+                        if args.params.len() != 1 {
+                            return Err(diag(
+                                cm,
+                                path,
+                                r.span,
+                                "`Promise<T>` must have exactly one type argument",
+                            ));
+                        }
+                        let inner =
+                            ts_type_from_ast(&args.params[0], cm, path, iface, type_params)?;
+                        return Ok(TsType::Promise(Box::new(inner)));
+                    }
                     let base = iface.get(&name).cloned().ok_or_else(|| {
                         diag(
                             cm,
