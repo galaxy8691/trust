@@ -1,17 +1,24 @@
-// test-ts：多文件手工回归 — 入口须为 `export function main`；依赖同目录 `./math.ts`。
+// test-ts：多文件手工回归 — 入口须为 `export function main`；依赖 `./math.ts`（math 再依赖 `./strutil.ts`）。
 // 运行：`cargo run -p ts2rs-cli -- run test-ts/main.ts`
-// 会先打印 ok1、cmp1、void_fn1、out=155502，最后一行打印 main 返回值（与单文件版逻辑一致）。
+// stdout 依次：`ok 1`、`cmp 1`、`void_fn 1`；随后一行 `out= 15 5 50 2`（空格分隔）；最后一行 stdout 为 main 返回值（当前实现为 13808）。
+// stderr：`err 1` 与单独一行 `2`（console.debug）。
 // 类型 `interface` / `type` 仅在本文件使用（具名表不跨模块合并，见 README）。
 
 import {
   abs_diff,
   add,
+  clamp,
   div,
   early,
+  eq,
   fib,
   fib_loop,
   greater,
+  ipow,
+  len_label_twice,
+  math_builtin_sum,
   mul,
+  sign,
   sub,
 } from "./math.ts";
 
@@ -127,6 +134,12 @@ export function main(): number {
 
   void_log_once();
 
+  console.error("err", 1);
+  console.debug(2);
+
+  let olen: { length: number; tag: number } = { length: 7, tag: 1 };
+  acc = acc + olen.length;
+
   let x: number = 10;
   let y: number = 5;
   let sum: number = add(x, y);
@@ -145,6 +158,15 @@ export function main(): number {
 
   {
   }
+  if (eq(3, 3)) {
+    acc = acc + 1;
+  }
+  acc = acc + math_builtin_sum();
+  acc = acc + clamp(99, 0, 50);
+  acc = acc + sign(-2) + sign(0) + sign(4);
+  acc = acc + ipow(2, 5);
+  acc = acc + len_label_twice();
+
   acc = acc + fib(20);
   acc = acc + fib_loop(20);
 

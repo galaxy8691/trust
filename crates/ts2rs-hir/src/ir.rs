@@ -137,6 +137,25 @@ pub enum IRUnaryOp {
     Neg,
 }
 
+/// `obj.length` 的代码生成策略（由语义阶段在 `prop == "length"` 时写入）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberLengthDispatch {
+    /// JS `String.prototype.length`（UTF-16 码元数）
+    JsStringUtf16,
+    /// `number[]` → `Vec<i32>::len`
+    VecLen,
+}
+
+/// `Math.abs` / `Math.min` 等受限内建（整数 `number` 子集）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MathBuiltinKind {
+    Abs,
+    Min,
+    Max,
+    Floor,
+    Ceil,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryKind {
     Int,
@@ -172,9 +191,18 @@ pub enum IRExpr {
         args: Vec<IRExpr>,
         span: Span,
     },
-    /// `console.log(...)` 内建
+    /// `obj.m(args)`：脱糖为全局函数 `m(receiver, ...args)`（`receiver` 为 `obj` 的值）。
+    MethodCall {
+        receiver: Box<IRExpr>,
+        method: String,
+        args: Vec<IRExpr>,
+        span: Span,
+    },
+    /// `console.log` / `console.error` / `console.debug`（`stderr: true` 时生成 `eprintln!`）
     BuiltinLog {
         args: Vec<IRExpr>,
+        /// `true`：`error` / `debug`；`false`：`log`
+        stderr: bool,
         span: Span,
     },
     /// `cond ? a : b`（`cond_ty` 由语义阶段填入）
@@ -200,6 +228,8 @@ pub enum IRExpr {
         obj: Box<IRExpr>,
         prop: String,
         span: Span,
+        /// `prop == "length"` 时由 `sem` 填入；`None` 表示对象数字字段等走 `HashMap::get`
+        length_dispatch: Option<MemberLengthDispatch>,
     },
     /// 字面量 `null`
     Null(Span),
@@ -215,6 +245,13 @@ pub enum IRExpr {
     OptionalMember {
         obj: Box<IRExpr>,
         prop: String,
+        span: Span,
+        length_dispatch: Option<MemberLengthDispatch>,
+    },
+    /// `Math.abs` / `Math.min` / …（受限子集）
+    MathBuiltin {
+        kind: MathBuiltinKind,
+        args: Vec<IRExpr>,
         span: Span,
     },
     /// 数组字面量 `[a, b, ...]`（无空洞、无 spread）
@@ -251,7 +288,8 @@ pub enum IRStmt {
     Let {
         name: String,
         ty: TsType,
-        init: IRExpr,
+        /// `None` = `let x: T;`（须由语义明确赋值后再读）
+        init: Option<IRExpr>,
         /// `true` = `let`（可赋值），`false` = `const`
         mutable: bool,
         span: Span,

@@ -1058,8 +1058,11 @@ name = "ts2rs-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "serde",
+ "serde_json",
  "tempfile",
  "ts2rs-driver",
+ "ts2rs-hir",
  "ts2rs-lower",
  "ts2rs-parser",
 ]

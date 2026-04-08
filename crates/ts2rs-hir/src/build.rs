@@ -568,17 +568,26 @@ fn build_var_decl_from_vardecl(
             ));
         }
     };
-    let init = d
-        .init
-        .as_ref()
-        .ok_or_else(|| diag_spanned(cm, path, v, "initializer is required"))?;
     let ty = ts_type_from_pat_ann(&d.name, cm, path, iface)?;
-    let expr = build_expr(init, cm, path, iface)?;
     let mutable = matches!(v.kind, VarDeclKind::Let | VarDeclKind::Var);
+    let init = match &d.init {
+        Some(init_expr) => Some(build_expr(init_expr, cm, path, iface)?),
+        None => {
+            if !mutable {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    v,
+                    "`const` requires an initializer",
+                ));
+            }
+            None
+        }
+    };
     Ok(IRStmt::Let {
         name,
         ty,
-        init: expr,
+        init,
         mutable,
         span: v.span,
     })
@@ -1047,28 +1056,129 @@ fn build_expr(
                     if let Expr::Ident(obj) = &*m.obj {
                         if obj.sym == "console" {
                             if let MemberProp::Ident(prop) = &m.prop {
-                                if prop.sym == "log" {
-                                    let mut args = Vec::new();
-                                    for a in &c.args {
-                                        match a {
-                                            ExprOrSpread { spread: None, expr } => {
-                                                args.push(build_expr(expr, cm, path, iface)?);
-                                            }
-                                            _ => {
-                                                return Err(diag_spanned(
-                                                    cm,
-                                                    path,
-                                                    c,
-                                                    "spread arguments are not supported",
-                                                ));
-                                            }
+                                let stderr = match prop.sym.as_ref() {
+                                    "log" => false,
+                                    "error" | "debug" => true,
+                                    _ => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "only `console.log`, `console.error`, and `console.debug` are supported",
+                                        ));
+                                    }
+                                };
+                                let mut args = Vec::new();
+                                for a in &c.args {
+                                    match a {
+                                        ExprOrSpread { spread: None, expr } => {
+                                            args.push(build_expr(expr, cm, path, iface)?);
+                                        }
+                                        _ => {
+                                            return Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                c,
+                                                "spread arguments are not supported",
+                                            ));
                                         }
                                     }
-                                    return Ok(IRExpr::BuiltinLog { args, span: c.span });
                                 }
+                                return Ok(IRExpr::BuiltinLog {
+                                    args,
+                                    stderr,
+                                    span: c.span,
+                                });
+                            }
+                        }
+                        if obj.sym == "Math" {
+                            if let MemberProp::Ident(prop) = &m.prop {
+                                let kind = match (prop.sym.as_ref(), c.args.len()) {
+                                    ("abs", 1) => MathBuiltinKind::Abs,
+                                    ("floor", 1) => MathBuiltinKind::Floor,
+                                    ("ceil", 1) => MathBuiltinKind::Ceil,
+                                    ("min", 2) => MathBuiltinKind::Min,
+                                    ("max", 2) => MathBuiltinKind::Max,
+                                    ("abs" | "floor" | "ceil", _) => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`Math.abs`, `Math.floor`, and `Math.ceil` expect exactly 1 argument",
+                                        ));
+                                    }
+                                    ("min" | "max", _) => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`Math.min` and `Math.max` expect exactly 2 arguments",
+                                        ));
+                                    }
+                                    _ => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "only `Math.abs`, `Math.min`, `Math.max`, `Math.floor`, and `Math.ceil` are supported",
+                                        ));
+                                    }
+                                };
+                                let mut args = Vec::new();
+                                for a in &c.args {
+                                    match a {
+                                        ExprOrSpread { spread: None, expr } => {
+                                            args.push(build_expr(expr, cm, path, iface)?);
+                                        }
+                                        _ => {
+                                            return Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                c,
+                                                "spread arguments are not supported",
+                                            ));
+                                        }
+                                    }
+                                }
+                                return Ok(IRExpr::MathBuiltin {
+                                    kind,
+                                    args,
+                                    span: c.span,
+                                });
                             }
                         }
                     }
+                    if let MemberProp::Ident(prop) = &m.prop {
+                        let mut args = Vec::new();
+                        for a in &c.args {
+                            match a {
+                                ExprOrSpread { spread: None, expr } => {
+                                    args.push(build_expr(expr, cm, path, iface)?);
+                                }
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "spread arguments are not supported",
+                                    ));
+                                }
+                            }
+                        }
+                        let receiver = Box::new(build_expr(&m.obj, cm, path, iface)?);
+                        return Ok(IRExpr::MethodCall {
+                            receiver,
+                            method: prop.sym.to_string(),
+                            args,
+                            span: c.span,
+                        });
+                    }
+                    return Err(diag_spanned(
+                        cm,
+                        path,
+                        c,
+                        "computed method calls `obj[expr](...)` are not supported in this compiler version",
+                    ));
                 }
                 if let Expr::Ident(i) = &**ce {
                     let mut args = Vec::new();
@@ -1098,7 +1208,7 @@ fn build_expr(
                 cm,
                 path,
                 c,
-                "only direct calls `f(...)` or `console.log(...)` are supported",
+                "only direct calls `f(...)`, `obj.m(...)` (desugared to global `m`), `console.log` / `console.error` / `console.debug`, or `Math.*` builtins are supported",
             ))
         }
         _ => Err(diag_spanned(cm, path, expr, "unsupported expression")),
@@ -1145,6 +1255,7 @@ fn build_member_expr(
             obj,
             prop: id.sym.to_string(),
             span: m.span,
+            length_dispatch: None,
         }),
         MemberProp::Computed(c) => Ok(IRExpr::Index {
             obj,
@@ -1190,12 +1301,14 @@ fn build_opt_chain_expr(
                     obj: Box::new(build_expr(&m.obj, cm, path, iface)?),
                     prop,
                     span: o.span,
+                    length_dispatch: None,
                 })
             } else {
                 Ok(IRExpr::Member {
                     obj: Box::new(build_expr(&m.obj, cm, path, iface)?),
                     prop,
                     span: o.span,
+                    length_dispatch: None,
                 })
             }
         }

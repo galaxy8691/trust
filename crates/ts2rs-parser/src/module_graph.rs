@@ -48,6 +48,15 @@ impl ParsedModuleGraph {
 
 /// 从入口 `.ts` 文件解析所有可达模块（相对路径 import）。
 pub fn parse_module_graph(entry: &Path) -> Result<ParsedModuleGraph, ParseError> {
+    parse_module_graph_with_extra_roots(entry, &[])
+}
+
+/// 从入口 DFS 解析依赖；再对每个 `extra` 根路径若尚未被访问则继续 DFS。
+/// `extra` 为空时与 [`parse_module_graph`] 一致。
+pub fn parse_module_graph_with_extra_roots(
+    entry: &Path,
+    extra: &[PathBuf],
+) -> Result<ParsedModuleGraph, ParseError> {
     let entry_canon = entry
         .canonicalize()
         .unwrap_or_else(|_| entry.to_path_buf());
@@ -55,6 +64,9 @@ pub fn parse_module_graph(entry: &Path) -> Result<ParsedModuleGraph, ParseError>
     let mut stack = HashSet::<PathBuf>::new();
     let mut modules = Vec::new();
     visit_module(entry, &mut visited, &mut stack, &mut modules)?;
+    for p in extra {
+        visit_module(p, &mut visited, &mut stack, &mut modules)?;
+    }
     Ok(ParsedModuleGraph {
         modules,
         entry: entry_canon,
@@ -235,6 +247,24 @@ mod tests {
             s.contains("circular import"),
             "expected circular diagnostic, got: {s}"
         );
+    }
+
+    #[test]
+    fn extra_root_includes_unreachable_file() {
+        let dir = tempdir().unwrap();
+        let main = dir.path().join("main.ts");
+        let side = dir.path().join("side.ts");
+        std::fs::write(
+            &main,
+            "export function main(): number { return 0; }\n",
+        )
+        .unwrap();
+        std::fs::write(&side, "export function side(): number { return 1; }\n").unwrap();
+        let g = parse_module_graph_with_extra_roots(&main, std::slice::from_ref(&side)).unwrap();
+        let paths: Vec<_> = g.modules.iter().map(|m| m.path.file_name().unwrap()).collect();
+        assert_eq!(paths.len(), 2);
+        assert!(paths.iter().any(|n| *n == "main.ts"));
+        assert!(paths.iter().any(|n| *n == "side.ts"));
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::path::Path;
 
 use swc_common::{sync::Lrc, SourceMap, Span, DUMMY_SP};
 
-use crate::error::{diag, CompileError};
+use crate::error::{diag, warn, CompileError, CompileWarning};
 use crate::ir::*;
 
 #[derive(Clone)]
@@ -18,6 +18,7 @@ struct FnSig {
 struct Binding {
     ty: TsType,
     mutable: bool,
+    initialized: bool,
 }
 
 fn is_numberish(t: &TsType) -> bool {
@@ -106,7 +107,7 @@ fn paths_equal_file(a: &str, b: &str) -> bool {
     ca == cb
 }
 
-pub fn check_module(module: &mut IRModule) -> Result<(), CompileError> {
+pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, CompileError> {
     let mut globals: HashMap<String, FnSig> = HashMap::new();
     for f in &module.fns {
         if globals
@@ -154,12 +155,13 @@ pub fn check_module(module: &mut IRModule) -> Result<(), CompileError> {
         ));
     }
 
+    let mut warnings = Vec::new();
     for f in &mut module.fns {
         let cm = f.cm.clone();
         let p = f.source_path.clone();
-        check_function(f, &globals, &cm, &p)?;
+        check_function(f, &globals, &cm, &p, &mut warnings)?;
     }
-    Ok(())
+    Ok(warnings)
 }
 
 fn collect_fn_sigs_in_stmts(stmts: &[IRStmt]) -> HashMap<String, FnSig> {
@@ -188,6 +190,7 @@ fn check_function(
     globals: &HashMap<String, FnSig>,
     cm: &Lrc<SourceMap>,
     path: &str,
+    warnings: &mut Vec<CompileWarning>,
 ) -> Result<(), CompileError> {
     let mut merged = globals.clone();
     merged.extend(collect_fn_sigs_in_stmts(&f.body));
@@ -201,6 +204,7 @@ fn check_function(
                 Binding {
                     ty: t.clone(),
                     mutable: true,
+                    initialized: true,
                 },
             )
             .is_some()
@@ -210,6 +214,7 @@ fn check_function(
     }
     stack.push(root);
 
+    let mut reachable = true;
     check_stmts(
         &mut f.body,
         &mut stack,
@@ -218,9 +223,11 @@ fn check_function(
         0,
         cm,
         path,
+        warnings,
+        &mut reachable,
     )?;
 
-    if f.ret != TsType::Void && !stmts_return(&f.body) {
+    if f.ret != TsType::Void && !fn_body_returns(&f.body, &f.ret) {
         return Err(diag(
             cm,
             path,
@@ -253,6 +260,7 @@ fn insert_let(
     name: &str,
     ty: TsType,
     mutable: bool,
+    initialized: bool,
     span: Span,
     cm: &Lrc<SourceMap>,
     path: &str,
@@ -262,7 +270,11 @@ fn insert_let(
         .unwrap()
         .insert(
             name.to_string(),
-            Binding { ty, mutable },
+            Binding {
+                ty,
+                mutable,
+                initialized,
+            },
         )
         .is_some()
     {
@@ -276,6 +288,210 @@ fn insert_let(
     Ok(())
 }
 
+fn mark_initialized(stack: &mut Vec<HashMap<String, Binding>>, name: &str) {
+    for m in stack.iter_mut().rev() {
+        if let Some(b) = m.get_mut(name) {
+            b.initialized = true;
+            return;
+        }
+    }
+}
+
+fn snapshot_inits(stack: &[HashMap<String, Binding>]) -> Vec<HashMap<String, bool>> {
+    stack
+        .iter()
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.initialized)).collect())
+        .collect()
+}
+
+fn restore_inits(stack: &mut [HashMap<String, Binding>], snap: &[HashMap<String, bool>]) {
+    for (m, s) in stack.iter_mut().zip(snap.iter()) {
+        for (name, init) in s {
+            if let Some(b) = m.get_mut(name) {
+                b.initialized = *init;
+            }
+        }
+    }
+}
+
+fn merge_init_after_if_else(
+    stack: &mut [HashMap<String, Binding>],
+    pre: &[HashMap<String, bool>],
+    then_snap: &[HashMap<String, bool>],
+    else_snap: &[HashMap<String, bool>],
+) {
+    for i in 0..stack.len() {
+        let names: Vec<String> = stack[i].keys().cloned().collect();
+        for name in names {
+            let p = pre.get(i).and_then(|m| m.get(&name)).copied().unwrap_or(true);
+            let t = then_snap
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .unwrap_or(p);
+            let e = else_snap
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .unwrap_or(p);
+            if let Some(b) = stack[i].get_mut(&name) {
+                b.initialized = t && e;
+            }
+        }
+    }
+}
+
+fn merge_init_after_if_no_else(
+    stack: &mut [HashMap<String, Binding>],
+    pre: &[HashMap<String, bool>],
+    then_snap: &[HashMap<String, bool>],
+) {
+    for i in 0..stack.len() {
+        let names: Vec<String> = stack[i].keys().cloned().collect();
+        for name in names {
+            let p = pre.get(i).and_then(|m| m.get(&name)).copied().unwrap_or(true);
+            let t = then_snap
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .unwrap_or(p);
+            if let Some(b) = stack[i].get_mut(&name) {
+                b.initialized = p && t;
+            }
+        }
+    }
+}
+
+fn apply_loop_conservative_init(stack: &mut [HashMap<String, Binding>], pre: &[HashMap<String, bool>]) {
+    for i in 0..stack.len() {
+        for (name, b) in stack[i].iter_mut() {
+            let was_init = pre.get(i).and_then(|m| m.get(name)).copied().unwrap_or(false);
+            if !was_init {
+                b.initialized = false;
+            }
+        }
+    }
+}
+
+fn stmt_span(s: &IRStmt) -> Span {
+    match s {
+        IRStmt::Empty { span }
+        | IRStmt::Let { span, .. }
+        | IRStmt::Assign { span, .. }
+        | IRStmt::Expr { span, .. }
+        | IRStmt::Return { span, .. }
+        | IRStmt::Block { span, .. }
+        | IRStmt::If { span, .. }
+        | IRStmt::While { span, .. }
+        | IRStmt::DoWhile { span, .. }
+        | IRStmt::Break { span }
+        | IRStmt::Continue { span }
+        | IRStmt::FnDecl { span, .. } => *span,
+    }
+}
+
+/// 当前语句执行后，同一块内后续语句是否均不可达（用于不可达警告）。
+fn stmt_block_diverges(s: &IRStmt, ret_ty: &TsType, loop_depth: usize) -> bool {
+    match s {
+        IRStmt::Return { .. } => true,
+        IRStmt::Break { .. } | IRStmt::Continue { .. } => loop_depth > 0,
+        IRStmt::Block { stmts, .. } => stmts_block_seq_diverges(stmts, ret_ty, loop_depth),
+        IRStmt::If {
+            then_b,
+            else_b: Some(else_b),
+            ..
+        } => {
+            stmts_block_seq_diverges(then_b, ret_ty, loop_depth)
+                && stmts_block_seq_diverges(else_b, ret_ty, loop_depth)
+        }
+        IRStmt::If { else_b: None, .. } => false,
+        IRStmt::While { .. } | IRStmt::DoWhile { .. } => false,
+        IRStmt::Empty { .. }
+        | IRStmt::Let { .. }
+        | IRStmt::Assign { .. }
+        | IRStmt::Expr { .. }
+        | IRStmt::FnDecl { .. } => false,
+    }
+}
+
+fn stmts_block_seq_diverges(stmts: &[IRStmt], ret_ty: &TsType, loop_depth: usize) -> bool {
+    for s in stmts {
+        if stmt_block_diverges(s, ret_ty, loop_depth) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 与旧版 `stmts_return` / `last_returns` 一致：仅看循环体语句列表的「尾部」是否保证带值返回（保持 while/do-while 语义不变）。
+fn tail_returns_while_body(stmts: &[IRStmt]) -> bool {
+    if stmts.is_empty() {
+        return false;
+    }
+    match &stmts[stmts.len() - 1] {
+        IRStmt::Return { arg: Some(_), .. } => true,
+        IRStmt::If {
+            then_b,
+            else_b: Some(else_b),
+            ..
+        } => tail_returns_while_body(then_b) && tail_returns_while_body(else_b),
+        IRStmt::Block { stmts: b, .. } => tail_returns_while_body(b),
+        IRStmt::While { body, .. } | IRStmt::DoWhile { body, .. } => tail_returns_while_body(body),
+        _ => false,
+    }
+}
+
+/// 该语句是否在非 void 函数中保证「所有路径」均带值返回（用于提前穷尽返回）。
+fn stmt_fn_returns_complete(s: &IRStmt, ret: &TsType) -> bool {
+    if *ret == TsType::Void {
+        return false;
+    }
+    match s {
+        IRStmt::Return { arg: Some(_), .. } => true,
+        IRStmt::Return { arg: None, .. } => false,
+        IRStmt::If {
+            then_b,
+            else_b: Some(else_b),
+            ..
+        } => fn_body_returns(then_b, ret) && fn_body_returns(else_b, ret),
+        IRStmt::If { else_b: None, .. } => false,
+        IRStmt::Block { stmts, .. } => fn_body_returns(stmts, ret),
+        IRStmt::While { body, .. } | IRStmt::DoWhile { body, .. } => tail_returns_while_body(body),
+        _ => false,
+    }
+}
+
+/// 函数体是否在所有控制路径上带值返回（非 void）；含序列内「提前穷尽返回」。
+fn fn_body_returns(stmts: &[IRStmt], ret: &TsType) -> bool {
+    if *ret == TsType::Void {
+        return true;
+    }
+    for s in stmts {
+        if stmt_fn_returns_complete(s, ret) {
+            return true;
+        }
+    }
+    tail_returns_last_only(stmts)
+}
+
+/// 仅检查最后一条语句（与旧 `last_returns` 一致）。
+fn tail_returns_last_only(stmts: &[IRStmt]) -> bool {
+    if stmts.is_empty() {
+        return false;
+    }
+    match &stmts[stmts.len() - 1] {
+        IRStmt::Return { arg: Some(_), .. } => true,
+        IRStmt::If {
+            then_b,
+            else_b: Some(else_b),
+            ..
+        } => tail_returns_while_body(then_b) && tail_returns_while_body(else_b),
+        IRStmt::Block { stmts: b, .. } => tail_returns_last_only(b),
+        IRStmt::While { body, .. } | IRStmt::DoWhile { body, .. } => tail_returns_while_body(body),
+        _ => false,
+    }
+}
+
 fn check_stmts(
     stmts: &mut [IRStmt],
     stack: &mut Vec<HashMap<String, Binding>>,
@@ -284,17 +500,24 @@ fn check_stmts(
     loop_depth: usize,
     cm: &Lrc<SourceMap>,
     path: &str,
+    warnings: &mut Vec<CompileWarning>,
+    reachable: &mut bool,
 ) -> Result<(), CompileError> {
     for s in stmts.iter_mut() {
+        if !*reachable {
+            warnings.push(warn(
+                cm,
+                path,
+                stmt_span(s),
+                "unreachable code",
+            ));
+        }
         check_stmt(
-            s,
-            stack,
-            globals,
-            ret_ty,
-            loop_depth,
-            cm,
-            path,
+            s, stack, globals, ret_ty, loop_depth, cm, path, warnings,
         )?;
+        if *reachable && stmt_block_diverges(s, ret_ty, loop_depth) {
+            *reachable = false;
+        }
     }
     Ok(())
 }
@@ -307,6 +530,7 @@ fn check_stmt(
     loop_depth: usize,
     cm: &Lrc<SourceMap>,
     path: &str,
+    warnings: &mut Vec<CompileWarning>,
 ) -> Result<(), CompileError> {
     match s {
         IRStmt::Empty { .. } => Ok(()),
@@ -325,24 +549,38 @@ fn check_stmt(
                     "`void` cannot be used in `let`/`const` binding",
                 ));
             }
-            let got = infer_expr_mut(init, stack, globals, cm, path)?;
-            if got == TsType::Void {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    "cannot use `void` expression in initializer",
-                ));
-            }
-            if !type_assignable(ty, &got) {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    format!("initializer type mismatch: expected `{ty:?}`, found `{got:?}`"),
-                ));
-            }
-            insert_let(stack, name, ty.clone(), *mutable, *span, cm, path)?;
+            let initialized = if let Some(init_e) = init {
+                let got = infer_expr_mut(init_e, stack, globals, cm, path)?;
+                if got == TsType::Void {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "cannot use `void` expression in initializer",
+                    ));
+                }
+                if !type_assignable(ty, &got) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        format!("initializer type mismatch: expected `{ty:?}`, found `{got:?}`"),
+                    ));
+                }
+                true
+            } else {
+                false
+            };
+            insert_let(
+                stack,
+                name,
+                ty.clone(),
+                *mutable,
+                initialized,
+                *span,
+                cm,
+                path,
+            )?;
             Ok(())
         }
         IRStmt::Assign {
@@ -375,6 +613,7 @@ fn check_stmt(
                     format!("assignment type mismatch: expected `{:?}`, found `{got:?}`", b.ty),
                 ));
             }
+            mark_initialized(stack, name);
             Ok(())
         }
         IRStmt::Expr { ref mut expr, .. } => {
@@ -416,7 +655,18 @@ fn check_stmt(
         }
         IRStmt::Block { stmts, .. } => {
             push_scope(stack);
-            check_stmts(stmts, stack, globals, ret_ty, loop_depth, cm, path)?;
+            let mut inner_reachable = true;
+            check_stmts(
+                stmts,
+                stack,
+                globals,
+                ret_ty,
+                loop_depth,
+                cm,
+                path,
+                warnings,
+                &mut inner_reachable,
+            )?;
             pop_scope(stack);
             Ok(())
         }
@@ -437,13 +687,43 @@ fn check_stmt(
                 ));
             }
             *cond_ty = ct.clone();
+            let pre = snapshot_inits(stack);
             push_scope(stack);
-            check_stmts(then_b, stack, globals, ret_ty, loop_depth, cm, path)?;
+            let mut then_r = true;
+            check_stmts(
+                then_b,
+                stack,
+                globals,
+                ret_ty,
+                loop_depth,
+                cm,
+                path,
+                warnings,
+                &mut then_r,
+            )?;
             pop_scope(stack);
+            let then_snap = snapshot_inits(stack);
+            restore_inits(stack, &pre);
             if let Some(else_b) = else_b {
                 push_scope(stack);
-                check_stmts(else_b, stack, globals, ret_ty, loop_depth, cm, path)?;
+                let mut else_r = true;
+                check_stmts(
+                    else_b,
+                    stack,
+                    globals,
+                    ret_ty,
+                    loop_depth,
+                    cm,
+                    path,
+                    warnings,
+                    &mut else_r,
+                )?;
                 pop_scope(stack);
+                let else_snap = snapshot_inits(stack);
+                restore_inits(stack, &pre);
+                merge_init_after_if_else(stack, &pre, &then_snap, &else_snap);
+            } else {
+                merge_init_after_if_no_else(stack, &pre, &then_snap);
             }
             Ok(())
         }
@@ -463,7 +743,9 @@ fn check_stmt(
                 ));
             }
             *cond_ty = ct.clone();
+            let pre = snapshot_inits(stack);
             push_scope(stack);
+            let mut body_r = true;
             check_stmts(
                 body,
                 stack,
@@ -472,8 +754,11 @@ fn check_stmt(
                 loop_depth + 1,
                 cm,
                 path,
+                warnings,
+                &mut body_r,
             )?;
             pop_scope(stack);
+            apply_loop_conservative_init(stack, &pre);
             Ok(())
         }
         IRStmt::DoWhile {
@@ -492,7 +777,9 @@ fn check_stmt(
                 ));
             }
             *cond_ty = ct.clone();
+            let pre = snapshot_inits(stack);
             push_scope(stack);
+            let mut body_r = true;
             check_stmts(
                 body,
                 stack,
@@ -501,8 +788,11 @@ fn check_stmt(
                 loop_depth + 1,
                 cm,
                 path,
+                warnings,
+                &mut body_r,
             )?;
             pop_scope(stack);
+            apply_loop_conservative_init(stack, &pre);
             Ok(())
         }
         IRStmt::Break { span } => {
@@ -530,7 +820,7 @@ fn check_stmt(
         IRStmt::FnDecl { func, .. } => {
             let c = func.cm.clone();
             let p = func.source_path.clone();
-            check_function(func, globals, &c, &p)?;
+            check_function(func, globals, &c, &p, warnings)?;
             Ok(())
         }
     }
@@ -551,6 +841,14 @@ fn infer_expr_mut(
         IRExpr::Undefined(_) => Ok(TsType::Undefined),
         IRExpr::Ident(name, span) => {
             if let Some(b) = lookup(stack, name) {
+                if !b.initialized {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "variable may be used before being assigned",
+                    ));
+                }
                 return Ok(b.ty.clone());
             }
             if globals.contains_key(name) {
@@ -684,6 +982,55 @@ fn infer_expr_mut(
             }
             Ok(sig.ret.clone())
         }
+        IRExpr::MethodCall {
+            receiver,
+            method,
+            args,
+            span,
+        } => {
+            let sig = globals.get(method).ok_or_else(|| {
+                diag(
+                    cm,
+                    path,
+                    *span,
+                    format!("call to unknown function `{method}`"),
+                )
+            })?;
+            let expected_arity = 1 + args.len();
+            if sig.params.len() != expected_arity {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    format!(
+                        "wrong argument count for `{method}` in `obj.m(...)` form: global function must have {} parameter(s) (receiver first), signature has {}",
+                        expected_arity,
+                        sig.params.len()
+                    ),
+                ));
+            }
+            let rt = infer_expr_mut(receiver, stack, globals, cm, path)?;
+            if !type_assignable(&sig.params[0], &rt) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    format!("receiver type mismatch for `{method}`"),
+                ));
+            }
+            for (a, pt) in args.iter_mut().zip(sig.params.iter().skip(1)) {
+                let at = infer_expr_mut(a, stack, globals, cm, path)?;
+                if !type_assignable(pt, &at) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        format!("argument type mismatch for `{method}`"),
+                    ));
+                }
+            }
+            Ok(sig.ret.clone())
+        }
         IRExpr::BuiltinLog { args, .. } => {
             for a in args.iter_mut() {
                 infer_expr_mut(a, stack, globals, cm, path)?;
@@ -745,12 +1092,29 @@ fn infer_expr_mut(
             }
             Ok(TsType::String)
         }
-        IRExpr::Member { obj, prop, span } => {
+        IRExpr::Member {
+            obj,
+            prop,
+            span,
+            length_dispatch,
+        } => {
             let ot = infer_expr_mut(obj, stack, globals, cm, path)?;
-            if prop == "length" && is_stringish(&ot) {
-                return Ok(TsType::Number);
-            }
-            if let TsType::ObjectNum(keys) = &ot {
+            if prop == "length" {
+                if is_stringish(&ot) {
+                    *length_dispatch = Some(MemberLengthDispatch::JsStringUtf16);
+                    return Ok(TsType::Number);
+                }
+                if ot == TsType::ArrayNumber {
+                    *length_dispatch = Some(MemberLengthDispatch::VecLen);
+                    return Ok(TsType::Number);
+                }
+                if let TsType::ObjectNum(keys) = &ot {
+                    if keys.iter().any(|k| k == prop) {
+                        *length_dispatch = None;
+                        return Ok(TsType::Number);
+                    }
+                }
+            } else if let TsType::ObjectNum(keys) = &ot {
                 if keys.iter().any(|k| k == prop) {
                     return Ok(TsType::Number);
                 }
@@ -759,10 +1123,15 @@ fn infer_expr_mut(
                 cm,
                 path,
                 *span,
-                "unsupported member access (supports `string.length` or object number fields)",
+                "unsupported member access (supports `string.length`, `number[].length`, or object number fields)",
             ))
         }
-        IRExpr::OptionalMember { obj, prop, span } => {
+        IRExpr::OptionalMember {
+            obj,
+            prop,
+            span,
+            length_dispatch,
+        } => {
             match &**obj {
                 IRExpr::Null(_) | IRExpr::Undefined(_) => return Ok(TsType::Undefined),
                 _ => {}
@@ -771,10 +1140,22 @@ fn infer_expr_mut(
             if ot == TsType::Null || ot == TsType::Undefined {
                 return Ok(TsType::Undefined);
             }
-            if prop == "length" && is_stringish(&ot) {
-                return Ok(TsType::Number);
-            }
-            if let TsType::ObjectNum(keys) = &ot {
+            if prop == "length" {
+                if is_stringish(&ot) {
+                    *length_dispatch = Some(MemberLengthDispatch::JsStringUtf16);
+                    return Ok(TsType::Number);
+                }
+                if ot == TsType::ArrayNumber {
+                    *length_dispatch = Some(MemberLengthDispatch::VecLen);
+                    return Ok(TsType::Number);
+                }
+                if let TsType::ObjectNum(keys) = &ot {
+                    if keys.iter().any(|k| k == prop) {
+                        *length_dispatch = None;
+                        return Ok(TsType::Number);
+                    }
+                }
+            } else if let TsType::ObjectNum(keys) = &ot {
                 if keys.iter().any(|k| k == prop) {
                     return Ok(TsType::Number);
                 }
@@ -785,6 +1166,20 @@ fn infer_expr_mut(
                 *span,
                 "unsupported optional member access",
             ))
+        }
+        IRExpr::MathBuiltin { args, span, .. } => {
+            for a in args.iter_mut() {
+                let t = infer_expr_mut(a, stack, globals, cm, path)?;
+                if !is_numberish(&t) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "Math builtin arguments must be `number`",
+                    ));
+                }
+            }
+            Ok(TsType::Number)
         }
         IRExpr::NullishCoalesce { left, right, span } => {
             let lt = infer_expr_mut(left, stack, globals, cm, path)?;
@@ -869,26 +1264,3 @@ fn infer_expr_mut(
     }
 }
 
-fn last_returns(stmts: &[IRStmt]) -> bool {
-    if stmts.is_empty() {
-        return false;
-    }
-    match &stmts[stmts.len() - 1] {
-        IRStmt::Return { arg: Some(_), .. } => true,
-        IRStmt::If {
-            then_b,
-            else_b: Some(else_b),
-            ..
-        } => stmts_return(then_b) && stmts_return(else_b),
-        IRStmt::Block { stmts: b, .. } => stmts_return(b),
-        IRStmt::While { body, .. } | IRStmt::DoWhile { body, .. } => stmts_return(body),
-        _ => false,
-    }
-}
-
-fn stmts_return(stmts: &[IRStmt]) -> bool {
-    if stmts.is_empty() {
-        return false;
-    }
-    last_returns(stmts)
-}

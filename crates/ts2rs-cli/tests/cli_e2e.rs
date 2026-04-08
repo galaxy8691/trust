@@ -63,6 +63,53 @@ fn compile_writes_rust() {
 }
 
 #[test]
+fn compile_span_comments_writes_ts_anchors() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("sample.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+            "--span-comments",
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("// ts:"),
+        "expected // ts: span comments in generated Rust: {body}"
+    );
+}
+
+#[test]
+fn compile_console_stderr_writes_eprintln() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("console_stderr.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("eprintln!"),
+        "expected console.error/debug to lower to eprintln!: {body}"
+    );
+}
+
+#[test]
 fn run_let_if_prints_ten() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
     let ts = fixture("let_if.ts");
@@ -507,6 +554,26 @@ fn run_comma_ok_prints_three() {
 }
 
 #[test]
+fn run_string_utf16_length_prints_two() {
+    assert_run_stdout("string_utf16_length.ts", "2\n");
+}
+
+#[test]
+fn run_object_length_field_prints_value() {
+    assert_run_stdout("object_length_field.ts", "42\n");
+}
+
+#[test]
+fn run_array_length_prints_three() {
+    assert_run_stdout("array_length.ts", "3\n");
+}
+
+#[test]
+fn run_math_builtin_prints_sum() {
+    assert_run_stdout("math_builtin.ts", "17\n");
+}
+
+#[test]
 fn run_member_length_ok_prints_two() {
     assert_run_stdout("member_length_ok.ts", "2\n");
 }
@@ -529,4 +596,159 @@ fn run_array_ok_prints_two() {
 #[test]
 fn run_object_ok_prints_three() {
     assert_run_stdout("object_ok.ts", "3\n");
+}
+
+// --- §3.4 不可达警告、明确赋值、提前 return ---
+
+fn assert_compile_ok_stderr_contains(name: &str, needle: &str) {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture(name);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let out = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn ts2rs compile");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(needle),
+        "expected stderr to contain {needle:?}, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn compile_early_return_unreachable_warns() {
+    assert_compile_ok_stderr_contains("early_return_unreachable.ts", "unreachable code");
+}
+
+#[test]
+fn compile_unreachable_after_return_warns() {
+    assert_compile_ok_stderr_contains("unreachable_after_return.ts", "unreachable code");
+}
+
+#[test]
+fn compile_break_unreachable_warns() {
+    assert_compile_ok_stderr_contains("break_unreachable.ts", "unreachable code");
+}
+
+#[test]
+fn run_early_return_unreachable_prints_one() {
+    assert_run_stdout("early_return_unreachable.ts", "1\n");
+}
+
+#[test]
+fn run_unreachable_after_return_prints_one() {
+    assert_run_stdout("unreachable_after_return.ts", "1\n");
+}
+
+#[test]
+fn run_definite_assign_ok_prints_one() {
+    assert_run_stdout("definite_assign_ok.ts", "1\n");
+}
+
+#[test]
+fn run_definite_assign_if_ok_prints_one() {
+    assert_run_stdout("definite_assign_if_ok.ts", "1\n");
+}
+
+#[test]
+fn compile_definite_assign_fail_errors() {
+    assert_compile_fails_stderr("definite_assign_fail.ts", "before being assigned");
+}
+
+#[test]
+fn run_multi_entry_extra_roots_prints_main() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let main_ts = fixture("multi_entry_main.ts");
+    let side_ts = fixture("multi_entry_side.ts");
+    let out = Command::new(exe)
+        .args([
+            "run",
+            main_ts.to_str().unwrap(),
+            side_ts.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn ts2rs run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "42\n");
+}
+
+#[test]
+fn run_project_tsconfig_prints_main() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let tsconfig = fixture("multi_entry_tsconfig.json");
+    let out = Command::new(exe)
+        .args(["run", "--project", tsconfig.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "42\n");
+}
+
+#[test]
+fn run_method_call_ok_prints_three() {
+    assert_run_stdout("method_call_ok.ts", "3\n");
+}
+
+#[test]
+fn compile_method_call_ok_desugars_to_global_fn() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("method_call_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("sum_xy(") && body.contains("ts_main"),
+        "expected desugared call to sum_xy in generated Rust: {body}"
+    );
+}
+
+#[test]
+fn run_with_link_ts2rs_rt_prints_main() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let main_ts = fixture("multi_entry_main.ts");
+    let side_ts = fixture("multi_entry_side.ts");
+    let out = Command::new(exe)
+        .args([
+            "run",
+            "--link-ts2rs-rt",
+            main_ts.to_str().unwrap(),
+            side_ts.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn ts2rs run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "42\n");
 }

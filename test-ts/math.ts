@@ -1,4 +1,7 @@
 // 多文件样例：依赖模块 — 仅 `export function` 可被其它文件 import。
+// 本文件再依赖 `./strutil.ts`（模块图：main → math → strutil）。
+import { aux_label, utf16_len } from "./strutil.ts";
+
 export function add(a: number, b: number): number {
   return a + b;
 }
@@ -54,4 +57,47 @@ export function fib_loop(n: number): number {
     b = tmp;
   }
   return a;
+}
+
+// 与 cli fixture math_builtin.ts 一致：Math 整数子集。
+export function math_builtin_sum(): number {
+  return Math.abs(-7) + Math.min(1, 9) + Math.max(0, 4) + Math.floor(3) + Math.ceil(2);
+}
+
+export function clamp(v: number, lo: number, hi: number): number {
+  if (v < lo) {
+    return lo;
+  }
+  if (v > hi) {
+    return hi;
+  }
+  return v;
+}
+
+export function sign(n: number): number {
+  if (n > 0) {
+    return 1;
+  }
+  if (n < 0) {
+    return -1;
+  }
+  return 0;
+}
+
+// 小指数整数幂（底数、指数均非负，避免溢出）。
+export function ipow(base: number, exp: number): number {
+  let r: number = 1;
+  let i: number = 0;
+  while (i < exp) {
+    r = r * base;
+    i = i + 1;
+  }
+  return r;
+}
+
+// 经 strutil 取 UTF-16 长度再翻倍，覆盖 math → strutil。
+export function len_label_twice(): number {
+  let s: string = aux_label();
+  let n: number = utf16_len(s);
+  return n + n;
 }

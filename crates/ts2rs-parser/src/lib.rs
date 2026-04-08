@@ -74,7 +74,8 @@ pub fn parse_typescript_file(
 }
 
 pub use module_graph::{
-    exported_function_names, parse_module_graph, validate_imports, ParsedModule, ParsedModuleGraph,
+    exported_function_names, parse_module_graph, parse_module_graph_with_extra_roots,
+    validate_imports, ParsedModule, ParsedModuleGraph,
 };
 #[allow(deprecated)]
 pub use resolve_imports::parse_typescript_resolving_imports;
