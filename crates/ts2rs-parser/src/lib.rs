@@ -1,5 +1,6 @@
 //! TypeScript 源文件解析（基于 swc）。
 
+mod import_utils;
 mod module_graph;
 mod resolve_imports;
 

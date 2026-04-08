@@ -27,6 +27,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
+## 模块拆分约定
+
+- 大文件优先按“编译阶段”拆分：
+  - `ts2rs-hir`：`build/*`、`sem/*`、`codegen/*` 辅助模块
+  - `ts2rs-cli`：`cli_args.rs`、`commands.rs`、`graph_loader.rs`
+  - `ts2rs-driver`：`pipeline.rs`、`cargo_runner.rs`、`crate_writer.rs`
+- 纯搬移（不改行为）与语义变更尽量分开提交，便于回归定位。
+
 ## Rust 工具链
 
 - **Edition**：全工作区 **Rust 2021**。

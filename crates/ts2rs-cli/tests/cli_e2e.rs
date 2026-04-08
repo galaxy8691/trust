@@ -252,18 +252,20 @@ fn compile_interface_extends_fails() {
 }
 
 #[test]
-fn compile_interface_generic_fails() {
-    assert_compile_fails_stderr(
-        "interface_generic_fail.ts",
-        "generic interfaces are not supported",
-    );
+fn run_interface_generic_ok_prints_zero() {
+    assert_run_stdout("interface_generic_fail.ts", "0\n");
 }
 
 #[test]
-fn compile_generic_function_fails() {
+fn run_generic_function_ok_prints_three() {
+    assert_run_stdout("generic_function_ok.ts", "3\n");
+}
+
+#[test]
+fn compile_generic_function_missing_type_args_fails() {
     assert_compile_fails_stderr(
-        "generic_function_fail.ts",
-        "generic functions are not supported",
+        "generic_function_missing_type_args_fail.ts",
+        "requires explicit type arguments",
     );
 }
 
@@ -283,11 +285,8 @@ fn run_export_type_alias_ok_prints_ten() {
 }
 
 #[test]
-fn compile_type_alias_generic_fails() {
-    assert_compile_fails_stderr(
-        "type_alias_generic_fail.ts",
-        "generic type aliases are not supported",
-    );
+fn run_type_alias_generic_ok_prints_zero() {
+    assert_run_stdout("type_alias_generic_fail.ts", "0\n");
 }
 
 #[test]

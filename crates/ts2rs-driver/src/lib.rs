@@ -14,12 +14,14 @@
 //! 含 stdout/stderr，便于排查。
 
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use tempfile::TempDir;
 use thiserror::Error;
+
+mod cargo_runner;
+mod crate_writer;
+mod pipeline;
 
 const CRATE_NAME: &str = "ts2rs_generated";
 
@@ -71,15 +73,7 @@ impl Default for RustBuildOptions {
 /// 成功时返回 `(TempDir, PathBuf)`：**先**为临时目录句柄（须保持存活至用完二进制），**后**为
 /// `target/release/ts2rs_generated`（Windows 下为 `.exe`）。详见 [crate 级说明](crate#临时目录与-tempdir)。
 pub fn compile_entrypoint_to_executable(path: &Path) -> Result<(TempDir, PathBuf), DriverError> {
-    let graph = ts2rs_parser::parse_module_graph(path)?;
-    ts2rs_parser::validate_imports(&graph)?;
-    let units = graph.compile_units();
-    let entry_path = graph.entry_path_str();
-    let (rust, warnings) = ts2rs_lower::lower_module_graph(&units, &entry_path)?;
-    for w in &warnings {
-        eprintln!("warning: {w}");
-    }
-    build_rust_to_executable(&rust)
+    pipeline::compile_entrypoint_to_executable_impl(path)
 }
 
 /// 在临时目录中生成 crate、编译，返回 `(TempDir, PathBuf)`：
@@ -98,35 +92,8 @@ pub fn build_rust_to_executable_with_options(
     let dir = tempfile::tempdir()?;
     let root = dir.path();
 
-    write_minimal_crate(root, rust_source, opts)?;
-
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build").current_dir(root);
-    if opts.release {
-        cmd.arg("--release");
-    }
-    let output = cmd.output().map_err(map_cargo_spawn_error)?;
-
-    if !output.status.success() {
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Err(DriverError::CargoBuild {
-            status: output.status.to_string(),
-            combined,
-        });
-    }
-
-    let profile_dir = if opts.release { "release" } else { "debug" };
-    let mut exe = root.join("target").join(profile_dir).join(CRATE_NAME);
-    if cfg!(windows) {
-        exe.set_extension("exe");
-    }
-    if !exe.is_file() {
-        return Err(DriverError::MissingBinary(exe));
-    }
+    crate_writer::write_minimal_crate(root, rust_source, opts)?;
+    let exe = cargo_runner::cargo_build(root, opts)?;
 
     Ok((dir, exe))
 }
@@ -143,59 +110,6 @@ pub fn build_rust_and_copy(rust_source: &str, output: &Path) -> Result<(), Drive
     Ok(())
 }
 
-fn map_cargo_spawn_error(e: io::Error) -> DriverError {
-    if e.kind() == io::ErrorKind::NotFound {
-        DriverError::CargoNotFound
-    } else {
-        DriverError::Io(e)
-    }
-}
-
-fn write_minimal_crate(
-    root: &Path,
-    rust_source: &str,
-    opts: &RustBuildOptions,
-) -> Result<(), DriverError> {
-    let cargo_toml = if opts.link_ts2rs_rt {
-        let rt_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ts2rs_rt");
-        let rt_canon = rt_path
-            .canonicalize()
-            .map_err(|_| DriverError::Ts2rsRtPathResolveFailed(rt_path.display().to_string()))?;
-        let path_toml = rt_canon.to_string_lossy().replace('\\', "/");
-        format!(
-            r#"[package]
-name = "{name}"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-ts2rs_rt = {{ path = "{path}", optional = true }}
-
-[features]
-default = []
-ts2rs_rt = ["dep:ts2rs_rt"]
-"#,
-            name = CRATE_NAME,
-            path = path_toml,
-        )
-    } else {
-        format!(
-            r#"[package]
-name = "{name}"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-"#,
-            name = CRATE_NAME
-        )
-    };
-    fs::write(root.join("Cargo.toml"), cargo_toml)?;
-    fs::create_dir_all(root.join("src"))?;
-    fs::write(root.join("src/main.rs"), rust_source)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,7 +122,7 @@ mod tests {
             link_ts2rs_rt: true,
             ..Default::default()
         };
-        write_minimal_crate(dir.path(), "fn main() {}", &opts).expect("write crate");
+        crate_writer::write_minimal_crate(dir.path(), "fn main() {}", &opts).expect("write crate");
         let toml = fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
         assert!(
             toml.contains("ts2rs_rt") && toml.contains("optional = true"),
@@ -247,7 +161,7 @@ mod tests {
             .output()
             .expect_err("missing executable should yield io error");
         assert_eq!(io_err.kind(), std::io::ErrorKind::NotFound);
-        let mapped = map_cargo_spawn_error(io_err);
+        let mapped = cargo_runner::map_cargo_spawn_error(io_err);
         assert!(matches!(mapped, DriverError::CargoNotFound), "{mapped}");
     }
 

@@ -39,7 +39,7 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 | User-visible form | Notes |
 |-------------------|--------|
 | `export` other than `export function` / top-level `function` | e.g. `export { }`, `export default`, `export * from`, `export const` / `class` |
-| Generics | `function f<T>`, `interface I<T>`, `type A<T>`, type references `Foo<T>` |
+| Advanced generics | Complex inference/constraints and full TS generic semantics are still out of scope (basic monomorphization subset is supported below) |
 | Optional call | `f?.()` — optional **member** `obj?.prop` is partially supported |
 | `interface` `extends`, optional props, imported interface names across files | Single-file nominal table only |
 | Intersection `A & B` | Rejected |
@@ -103,7 +103,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | Union `A \| B` | Partial | Normalization; must map to one Rust type; `number \| string` heterogeneous fails; `A & B` rejected; `union_*`, `intersection_type_fail.ts` |
 | `interface` | Partial | Top-level; `TsType::ObjectNum`; `interface_ok.ts`, negatives |
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
-| Generics / type args | Not supported | Explicit reject; `generic_function_fail.ts`, etc. |
+| Generics / type args | Partial | Monomorphization subset: explicit type args required at generic call sites; generic declarations are allowed; unsupported broad shapes still rejected |
 | Full TypeScript / `tsc` | Not implemented | Long-term |
 
 ### Matrix vs integration tests
@@ -125,7 +125,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | `switch` | `switch_ok.ts`, `switch_fail.ts` | … |
 | Console | `console_stderr.ts`, `void_log.ts` | … |
 | Literal / union / intersection | `literal_type_*.ts`, `union_*.ts` | … |
-| Interface / type / generic reject | `interface_*.ts`, `type_alias_*.ts` | … |
+| Interface / type / generic subset | `interface_*.ts`, `type_alias_*.ts`, `generic_function_ok.ts` | `run_interface_generic_ok_prints_zero`, `run_type_alias_generic_ok_prints_zero`, `run_generic_function_ok_prints_three` |
 | Nested function | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
 | CLI `check` / `--emit-ir` | `sample.ts`, `switch_fail.ts` | `check_sample_ok`, `compile_emit_ir_stderr_contains_ir_module` |
@@ -136,14 +136,12 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 
 Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJECT-TODO.md §1.4](PROJECT-TODO.md). Nullable narrowing vs §3.3.
 
-### Generics (still rejected)
+### Generics (monomorphization subset)
 
-| Syntax | Diagnostic (excerpt) |
-|--------|----------------------|
-| `function f<T>(…)` | `generic functions are not supported` |
-| `interface I<T>`, `export interface I<T>` | `generic interfaces are not supported` |
-| `type A<T>`, `export type A<T>` | `generic type aliases are not supported` |
-| `Name<T>` in type position | `type arguments on type references are not supported` |
+- Generic function declarations are accepted and instantiated by `sem` when called with explicit type arguments.
+- Generic calls without explicit type arguments are rejected (e.g. `id(1)` when `id<T>`).
+- Generic `interface` / `type` declarations are accepted in the current restricted type subset.
+- Broader TypeScript generic semantics (inference, constraints-rich forms, higher-order generic typing) remain out of scope.
 
 ## Semantics roadmap (§3.3)
 
@@ -202,12 +200,12 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 
 | Crate | Role |
 |-------|------|
-| `ts2rs-parser` | swc wrapper; `source_map`; [`module_graph`](crates/ts2rs-parser/src/module_graph.rs) |
-| `ts2rs-hir` | IR, build, sem, `emit_rust`; [`compile_graph`](crates/ts2rs-hir/src/lib.rs) |
+| `ts2rs-parser` | swc wrapper; `source_map`; [`module_graph`](crates/ts2rs-parser/src/module_graph.rs); shared import parsing in [`import_utils`](crates/ts2rs-parser/src/import_utils.rs) |
+| `ts2rs-hir` | IR, build, sem, `emit_rust`; [`compile_graph`](crates/ts2rs-hir/src/lib.rs); split helpers: [`build/build_types.rs`](crates/ts2rs-hir/src/build/build_types.rs), [`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs), [`codegen/helpers.rs`](crates/ts2rs-hir/src/codegen/helpers.rs) |
 | `ts2rs-lower` | [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) |
-| `ts2rs-driver` | Temp crate + `cargo` ([`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)) |
+| `ts2rs-driver` | Temp crate + `cargo` ([`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)); pipeline split: [`pipeline.rs`](crates/ts2rs-driver/src/pipeline.rs), [`cargo_runner.rs`](crates/ts2rs-driver/src/cargo_runner.rs), [`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs) |
 | `ts2rs_rt` | Optional runtime |
-| `ts2rs-cli` | `ts2rs` binary |
+| `ts2rs-cli` | `ts2rs` binary; command split: [`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs), [`commands.rs`](crates/ts2rs-cli/src/commands.rs), [`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs) |
 
 ## License
 

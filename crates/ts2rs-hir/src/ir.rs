@@ -6,6 +6,7 @@
 //! **函数级 `ir_id`**：单次编译内单调递增，用于调试或后续 MIR/SSA 粗粒度锚点；不保证跨编译稳定。
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
 
 use swc_common::sync::Lrc;
@@ -33,6 +34,8 @@ pub enum TsType {
     ObjectNum(Vec<String>),
     /// 联合类型 `A | B`（成员已规范化：扁平化、去重、按 [`cmp_ts_type`] 排序）。
     Union(Vec<TsType>),
+    /// 类型参数（泛型）
+    TypeParam(String),
 }
 
 /// 稳定全序，用于联合类型规范化与 `B | A` 与 `A | B` 相等。
@@ -49,6 +52,7 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
         (NumberLit(x), NumberLit(y)) => x.cmp(y),
         (StringLit(x), StringLit(y)) => x.cmp(y),
         (ObjectNum(x), ObjectNum(y)) => x.cmp(y),
+        (TypeParam(x), TypeParam(y)) => x.cmp(y),
         (Union(x), Union(y)) => {
             let mut ita = x.iter();
             let mut itb = y.iter();
@@ -83,7 +87,8 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::StringLit(_) => 8,
         TsType::ArrayNumber => 9,
         TsType::ObjectNum(_) => 10,
-        TsType::Union(_) => 11,
+        TsType::TypeParam(_) => 11,
+        TsType::Union(_) => 12,
     }
 }
 
@@ -189,6 +194,8 @@ pub enum IRExpr {
     Call {
         callee: String,
         args: Vec<IRExpr>,
+        /// 显式类型实参 `f<T, U>(...)`
+        type_args: Vec<TsType>,
         span: Span,
     },
     /// `obj.m(args)`：脱糖为全局函数 `m(receiver, ...args)`（`receiver` 为 `obj` 的值）。
@@ -196,6 +203,7 @@ pub enum IRExpr {
         receiver: Box<IRExpr>,
         method: String,
         args: Vec<IRExpr>,
+        type_args: Vec<TsType>,
         span: Span,
     },
     /// `console.log` / `console.error` / `console.debug`（`stderr: true` 时生成 `eprintln!`）
@@ -352,6 +360,8 @@ pub struct IRFunction {
     /// 单次编译内唯一序号（含嵌套 `function`）。
     pub ir_id: u32,
     pub name: String,
+    /// 泛型类型参数名（单态化后应为空）。
+    pub type_params: Vec<String>,
     pub params: Vec<(String, TsType)>,
     pub ret: TsType,
     pub body: Vec<IRStmt>,
@@ -360,6 +370,8 @@ pub struct IRFunction {
     pub cm: Lrc<SourceMap>,
     /// 该函数所在文件路径（与 `entry_path` 比较以定位 `main`）。
     pub source_path: String,
+    /// 单态化实例来源（如 `foo<number>`），用于诊断可读性。
+    pub mono_origin: Option<String>,
 }
 
 impl fmt::Debug for IRFunction {
@@ -367,18 +379,27 @@ impl fmt::Debug for IRFunction {
         f.debug_struct("IRFunction")
             .field("ir_id", &self.ir_id)
             .field("name", &self.name)
+            .field("type_params", &self.type_params)
             .field("params", &self.params)
             .field("ret", &self.ret)
             .field("body", &self.body)
             .field("span", &self.span)
             .field("source_path", &self.source_path)
+            .field("mono_origin", &self.mono_origin)
             .finish()
     }
 }
 
 #[derive(Debug, Clone)]
+pub struct IRGenericTypeDecl {
+    pub type_params: Vec<String>,
+    pub body: TsType,
+}
+
+#[derive(Debug, Clone)]
 pub struct IRModule {
     pub fns: Vec<IRFunction>,
+    pub generic_types: HashMap<String, IRGenericTypeDecl>,
     /// 编译入口文件路径（用于要求 `main` 定义在入口模块）。
     pub entry_path: String,
 }

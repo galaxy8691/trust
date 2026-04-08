@@ -4,6 +4,8 @@ use crate::error::{diag, CompileError};
 use crate::ir::*;
 use swc_common::Span;
 
+mod helpers;
+
 /// 代码生成选项（默认不改变既有输出）。
 #[derive(Debug, Clone, Default)]
 pub struct CodegenOptions {
@@ -59,63 +61,15 @@ pub fn emit_rust_with_options(
 }
 
 fn rust_fn_name(name: &str) -> &str {
-    if name == "main" {
-        "ts_main"
-    } else {
-        name
-    }
+    helpers::rust_fn_name(name)
 }
 
 fn is_numberish(t: &TsType) -> bool {
-    match t {
-        TsType::Number | TsType::NumberLit(_) => true,
-        TsType::Union(m) => m.iter().all(is_numberish),
-        _ => false,
-    }
-}
-
-fn rust_ty_scalar(t: &TsType) -> &'static str {
-    match t {
-        TsType::Number | TsType::NumberLit(_) => "i32",
-        TsType::Boolean | TsType::BoolLit(_) => "bool",
-        TsType::String | TsType::StringLit(_) => "String",
-        TsType::Void => "()",
-        TsType::Null => "()",
-        TsType::Undefined => "()",
-        TsType::ArrayNumber => "Vec<i32>",
-        TsType::ObjectNum(_) => "std::collections::HashMap<String, i32>",
-        TsType::Union(_) => unreachable!("rust_ty_scalar: use rust_ty for unions"),
-    }
+    helpers::is_numberish(t)
 }
 
 fn rust_ty(t: &TsType, f: &IRFunction) -> Result<&'static str, CompileError> {
-    match t {
-        TsType::Union(members) => {
-            if members.is_empty() {
-                return Err(diag(
-                    f.cm.as_ref(),
-                    &f.source_path,
-                    f.span,
-                    "empty union type",
-                ));
-            }
-            let mut it = members.iter();
-            let first = rust_ty(it.next().unwrap(), f)?;
-            for m in it {
-                let r = rust_ty(m, f)?;
-                if r != first {
-                    return Err(diag(
-                        f.cm.as_ref(),
-                        &f.source_path,
-                        f.span,
-                        "union type cannot be mapped to a single Rust type (heterogeneous members)",
-                    ));
-                }
-            }
-            Ok(first)
-        }
-        _ => Ok(rust_ty_scalar(t)),
-    }
+    helpers::rust_ty(t, f)
 }
 
 fn emit_fn(
@@ -124,6 +78,17 @@ fn emit_fn(
     level: usize,
     opts: &CodegenOptions,
 ) -> Result<(), CompileError> {
+    if !f.type_params.is_empty() {
+        return Err(diag(
+            f.cm.as_ref(),
+            &f.source_path,
+            f.span,
+            format!(
+                "internal error: generic function `{}` must be monomorphized before codegen",
+                f.name
+            ),
+        ));
+    }
     let ind = indent(level);
     let name = rust_fn_name(&f.name);
     out.push_str(&ind);
@@ -153,36 +118,15 @@ fn emit_fn(
 }
 
 fn indent(n: usize) -> String {
-    "    ".repeat(n)
+    helpers::indent(n)
 }
 
 fn stmt_span(s: &IRStmt) -> Span {
-    match s {
-        IRStmt::Empty { span }
-        | IRStmt::Let { span, .. }
-        | IRStmt::Assign { span, .. }
-        | IRStmt::Expr { span, .. }
-        | IRStmt::Return { span, .. }
-        | IRStmt::Block { span, .. }
-        | IRStmt::If { span, .. }
-        | IRStmt::While { span, .. }
-        | IRStmt::DoWhile { span, .. }
-        | IRStmt::Break { span }
-        | IRStmt::Continue { span }
-        | IRStmt::FnDecl { span, .. } => *span,
-    }
+    helpers::stmt_span(s)
 }
 
 fn emit_ts_span_comment(out: &mut String, ind: &str, f: &IRFunction, span: Span) {
-    let loc = f.cm.lookup_char_pos(span.lo);
-    out.push_str(ind);
-    out.push_str("// ts: ");
-    out.push_str(&f.source_path);
-    out.push(':');
-    out.push_str(&loc.line.to_string());
-    out.push(':');
-    out.push_str(&loc.col_display.to_string());
-    out.push('\n');
+    helpers::emit_ts_span_comment(out, ind, f, span);
 }
 
 fn emit_stmt(

@@ -39,7 +39,7 @@ flowchart LR
 | 用户可见形态 | 说明 |
 |--------------|------|
 | 非 `export function` / 非顶层 `function` 的 `export` | 如 `export { }`、`export default`、`export * from`、`export const` / `class` 等 |
-| 泛型 | `function f<T>`、`interface I<T>`、`type A<T>`、类型位置 `Foo<T>` |
+| 复杂泛型语义 | 高阶推导、复杂约束与完整 TS 泛型语义仍未实现（基础单态化子集见下文） |
 | 可选调用 | `f?.()`；可选**成员** `obj?.prop` 为部分支持 |
 | `interface extends`、跨文件导入接口名、可选属性 | 仅单文件具名表 |
 | 交集 `A & B` | 拒绝 |
@@ -108,7 +108,7 @@ flowchart LR
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
 | `interface`（受限） | 部分支持 | 顶层 `interface` / `export interface`；声明体与 `{ k: number }` 相同规则，解析为 [`TsType::ObjectNum`](crates/ts2rs-hir/src/ir.rs)（`build.rs` 中具名表）；类型位置用 `Point` 形式引用；**单文件**内按出现顺序声明，引用尚未声明的接口名会报错；**不**从依赖模块导入接口名；`extends`、泛型、可选属性拒绝；见 `interface_ok.ts`、`export_interface_ok.ts`、负例 `interface_extends_fail.ts`、`interface_generic_fail.ts` |
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types`](crates/ts2rs-hir/src/build.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
-| 泛型 / 类型实参 | 不支持 | 显式拒绝（见下文「泛型与类型参数（当前仍拒绝）」）；负例 `generic_function_fail.ts`、`interface_generic_fail.ts`、`type_alias_generic_fail.ts` |
+| 泛型 / 类型实参 | 部分支持 | 单态化子集：泛型调用需显式类型实参；泛型声明可解析；更宽泛语义仍拒绝 |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
 
 ### 矩阵与集成测试对照
@@ -130,7 +130,7 @@ flowchart LR
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |
 | `console` | `console_stderr.ts`、`void_log.ts` | `compile_console_stderr_writes_eprintln`、`run_void_log_in_branch_prints_branch` |
 | 字面量类型 / 联合 / 交集 | `literal_type_*.ts`、`union_*.ts`、`intersection_type_fail.ts` | `run_literal_type_ok_prints_eight`、`compile_union_heterogeneous_fail_errors` 等 |
-| `interface` / `type` / 泛型拒绝 | `interface_*.ts`、`type_alias_*.ts`、`generic_function_fail.ts` | `run_interface_ok_prints_three`、`compile_generic_function_fails` 等 |
+| `interface` / `type` / 泛型子集 | `interface_*.ts`、`type_alias_*.ts`、`generic_function_ok.ts` | `run_interface_generic_ok_prints_zero`、`run_type_alias_generic_ok_prints_zero`、`run_generic_function_ok_prints_three` |
 | 嵌套函数 | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | 极简 tsconfig / `--project` | `multi_entry_tsconfig.json` + `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
 | CLI：`check` / `--emit-ir` | `sample.ts`、`switch_fail.ts` | `check_sample_ok`、`compile_emit_ir_stderr_contains_ir_module` |
@@ -141,18 +141,12 @@ flowchart LR
 
 **字面量类型**、**联合类型**、**受限 `interface`**、**受限 `type` 别名**与**泛型边界文档**子项已勾选（见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)）。与已实现子集（如注解中的 `number[]`、仅 `number` 字段的对象类型）的边界与拆分里程碑见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)。空值与收窄与下文「语义与类型路线（§3.3）」及 [PROJECT-TODO.zh-CN.md §3.3](PROJECT-TODO.zh-CN.md) 交叉：联合与 `??` / `?.` 的**完整**收窄仍待后续；当前 `??` 仍为受限子集（见 `nullish_ok.ts`），含 `null`/`undefined` 与非 primitive 的联合若无法映射到单一 Rust 类型会在 codegen 阶段拒绝。
 
-### 泛型与类型参数（当前仍拒绝）
+### 泛型与类型参数（单态化子集）
 
-本版本**不实现**泛型语义（无单态化/类型实参代入）。下列形态在 [`build.rs`](crates/ts2rs-hir/src/build.rs) 中显式报错，诊断为英文：
-
-| 语法形态 | 诊断摘要（节选） | 说明 |
-|----------|------------------|------|
-| 顶层 `function f<T>(…)` | `generic functions are not supported` | `build_fn` 检查 `func.type_params` |
-| `interface I<T> { … }` / `export interface I<T>` | `generic interfaces are not supported` | `collect_one_interface` |
-| `type A<T> = …` / `export type A<T> = …` | `generic type aliases are not supported` | `collect_one_type_alias` |
-| 类型位置 `Name<T>`（`TsTypeRef` 带实参） | `type arguments on type references are not supported` | `ts_type_from_ast` 中 `TsTypeRef` |
-
-后续若支持泛型，需单态化或等价受限策略；与上表无关的其它类型错误（如 `qualified type names are not supported`）仍按现有诊断为准。
+- 泛型函数声明可通过；在调用处使用显式类型实参时由 `sem` 进行实例化并改写调用。
+- 泛型函数若省略显式类型实参（如 `id(1)`，其中 `id<T>`）会报错。
+- 泛型 `interface` / `type` 声明可解析于当前受限类型子集。
+- 复杂推导、约束丰富形态与更完整 TypeScript 泛型语义仍在后续范围内。
 
 ## 语义与类型路线（§3.3）
 
@@ -232,12 +226,12 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 
 | Crate | 说明 |
 |-------|------|
-| `ts2rs-parser` | swc 封装；`ParsedSource` 含 `source_map`；[`module_graph`](crates/ts2rs-parser/src/module_graph.rs) 多文件入口 |
-| `ts2rs-hir` | IR、构建、语义、`emit_rust`；[`compile_graph`](crates/ts2rs-hir/src/lib.rs) 多模块；诊断与 codegen 共用节点 `Span` + 函数级 `ir_id`（见 [`ir.rs`](crates/ts2rs-hir/src/ir.rs)） |
+| `ts2rs-parser` | swc 封装；`ParsedSource` 含 `source_map`；[`module_graph`](crates/ts2rs-parser/src/module_graph.rs) 多文件入口；共享 import 解析见 [`import_utils`](crates/ts2rs-parser/src/import_utils.rs) |
+| `ts2rs-hir` | IR、构建、语义、`emit_rust`；[`compile_graph`](crates/ts2rs-hir/src/lib.rs) 多模块；诊断与 codegen 共用节点 `Span` + 函数级 `ir_id`（见 [`ir.rs`](crates/ts2rs-hir/src/ir.rs)）；拆分辅助模块：[`build/build_types.rs`](crates/ts2rs-hir/src/build/build_types.rs)、[`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs)、[`codegen/helpers.rs`](crates/ts2rs-hir/src/codegen/helpers.rs) |
 | `ts2rs-lower` | `lower_program` / [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) |
-| `ts2rs-driver` | 临时 crate + `cargo build`（需本机 `cargo` 在 `PATH`）；[`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)；未找到 `cargo` 时 [`DriverError::CargoNotFound`](crates/ts2rs-driver/src/lib.rs) |
+| `ts2rs-driver` | 临时 crate + `cargo build`（需本机 `cargo` 在 `PATH`）；[`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)；未找到 `cargo` 时 [`DriverError::CargoNotFound`](crates/ts2rs-driver/src/lib.rs)；流水线拆分：[`pipeline.rs`](crates/ts2rs-driver/src/pipeline.rs)、[`cargo_runner.rs`](crates/ts2rs-driver/src/cargo_runner.rs)、[`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs) |
 | `ts2rs_rt` | 可选运行时（预留） |
-| `ts2rs-cli` | 命令行 `ts2rs` |
+| `ts2rs-cli` | 命令行 `ts2rs`；命令拆分：[`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs)、[`commands.rs`](crates/ts2rs-cli/src/commands.rs)、[`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs) |
 
 ## 许可
 

@@ -4,11 +4,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use swc_ecma_ast::{
-    Decl, ExportDecl, FnDecl, ImportSpecifier, Module, ModuleDecl, ModuleExportName, ModuleItem,
-    Program, Stmt,
-};
+use swc_ecma_ast::{Decl, ExportDecl, FnDecl, Module, ModuleDecl, ModuleItem, Program, Stmt};
 
+use crate::import_utils::{named_import_target, resolve_supported_import_path};
 use crate::{parse_typescript_file, ParseError, ParsedSource};
 
 /// 解析入口文件并递归展开支持的 `import`（旧策略：合并进单模块 AST）。
@@ -83,23 +81,7 @@ fn process_import(
     visited: &mut HashSet<std::path::PathBuf>,
     prefix: &mut Vec<ModuleItem>,
 ) -> Result<(), ParseError> {
-    if imp.type_only {
-        return Err(ParseError::Message(
-            "`import type` is not supported for import resolution".to_string(),
-        ));
-    }
-    let raw = imp.src.value.to_string_lossy();
-    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
-    if !(raw.starts_with("./") || raw.starts_with("../")) {
-        return Err(ParseError::Message(format!(
-            "only relative imports like `./file.ts` are supported, got `{raw}`"
-        )));
-    }
-
-    let dir = file.parent().ok_or_else(|| {
-        ParseError::Message(format!("cannot resolve parent of `{}`", file.display()))
-    })?;
-    let dep_path = dir.join(raw);
+    let dep_path = resolve_supported_import_path(file, imp)?;
 
     let text = fs::read_to_string(&dep_path)
         .map_err(|e| ParseError::Message(format!("cannot read `{}`: {e}", dep_path.display())))?;
@@ -112,32 +94,14 @@ fn process_import(
     };
 
     for spec in &imp.specifiers {
-        match spec {
-            ImportSpecifier::Named(named) => {
-                if named.is_type_only {
-                    return Err(ParseError::Message(
-                        "type-only import specifiers are not supported".to_string(),
-                    ));
-                }
-                let want = match &named.imported {
-                    Some(ModuleExportName::Ident(id)) => id.sym.to_string(),
-                    Some(ModuleExportName::Str(s)) => s.value.to_string_lossy().into_owned(),
-                    None => named.local.sym.to_string(),
-                };
-                let f = find_exported_function(&dm, &want).ok_or_else(|| {
-                    ParseError::Message(format!(
-                        "no exported function `{want}` in `{}`",
-                        dep_path.display()
-                    ))
-                })?;
-                prefix.push(fn_decl_as_module_item(f));
-            }
-            ImportSpecifier::Default(_) | ImportSpecifier::Namespace(_) => {
-                return Err(ParseError::Message(
-                    "only named imports `{ foo }` are supported".to_string(),
-                ));
-            }
-        }
+        let want = named_import_target(spec)?;
+        let f = find_exported_function(&dm, &want).ok_or_else(|| {
+            ParseError::Message(format!(
+                "no exported function `{want}` in `{}`",
+                dep_path.display()
+            ))
+        })?;
+        prefix.push(fn_decl_as_module_item(f));
     }
 
     Ok(())

@@ -6,11 +6,9 @@ use std::path::{Path, PathBuf};
 
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
-use swc_ecma_ast::{
-    Decl, ExportDecl, ImportDecl, ImportSpecifier, ModuleDecl, ModuleExportName, ModuleItem,
-    Program,
-};
+use swc_ecma_ast::{Decl, ExportDecl, ModuleDecl, ModuleItem, Program};
 
+use crate::import_utils::{named_import_target, resolve_supported_import_path};
 use crate::{parse_typescript_file, ParseError, ParsedSource};
 
 /// 解析得到的单个模块。
@@ -96,7 +94,7 @@ fn visit_module(
     if let Program::Module(ref m) = source.program {
         for item in &m.body {
             if let ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) = item {
-                let dep = resolve_import_path(path, imp)?;
+                let dep = resolve_supported_import_path(path, imp)?;
                 visit_module(&dep, visited, stack, modules)?;
             }
         }
@@ -109,25 +107,6 @@ fn visit_module(
         source,
     });
     Ok(())
-}
-
-fn resolve_import_path(file: &Path, imp: &ImportDecl) -> Result<PathBuf, ParseError> {
-    if imp.type_only {
-        return Err(ParseError::Message(
-            "`import type` is not supported for import resolution".to_string(),
-        ));
-    }
-    let raw = imp.src.value.to_string_lossy();
-    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
-    if !(raw.starts_with("./") || raw.starts_with("../")) {
-        return Err(ParseError::Message(format!(
-            "only relative imports like `./file.ts` are supported, got `{raw}`"
-        )));
-    }
-    let dir = file.parent().ok_or_else(|| {
-        ParseError::Message(format!("cannot resolve parent of `{}`", file.display()))
-    })?;
-    Ok(dir.join(raw))
 }
 
 /// 每个模块导出的函数名（仅 `export function name`）。
@@ -167,7 +146,7 @@ pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
             let ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) = item else {
                 continue;
             };
-            let dep_path = resolve_import_path(&m.path, imp)?;
+            let dep_path = resolve_supported_import_path(&m.path, imp)?;
             let dep_canon = dep_path.canonicalize().unwrap_or_else(|_| dep_path.clone());
             let exports = exports_by_path.get(&dep_canon).ok_or_else(|| {
                 ParseError::Message(format!(
@@ -177,32 +156,12 @@ pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
             })?;
 
             for spec in &imp.specifiers {
-                match spec {
-                    ImportSpecifier::Named(named) => {
-                        if named.is_type_only {
-                            return Err(ParseError::Message(
-                                "type-only import specifiers are not supported".to_string(),
-                            ));
-                        }
-                        let want = match &named.imported {
-                            Some(ModuleExportName::Ident(id)) => id.sym.to_string(),
-                            Some(ModuleExportName::Str(s)) => {
-                                s.value.to_string_lossy().into_owned()
-                            }
-                            None => named.local.sym.to_string(),
-                        };
-                        if !exports.contains(&want) {
-                            return Err(ParseError::Message(format!(
-                                "no exported function `{want}` in `{}`",
-                                dep_path.display()
-                            )));
-                        }
-                    }
-                    ImportSpecifier::Default(_) | ImportSpecifier::Namespace(_) => {
-                        return Err(ParseError::Message(
-                            "only named imports `{ foo }` are supported".to_string(),
-                        ));
-                    }
+                let want = named_import_target(spec)?;
+                if !exports.contains(&want) {
+                    return Err(ParseError::Message(format!(
+                        "no exported function `{want}` in `{}`",
+                        dep_path.display()
+                    )));
                 }
             }
         }

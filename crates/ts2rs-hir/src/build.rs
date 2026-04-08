@@ -7,13 +7,14 @@ use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, Decl, EmptyStmt, ExportDecl, Expr,
     ExprOrSpread, FnDecl, ForStmt, KeyValueProp, Lit, MemberExpr, MemberProp, ModuleDecl,
     ModuleItem, OptChainBase, OptChainExpr, Param, Pat, Program, Prop, PropName, PropOrSpread,
-    SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsEntityName, TsInterfaceDecl, TsIntersectionType,
-    TsKeywordTypeKind, TsLit, TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement,
-    TsUnionOrIntersectionType, TsUnionType, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
+    SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind,
+    VarDeclOrExpr,
 };
 
 use crate::error::{diag, diag_spanned, CompileError};
 use crate::ir::*;
+
+mod build_types;
 
 pub fn build_module(
     program: &Program,
@@ -37,6 +38,7 @@ pub fn build_module(
     }
     Ok(IRModule {
         fns,
+        generic_types: HashMap::new(),
         entry_path: path.to_string(),
     })
 }
@@ -66,80 +68,9 @@ pub fn build_program_multi(
     }
     Ok(IRModule {
         fns: all,
+        generic_types: HashMap::new(),
         entry_path: entry_path.to_string(),
     })
-}
-
-/// 顶层 `interface` 声明体与对象类型字面量一致：必选、`number` 字段 → [`TsType::ObjectNum`]。
-/// 同一文件内按**出现顺序**解析；引用尚未声明的接口名将报错。
-fn object_num_from_type_elements(
-    members: &[TsTypeElement],
-    cm: &Lrc<SourceMap>,
-    path: &str,
-    dup_span: Span,
-    iface: &HashMap<String, TsType>,
-) -> Result<TsType, CompileError> {
-    let mut keys: Vec<String> = Vec::new();
-    for m in members {
-        let TsTypeElement::TsPropertySignature(p) = m else {
-            return Err(diag(
-                cm,
-                path,
-                m.span(),
-                "only property signatures are supported in object type literal",
-            ));
-        };
-        if p.optional {
-            return Err(diag(
-                cm,
-                path,
-                p.span,
-                "optional object fields are not supported",
-            ));
-        }
-        let key = match &*p.key {
-            Expr::Ident(i) => i.sym.to_string(),
-            Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
-            _ => {
-                return Err(diag(
-                    cm,
-                    path,
-                    p.span,
-                    "object type field key must be identifier or string literal",
-                ));
-            }
-        };
-        let Some(type_ann) = &p.type_ann else {
-            return Err(diag(
-                cm,
-                path,
-                p.span,
-                "object type field annotation is required",
-            ));
-        };
-        let ft = ts_type_from_ast(&type_ann.type_ann, cm, path, iface)?;
-        if ft != TsType::Number {
-            return Err(diag(
-                cm,
-                path,
-                p.span,
-                "only `number` object fields are supported",
-            ));
-        }
-        keys.push(key);
-    }
-    keys.sort();
-    for w in keys.windows(2) {
-        if w[0] == w[1] {
-            return Err(diag(
-                cm,
-                path,
-                dup_span,
-                format!("duplicate object type field `{}`", w[0]),
-            ));
-        }
-    }
-    Ok(TsType::ObjectNum(keys))
 }
 
 fn collect_named_types(
@@ -147,111 +78,7 @@ fn collect_named_types(
     cm: &Lrc<SourceMap>,
     path: &str,
 ) -> Result<HashMap<String, TsType>, CompileError> {
-    let mut map = HashMap::new();
-    match program {
-        Program::Module(m) => {
-            for item in &m.body {
-                match item {
-                    ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(i))) => {
-                        collect_one_interface(i.as_ref(), &mut map, cm, path)?;
-                    }
-                    ModuleItem::Stmt(Stmt::Decl(Decl::TsTypeAlias(a))) => {
-                        collect_one_type_alias(a.as_ref(), &mut map, cm, path)?;
-                    }
-                    ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => {
-                        match decl {
-                            Decl::TsInterface(i) => {
-                                collect_one_interface(i.as_ref(), &mut map, cm, path)?
-                            }
-                            Decl::TsTypeAlias(a) => {
-                                collect_one_type_alias(a.as_ref(), &mut map, cm, path)?
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Program::Script(s) => {
-            for stmt in &s.body {
-                match stmt {
-                    Stmt::Decl(Decl::TsInterface(i)) => {
-                        collect_one_interface(i.as_ref(), &mut map, cm, path)?;
-                    }
-                    Stmt::Decl(Decl::TsTypeAlias(a)) => {
-                        collect_one_type_alias(a.as_ref(), &mut map, cm, path)?;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    Ok(map)
-}
-
-fn collect_one_interface(
-    d: &TsInterfaceDecl,
-    map: &mut HashMap<String, TsType>,
-    cm: &Lrc<SourceMap>,
-    path: &str,
-) -> Result<(), CompileError> {
-    let name = d.id.sym.to_string();
-    if map.contains_key(&name) {
-        return Err(diag(
-            cm,
-            path,
-            d.id.span,
-            format!("duplicate type name `{}`", d.id.sym),
-        ));
-    }
-    if d.type_params.is_some() {
-        return Err(diag(
-            cm,
-            path,
-            d.span,
-            "generic interfaces are not supported",
-        ));
-    }
-    if !d.extends.is_empty() {
-        return Err(diag(
-            cm,
-            path,
-            d.extends[0].span,
-            "interface extends clauses are not supported",
-        ));
-    }
-    let ty = object_num_from_type_elements(&d.body.body, cm, path, d.body.span, map)?;
-    map.insert(name, ty);
-    Ok(())
-}
-
-fn collect_one_type_alias(
-    d: &TsTypeAliasDecl,
-    map: &mut HashMap<String, TsType>,
-    cm: &Lrc<SourceMap>,
-    path: &str,
-) -> Result<(), CompileError> {
-    let name = d.id.sym.to_string();
-    if map.contains_key(&name) {
-        return Err(diag(
-            cm,
-            path,
-            d.id.span,
-            format!("duplicate type name `{}`", d.id.sym),
-        ));
-    }
-    if d.type_params.is_some() {
-        return Err(diag(
-            cm,
-            path,
-            d.span,
-            "generic type aliases are not supported",
-        ));
-    }
-    let ty = ts_type_from_ast(d.type_ann.as_ref(), cm, path, map)?;
-    map.insert(name, ty);
-    Ok(())
+    build_types::collect_named_types(program, cm, path)
 }
 
 fn collect_fn_decls(
@@ -413,19 +240,48 @@ fn build_fn(
             "generator functions are not supported",
         ));
     }
-    if func.type_params.is_some() {
-        return Err(diag_spanned(
-            cm,
-            path,
-            f,
-            "generic functions are not supported",
-        ));
+    let mut fn_type_params = HashSet::new();
+    let mut fn_type_params_vec = Vec::new();
+    if let Some(tp) = &func.type_params {
+        for p in &tp.params {
+            let name = p.name.sym.to_string();
+            if !fn_type_params.insert(name.clone()) {
+                return Err(diag(
+                    cm,
+                    path,
+                    p.span,
+                    format!("duplicate type parameter `{}`", p.name.sym),
+                ));
+            }
+            fn_type_params_vec.push(name);
+        }
     }
 
-    let ret = ts_type_from_ann(&func.return_type, cm, path, f.span(), iface)?;
+    let ret = ts_type_from_ann(
+        &func.return_type,
+        cm,
+        path,
+        f.span(),
+        iface,
+        if fn_type_params.is_empty() {
+            None
+        } else {
+            Some(&fn_type_params)
+        },
+    )?;
     let mut params = Vec::new();
     for p in &func.params {
-        let (name, ty) = param_binding(p, cm, path, iface)?;
+        let (name, ty) = param_binding(
+            p,
+            cm,
+            path,
+            iface,
+            if fn_type_params.is_empty() {
+                None
+            } else {
+                Some(&fn_type_params)
+            },
+        )?;
         params.push((name, ty));
     }
 
@@ -442,12 +298,14 @@ fn build_fn(
     Ok(IRFunction {
         ir_id,
         name: f.ident.sym.to_string(),
+        type_params: fn_type_params_vec,
         params,
         ret,
         body: body_ir,
         span: f.span(),
         cm: cm.clone(),
         source_path: path.to_string(),
+        mono_origin: None,
     })
 }
 
@@ -921,17 +779,7 @@ fn ts_type_from_pat_ann(
     path: &str,
     iface: &HashMap<String, TsType>,
 ) -> Result<TsType, CompileError> {
-    match pat {
-        Pat::Ident(BindingIdent { type_ann, .. }) => {
-            ts_type_from_ann(type_ann, cm, path, pat.span(), iface)
-        }
-        _ => Err(diag(
-            cm,
-            path,
-            pat.span(),
-            "type annotation required for binding",
-        )),
-    }
+    build_types::ts_type_from_pat_ann(pat, cm, path, iface)
 }
 
 fn ts_type_from_ann(
@@ -940,147 +788,9 @@ fn ts_type_from_ann(
     path: &str,
     fallback_span: Span,
     iface: &HashMap<String, TsType>,
+    type_params: Option<&HashSet<String>>,
 ) -> Result<TsType, CompileError> {
-    let Some(ann) = ann else {
-        return Err(diag(cm, path, fallback_span, "type annotation is required"));
-    };
-    ts_type_from_ast(&ann.type_ann, cm, path, iface)
-}
-
-fn ts_type_from_ast(
-    ty: &AstTsType,
-    cm: &Lrc<SourceMap>,
-    path: &str,
-    iface: &HashMap<String, TsType>,
-) -> Result<TsType, CompileError> {
-    match ty {
-        AstTsType::TsKeywordType(k) => match k.kind {
-            TsKeywordTypeKind::TsNumberKeyword => Ok(TsType::Number),
-            TsKeywordTypeKind::TsBooleanKeyword => Ok(TsType::Boolean),
-            TsKeywordTypeKind::TsStringKeyword => Ok(TsType::String),
-            TsKeywordTypeKind::TsVoidKeyword => Ok(TsType::Void),
-            TsKeywordTypeKind::TsNullKeyword => Ok(TsType::Null),
-            TsKeywordTypeKind::TsUndefinedKeyword => Ok(TsType::Undefined),
-            _ => Err(diag(
-                cm,
-                path,
-                k.span,
-                "only `number`, `boolean`, `string`, `void`, `null`, `undefined` keyword types are supported",
-            )),
-        },
-        AstTsType::TsArrayType(a) => {
-            let elem = ts_type_from_ast(&a.elem_type, cm, path, iface)?;
-            if elem == TsType::Number {
-                Ok(TsType::ArrayNumber)
-            } else {
-                Err(diag(
-                    cm,
-                    path,
-                    a.span,
-                    "only `number[]` is supported for array type annotation (not numeric literal types)",
-                ))
-            }
-        }
-        AstTsType::TsLitType(lt) => match &lt.lit {
-            TsLit::Number(n) => {
-                let v = n.value;
-                if v.fract() != 0.0 || !v.is_finite() {
-                    return Err(diag(
-                        cm,
-                        path,
-                        lt.span,
-                        "only integer literal types are supported for `number` literals in type position",
-                    ));
-                }
-                if v < i32::MIN as f64 || v > i32::MAX as f64 {
-                    return Err(diag(
-                        cm,
-                        path,
-                        lt.span,
-                        "numeric literal type is out of range for `i32`",
-                    ));
-                }
-                Ok(TsType::NumberLit(v as i32))
-            }
-            TsLit::Str(s) => Ok(TsType::StringLit(s.value.to_string_lossy().into_owned())),
-            TsLit::Bool(b) => Ok(TsType::BoolLit(b.value)),
-            TsLit::BigInt(_) => Err(diag(
-                cm,
-                path,
-                lt.span,
-                "`bigint` literal types are not supported",
-            )),
-            TsLit::Tpl(_) => Err(diag(
-                cm,
-                path,
-                lt.span,
-                "template literal types are not supported",
-            )),
-        },
-        AstTsType::TsTypeLit(tl) => {
-            object_num_from_type_elements(&tl.members, cm, path, tl.span, iface)
-        }
-        AstTsType::TsTypeRef(r) => {
-            if r.type_params.is_some() {
-                return Err(diag(
-                    cm,
-                    path,
-                    r.span,
-                    "type arguments on type references are not supported",
-                ));
-            }
-            match &r.type_name {
-                TsEntityName::Ident(id) => {
-                    let name = id.sym.to_string();
-                    iface.get(&name).cloned().ok_or_else(|| {
-                        diag(
-                            cm,
-                            path,
-                            r.span,
-                            format!("unknown type name `{}`", id.sym),
-                        )
-                    })
-                }
-                TsEntityName::TsQualifiedName(q) => Err(diag(
-                    cm,
-                    path,
-                    q.span,
-                    "qualified type names are not supported",
-                )),
-            }
-        }
-        AstTsType::TsUnionOrIntersectionType(u) => match u {
-            TsUnionOrIntersectionType::TsUnionType(TsUnionType { types, span }) => {
-                if types.is_empty() {
-                    return Err(diag(
-                        cm,
-                        path,
-                        *span,
-                        "union type must have at least one member",
-                    ));
-                }
-                let mut members = Vec::with_capacity(types.len());
-                for t in types {
-                    members.push(ts_type_from_ast(t.as_ref(), cm, path, iface)?);
-                }
-                Ok(normalize_union(members))
-            }
-            TsUnionOrIntersectionType::TsIntersectionType(TsIntersectionType { span, .. }) => Err(
-                diag(
-                    cm,
-                    path,
-                    *span,
-                    "intersection types are not supported",
-                ),
-            ),
-        },
-        _ => Err(diag(
-            cm,
-            path,
-            ty.span(),
-            "unsupported type annotation",
-        )),
-    }
+    build_types::ts_type_from_ann(ann, cm, path, fallback_span, iface, type_params)
 }
 
 fn param_binding(
@@ -1088,10 +798,11 @@ fn param_binding(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
+    type_params: Option<&HashSet<String>>,
 ) -> Result<(String, TsType), CompileError> {
     match &p.pat {
         Pat::Ident(BindingIdent { id, type_ann, .. }) => {
-            let ty = ts_type_from_ann(type_ann, cm, path, id.span, iface)?;
+            let ty = ts_type_from_ann(type_ann, cm, path, id.span, iface, type_params)?;
             Ok((id.sym.to_string(), ty))
         }
         _ => Err(diag_spanned(
@@ -1101,6 +812,22 @@ fn param_binding(
             "only simple identifier parameters are supported",
         )),
     }
+}
+
+fn call_type_args(
+    c: &swc_ecma_ast::CallExpr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+) -> Result<Vec<TsType>, CompileError> {
+    let Some(targs) = &c.type_args else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::with_capacity(targs.params.len());
+    for t in &targs.params {
+        out.push(build_types::ts_type_from_ast(t, cm, path, iface, None)?);
+    }
+    Ok(out)
 }
 
 fn build_expr(
@@ -1233,6 +960,7 @@ fn build_expr(
         Expr::Array(a) => build_array_expr(a, cm, path, iface),
         Expr::Object(o) => build_object_expr(o, cm, path, iface),
         Expr::Call(c) => {
+            let type_args = call_type_args(c, cm, path, iface)?;
             if let Callee::Expr(ce) = &c.callee {
                 if let Expr::Member(m) = &**ce {
                     if let Expr::Ident(obj) = &*m.obj {
@@ -1352,6 +1080,7 @@ fn build_expr(
                             receiver,
                             method: prop.sym.to_string(),
                             args,
+                            type_args,
                             span: c.span,
                         });
                     }
@@ -1382,6 +1111,7 @@ fn build_expr(
                     return Ok(IRExpr::Call {
                         callee: i.sym.to_string(),
                         args,
+                        type_args,
                         span: c.span,
                     });
                 }

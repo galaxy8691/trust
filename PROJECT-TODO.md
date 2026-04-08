@@ -256,11 +256,11 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 
 ### 13.1 Generics (functions / interfaces / type aliases / type arguments)
 
-- [ ] **Design**: monomorphization, erasure, or limited strategy (document vs README generics table).
-- [ ] **Parse + build**: `type_params`, generic bounds, `TsTypeRef` args into HIR.
-- [ ] **sem**: argument substitution and consistency (decidable subset under hard typing).
-- [ ] **codegen**: monomorph expansion or equivalent Rust emission.
-- [ ] **Tests**: fixtures + `cli_e2e` + negatives (still reject overly broad cases).
+- [x] **Design**: monomorphization, erasure, or limited strategy (document vs README generics table).（本轮采用单态化子集）
+- [x] **Parse + build**: `type_params`, generic bounds, `TsTypeRef` args into HIR.（已接入泛型声明与显式类型实参解析）
+- [x] **sem**: argument substitution and consistency (decidable subset under hard typing).（调用处显式类型实参校验、类型替换与实例化改写）
+- [x] **codegen**: monomorph expansion or equivalent Rust emission.（消费单态化结果；未实例化类型参数在 codegen 兜底报错）
+- [x] **Tests**: fixtures + `cli_e2e` + negatives (still reject overly broad cases).（新增 `generic_function_ok` / `generic_function_missing_type_args_fail` 与对应 e2e）
 
 ### 13.2 Higher-order functions (first-class functions, types, calls)
 
