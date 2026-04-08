@@ -2,15 +2,15 @@
 
 # ts2rs 项目长期 TODO 清单
 
-本文档用于**长期跟进**编译器与工具链的演进，按主题分层列出可验收项。状态建议用 `[ ]` / `[~]` 进行中 / `[x]` 在 PR 或提交中维护。**本清单所列特性均以硬类型（trust）为前提。**
+本文档用于**长期跟进**编译器与工具链的演进，按主题分层列出可验收项。状态建议用 `[ ]` / `[~]` 进行中 / `[x]` 在 PR 或提交中维护。**本清单所列特性均以强类型（strong typing，trust）为前提。**
 
 **相关代码入口**：[`README.zh-CN.md`](README.zh-CN.md) · [`crates/ts2rs-hir`](crates/ts2rs-hir)（`build.rs` / `sem.rs` / `codegen.rs` / `ir.rs`）· [`crates/ts2rs-parser`](crates/ts2rs-parser) · [`crates/ts2rs-driver`](crates/ts2rs-driver) · [`crates/ts2rs-cli`](crates/ts2rs-cli) · [`test-ts/main.ts`](test-ts/main.ts)（多文件：`test-ts/math.ts`） · [`crates/ts2rs-cli/tests/fixtures/`](crates/ts2rs-cli/tests/fixtures/)
 
 **后续/backlog 总表**：见 **[§14 后续工作（backlog）](#14-后续工作backlog)**（与英文 [`PROJECT-TODO.md`](PROJECT-TODO.md) §14 对应）。
 
-### 规划约束：硬类型（trust）
+### 规划约束：强类型（strong typing，trust）
 
-**trust 为硬类型，不允许软类型。** 长期条目与 PR 取舍须与此一致：只扩展能在 HIR / [`sem.rs`](crates/ts2rs-hir/src/sem.rs) 中给出**静态**规则的语法；**不**把「隐式 any、运行期改型、无注解宽进」等软类型能力列入本仓库目标。详细表述见 [README「类型立场：硬类型」](README.zh-CN.md)。  
+**trust 采用强类型：** 与隐式 any、运行期改型等宽松语义相对，长期条目与 PR 取舍须与此一致：只扩展能在 HIR / [`sem.rs`](crates/ts2rs-hir/src/sem.rs) 中给出**静态**规则的语法；**不**把「隐式 any、运行期改型、无注解宽进」等能力列入本仓库目标。详细表述见 [README「类型立场：强类型」](README.zh-CN.md)。  
 本文中「收窄」「可赋值」「结构/形状」均指 **HIR / sem 内的静态规则**，**不**表示运行期改型，也**不**表示向 `tsc` 默认宽松或渐进式软类型靠拢。
 
 ---
@@ -47,7 +47,7 @@
 - [x] **`async` / `await` / `Promise` / `fetch` / `fetchText`（MVP）**：**`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()`：**JSON number** → `f64`，**`serde_json`**，与动态 `JSON.parse` 一致）；**`response.body.getReader()`** + **`await reader.read()`** 分块 body；`init` 支持字面量 `method`、`headers`（值为字符串字面量）、可选 `body` 字符串）；**`Promise.all`**、**`.then`** 拒绝与 §async 条目一致；生成代码若含 **`futures_util`** 则 driver 注入 **`futures-util`**；**完整 WHATWG `fetch`（浏览器级 `ReadableStream`/`Headers` 等）/ 与某版本 Node 字节级 TLS·HTTP2 对齐**仍属后续。
 - [x] **成员访问与调用链**：`string.length`（UTF-16）、`string[i]`、`number[]`/`string[]` 下标、对象 `length`；**`obj.m(args)`** → 全局 `m(receiver,…)`；**一层** `f().prop` / `f().m()`（`chain_call_ok.ts`）；可选 **`?.` / `f?.()` / `recv?.m()`**（`optional_call_ok.ts`）；见 `member_length_ok.ts`、`method_call_ok.ts`、`string_utf16_length.ts`、`stdlib_hir_ok.ts` 等。
 - [x] **可选链 / 空值合并**：受限子集已支持（`obj?.prop`、`??`；见 `optional_ok.ts`、`nullish_ok.ts`）；完整语义依赖 §3.3。
-- [x] **逻辑与短路**：`&&`、`||`；`boolean` 与 `number` 真值（`!= 0`）已支持，结果类型为 `boolean`（见 `logical_bool.ts`、`logical_truthy_ok.ts`）；与 TypeScript 值保留式 `&&`/`||` 仍不同；**硬类型下**结果类型固定为 `boolean`，更复杂真值或联合操作数仍受限。
+- [x] **逻辑与短路**：`&&`、`||`；`boolean` 与 `number` 真值（`!= 0`）已支持，结果类型为 `boolean`（见 `logical_bool.ts`、`logical_truthy_ok.ts`）；与 TypeScript 值保留式 `&&`/`||` 仍不同；**强类型下**结果类型固定为 `boolean`，更复杂真值或联合操作数仍受限。
 - [x] **三元运算符**：`cond ? a : b`（见 `ternary_ok.ts`）。
 - [x] **逗号表达式**：见 `comma_ok.ts`。
 - [x] **模板字符串**：无 tag；见 `template_ok.ts`。
@@ -63,7 +63,7 @@
 
 **摘要**
 
-- [x] **字面量类型**、**联合类型**、**接口**、**type 别名**：与 **硬类型** checker 路线图对齐（拆分为下列子项；**字面量类型**、**primitive/字面量联合**、**受限 `interface`→`ObjectNum`** 与 **受限 `type` 别名→具名表** 已见子项）。**泛型**见下列独立子项（文档化「仍拒绝」里程碑，非实现语义）。
+- [x] **字面量类型**、**联合类型**、**接口**、**type 别名**：与 **强类型** checker 路线图对齐（拆分为下列子项；**字面量类型**、**primitive/字面量联合**、**受限 `interface`→`ObjectNum`** 与 **受限 `type` 别名→具名表** 已见子项）。**泛型**见下列独立子项（文档化「仍拒绝」里程碑，非实现语义）。
 
 **与已实现子集的关系**：§1.3 已支持受限注解 `number[]`、`{ k: number }`（HIR 中 [`TsType::ArrayNumber`](crates/ts2rs-hir/src/ir.rs) / [`ObjectNum`](crates/ts2rs-hir/src/ir.rs)）。**字面量类型**（`NumberLit` / `StringLit` / `BoolLit`）与 **联合类型**（[`TsType::Union`](crates/ts2rs-hir/src/ir.rs) + 规范化）已见下项；**顶层 `interface`** 在类型层等价于具名 `ObjectNum`（与对象类型字面量同一规则）；**顶层 `type` 别名**经 [`collect_named_types`](crates/ts2rs-hir/src/build.rs) 解析为既有 `TsType` 并进入同一张具名表；**泛型语义**仍未实现，拒绝对照见下列子项与 [README §1.4](README.zh-CN.md)；完整对象/接口形状与 IR 演进见 §2.1；**静态**空值与分支收窄与 §3.3 交叉。
 
@@ -74,7 +74,7 @@
   - **验收**：[`build.rs`](crates/ts2rs-hir/src/build.rs) 解析 `TsLitType`；[`sem.rs`](crates/ts2rs-hir/src/sem.rs) `type_assignable` / 推断字面量；`literal_type_ok.ts`、`literal_type_fail.ts` + [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)。
 
 - [x] **联合类型**（`A | B`，建议先 primitive / 字面量联合再扩展）  
-  - **依赖**：类型规范化与可判定相等的并集表示；与 `??` / `?.` 的**静态收窄 / 分支类型**（硬类型下、须可静态判定）对齐 §3.3。  
+  - **依赖**：类型规范化与可判定相等的并集表示；与 `??` / `?.` 的**静态收窄 / 分支类型**（强类型下、须可静态判定）对齐 §3.3。  
   - **验收**：受限联合下的赋值与分支可给出一致诊断或生成；集成测试覆盖典型路径（`union_literal_ok`、`union_cond_ok`、负例 `union_heterogeneous_fail`、`intersection_type_fail`、`union_mixed_cond_fail`）。
 
 - [x] **`interface` 与对象类型**（声明体、可选属性、`extends` 等按阶段）  
@@ -96,7 +96,7 @@
 ### 2.1 当前结构补强
 
 - [x] **语句**：已含 `Assign`、`Break`、`Continue`、`DoWhile`、`FnDecl`、`Empty`；`for` 展开为 `while`；`Switch` 未实现。
-- [x] **表达式**：已含 `LogicalAnd` / `LogicalOr`、`Conditional`、`Seq`、`Tpl`、`Member` / `OptionalMember`、`Index`（数组与 UTF-16 字符串下标）、`MethodCall` / `OptionalMethodCall`、一层链式 `f().prop` / `f().m()`、`JsonBuiltin` / `UriBuiltin` 及 README 矩阵所列内建；**计算属性调用** `obj[expr](…)` 仍不支持。`ObjectNum` / `interface` 见 §1.4（硬类型、静态检查）。
+- [x] **表达式**：已含 `LogicalAnd` / `LogicalOr`、`Conditional`、`Seq`、`Tpl`、`Member` / `OptionalMember`、`Index`（数组与 UTF-16 字符串下标）、`MethodCall` / `OptionalMethodCall`、一层链式 `f().prop` / `f().m()`、`JsonBuiltin` / `UriBuiltin` 及 README 矩阵所列内建；**计算属性调用** `obj[expr](…)` 仍不支持。`ObjectNum` / `interface` 见 §1.4（强类型、静态检查）。
 - [x] **顶层**：多文件模块图 — `parse_module_graph` + `validate_imports`；HIR 合并为 [`IRModule`](crates/ts2rs-hir/src/ir.rs)（`build_program_multi` / `compile_graph`）；`main` 须在入口文件；全局函数名唯一；负例见 `import_missing_export_*`、`circular_*`、`dup_*` fixtures。
 
 ### 2.2 元数据与调试
@@ -124,7 +124,7 @@
 - [x] **与 §1.4 的衔接**：字面量类型、联合类型与 `??` / `?.` **静态**收窄应与 §1.4 子项一致（避免与受限 `TsType` 冲突）。联合类型已入 HIR。**已实现（sem）**：在 `Union` 上去除 `null`/`undefined` 后，若与 `??` 右侧为**同族**（`number`/`string`/`boolean` 或**结构一致**的 `Fn`），则 [`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) 中 `IRExpr::NullishCoalesce` 路径会调用 `unify_ternary_branches` 得到单一结果类型。**仍为后续**：依赖 **discriminant** 的 discriminated union 收窄（大范围，非本子项一次完成）。验收：README §3.3；`nullish_ok.ts` / `optional_ok.ts`；`??` 与函数类型联合的 sem 见 `nullish_fn_ok.ts`（`ts2rs check`）。
 - [x] **`null` / `undefined`**：[`TsType`](crates/ts2rs-hir/src/ir.rs) 已含 `Null` / `Undefined` 等变体；检查以 **当前 sem 静态规则**为准，**不设** tsc 默认「万物可空」式软语义。验收：README §3.3；**未**实现 `strictNullChecks` 式开关。若将来增加模式，应为**显式编译选项**（如 strict 空值），**非**隐式放宽或兼容 JS 动态性。
 - [x] **结构类型 vs 名义类型**：**trust 以名义表 + 静态形状检查为界**；与 Rust 后端映射策略（当前以基础类型为主）。验收：README §3.3 已说明具名表/语义检查与 Rust 生成侧边界；**未**实现 TS 结构子类型全集，**不**将其列为路线目标。
-- [x] **函数类型与高阶函数**：与 [§13.2](PROJECT-TODO.zh-CN.md) 及 README 一致——已实现**受限**静态函数类型、箭头值、`f(...)`、传参/返回函数等；codegen 闭包仍为 `(number) => number` 硬子集。**勿**再写「无一等函数值 / 未做 HOF」；应区分「已支持的 HOF 子集」与「仍为后续的泛化 / codegen 扩展」。
+- [x] **函数类型与高阶函数**：与 [§13.2](PROJECT-TODO.zh-CN.md) 及 README 一致——已实现**受限**静态函数类型、箭头值、`f(...)`、传参/返回函数等；codegen 闭包仍为 `(number) => number` 的严格子集。**勿**再写「无一等函数值 / 未做 HOF」；应区分「已支持的 HOF 子集」与「仍为后续的泛化 / codegen 扩展」。
 
 ### 3.4 控制流分析（进阶）
 
@@ -216,7 +216,7 @@
 
 ## 9. 文档与开发者体验
 
-- [x] **README**：与实现同步更新矩阵；「不支持的 TS 特性」简表（**兼作 trust 硬类型拒斥边界说明**）。**验收**：[`README.md`](README.md)（英文默认）与 [`README.zh-CN.md`](README.zh-CN.md) 中 **Unsupported TypeScript (trust rejection boundary)** / **不支持的 TypeScript 特性（trust 硬类型拒斥边界）** 小节及语言矩阵。
+- [x] **README**：与实现同步更新矩阵；「不支持的 TS 特性」简表（**兼作 trust 强类型拒斥边界说明**）。**验收**：[`README.md`](README.md)（英文默认）与 [`README.zh-CN.md`](README.zh-CN.md) 中 **Unsupported TypeScript (trust rejection boundary)** / **不支持的 TypeScript 特性（trust 强类型拒斥边界）** 小节及语言矩阵。
 - [x] **架构图**：解析 → HIR → sem → codegen → driver（可 Mermaid）。**验收**：两 README 中 **Architecture** / **架构** 下的 Mermaid `flowchart LR`（`ts2rs_parser` → HIR → sem → codegen → `ts2rs_lower` → `ts2rs_cli` / `ts2rs_driver`）。
 - [x] **贡献指南**：`CONTRIBUTING.md`（分支、测试命令、MSRV）。**验收**：[`CONTRIBUTING.md`](CONTRIBUTING.md) / [`CONTRIBUTING.zh-CN.md`](CONTRIBUTING.zh-CN.md)；根 [`Cargo.toml`](Cargo.toml) `[workspace.package] rust-version = "1.74"` 与各 crate `rust-version.workspace = true`。
 - [x] **变更日志**：`CHANGELOG.md`（若对外发布）。**验收**：[`CHANGELOG.md`](CHANGELOG.md) / [`CHANGELOG.zh-CN.md`](CHANGELOG.zh-CN.md)，Keep a Changelog 风格含 `[Unreleased]` 与 `[0.1.0]`。
@@ -251,19 +251,19 @@
 | P1     | 嵌套函数或明确不支持的长期策略          | 减少用户困惑                              |
 | P2     | 多文件 + `import`                       | 与 driver 联动，工作量大                  |
 | P2     | 逻辑运算与三元                          | 常见 TS 惯用法                            |
-| P3     | 泛型、硬类型下静态类型系统深化          | 长期（**非** tsc / 软类型全集）；**细项与验收见 §13** |
+| P3     | 泛型、强类型下静态类型系统深化          | 长期（**非** tsc / 软类型全集）；**细项与验收见 §13** |
 
 ---
 
 ## 13. 大型语言特性（分里程碑筹备）
 
-下列条目均为**大工程**，实施时按 **解析（swc/AST）→ HIR → `sem` → `codegen` → 集成/单元测试** 分 PR 推进；语义须保持 **trust 硬类型**（可静态判定），与完整 `tsc` **不必**逐条等价。完成子里程碑后更新 [README.zh-CN.md](README.zh-CN.md) 语言矩阵与本节勾选。
+下列条目均为**大工程**，实施时按 **解析（swc/AST）→ HIR → `sem` → `codegen` → 集成/单元测试** 分 PR 推进；语义须保持 **trust 强类型**（可静态判定），与完整 `tsc` **不必**逐条等价。完成子里程碑后更新 [README.zh-CN.md](README.zh-CN.md) 语言矩阵与本节勾选。
 
 ### 13.1 泛型（函数 / 接口 / 类型别名 / 类型实参）
 
 - [x] **设计**：单态化、 erased、或受限策略（文档化与 README 泛型表对齐或替代）。（本轮采用单态化子集）
 - [x] **解析 + build**：`type_params`、泛型实例化边界、`TsTypeRef` 实参进入 HIR。（已接入泛型声明与显式类型实参解析）
-- [x] **sem**：实参代入与一致性检查（硬类型下可判定子集）。（调用处显式类型实参校验、类型替换与实例化改写）
+- [x] **sem**：实参代入与一致性检查（强类型下可判定子集）。（调用处显式类型实参校验、类型替换与实例化改写）
 - [x] **codegen**：单态化展开或等价 Rust 生成策略。（消费单态化结果；未实例化类型参数在 codegen 兜底报错）
 - [x] **测试**：fixture + `cli_e2e` + 负例（过度宽泛的仍拒绝）。（新增 `generic_function_ok` / `generic_function_missing_type_args_fail` 及对应 e2e）
 
@@ -277,7 +277,7 @@
 
 ### 13.3 完整 OO（`class`、`this`、构造/继承等）
 
-- [x] **设计**：与 Rust 映射（结构体 + impl、或显式拒绝部分 TS 语义）；`export class` 与模块交互。（已落地 class lowering + codegen 动态 trait 框架，保持 hard-typing 子集。）
+- [x] **设计**：与 Rust 映射（结构体 + impl、或显式拒绝部分 TS 语义）；`export class` 与模块交互。（已落地 class lowering + codegen 动态 trait 框架，在强类型约束子集内。）
 - [x] **build**：`ClassDecl`、方法、字段进入 HIR（或分阶段：仅类字段 + 方法）。（已接入类收集/降级、`new`、`this` 重写与子类构造中的 `super(...)` 降级。）
 - [x] **sem**：`this`、可见性、继承/重写（按采纳子集）。（已接入继承关系校验、`super(...)` 位置校验、基础 `override` 名称与签名校验。）
 - [x] **codegen**：与方法分发、`super`（若纳入范围）。（已输出类动态 trait 代码框架，运行路径由降级后的构造函数/方法函数承接。）
@@ -293,7 +293,7 @@
 
 ### 13.5 完整 `switch` / `case`
 
-- [x] **设计**：硬类型子集——无穿透、`default` 须最后、`case` 仅数字/布尔字面量；完整 ECMA 穿透与 `default` 位置待后续。
+- [x] **设计**：强类型子集——无穿透、`default` 须最后、`case` 仅数字/布尔字面量；完整 ECMA 穿透与 `default` 位置待后续。
 - [x] **HIR**：无 `IRStmt::Switch`；`switch` 在 [`build.rs`](crates/ts2rs-hir/src/build.rs) 降为嵌套 [`IRStmt::If`](crates/ts2rs-hir/src/ir.rs) + [`IRExpr::Binary`](crates/ts2rs-hir/src/ir.rs) `Eq`（与 §2.1「或等价」一致）。
 - [x] **sem**：沿用 `if` 条件与 `Binary` `Eq` 推断；无单独 `switch` 分支。
 - [x] **codegen**：沿用 `If`/`Eq` 发射；`switch` 专用 `match` 未做。
@@ -340,7 +340,7 @@
 - [x] **拒绝 `.then`**（明确诊断，建议用 `async`/`await`）。见 [`promise_then_fail.ts`](crates/ts2rs-cli/tests/fixtures/promise_then_fail.ts)、`compile_promise_then_fails`。
 - [x] **TLS / HTTP 说明（非「与 Node 完全一致」）**：临时 crate 使用 **reqwest** + **rustls-tls**；**TLS 1.2+** 与 **HTTP/2**（ALPN 协商成功时）由该栈提供；**根证书、cipher、HTTP/2 细节不保证与某一 Node 或浏览器版本逐字节一致**。**仍为 backlog**：完整 **WHATWG `fetch`**（浏览器级 `ReadableStream`、`Request`/`Headers` 对象、duplex、在非浏览器宿主下的 CORS 等）；trust 子集已支持 **`getReader`/`read` 分块读 body**（见上条）。
 
-### 语言与类型（trust 硬子集）
+### 语言与类型（trust 强类型子集）
 
 - [x] **可选调用** `f?.()`；**`??` / `?.` 的静态收窄**（可判定；§3.3）。已实现：`OptionalCall` / `OptionalMethodCall`、`build_opt_chain_call_expr`；`optional_call_ok.ts`、`optional_chain_fail.ts`；`NullishCoalesce` 对同族 `Union` 去空值合并。**完整** discriminated 收窄仍属后续。
 - [x] **链式调用** `f().g()`（一层）。`chain_call_ok.ts`，`run_chain_call_ok_prints_six`；更一般实例方法类型仍见 §1.3。

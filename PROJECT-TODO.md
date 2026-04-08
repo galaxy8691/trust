@@ -2,7 +2,7 @@
 
 # ts2rs long-term project TODO
 
-This document tracks compiler and toolchain work over time, grouped by theme. Use `[ ]` / `[~]` / `[x]` in PRs or commits as appropriate. **Every item assumes the hard-typing (trust) model.**
+This document tracks compiler and toolchain work over time, grouped by theme. Use `[ ]` / `[~]` / `[x]` in PRs or commits as appropriate. **Every item assumes the strong-typing (trust) model.**
 
 **Code entry points**: [`README.md`](README.md) · [`crates/ts2rs-hir`](crates/ts2rs-hir) (`build.rs` / `sem.rs` / `codegen.rs` / `ir.rs`) · [`crates/ts2rs-parser`](crates/ts2rs-parser) · [`crates/ts2rs-driver`](crates/ts2rs-driver) · [`crates/ts2rs-cli`](crates/ts2rs-cli) · [`test-ts/main.ts`](test-ts/main.ts) (multi-file: [`test-ts/math.ts`](test-ts/math.ts)) · [`crates/ts2rs-cli/tests/fixtures/`](crates/ts2rs-cli/tests/fixtures/)
 
@@ -10,9 +10,9 @@ Chinese mirror: [`PROJECT-TODO.zh-CN.md`](PROJECT-TODO.zh-CN.md).
 
 **Follow-up backlog (what to do next)**: [§14 Next steps](#14-next-steps-follow-up-backlog) — consolidated; older sections may still mention the same work in passing.
 
-### Planning constraint: trust (hard typing)
+### Planning constraint: trust (strong typing)
 
-**trust is hard-typed; there is no soft typing.** Long-term items and PR trade-offs must stay consistent: only extend syntax that can get **static** rules in HIR / [`sem.rs`](crates/ts2rs-hir/src/sem.rs). **Do not** target implicit `any`, runtime reshaping, or un-annotated widen-in as goals. See [README — Trust: hard typing](README.md).  
+**trust is strongly typed; there is no soft typing.** Long-term items and PR trade-offs must stay consistent: only extend syntax that can get **static** rules in HIR / [`sem.rs`](crates/ts2rs-hir/src/sem.rs). **Do not** target implicit `any`, runtime reshaping, or un-annotated widen-in as goals. See [README — Trust: strong typing](README.md).  
 Here, “narrowing”, “assignable”, and “structural / shape” mean **static rules inside HIR / sem**, not runtime reshaping, and not aligning with `tsc`’s default loose or progressive soft typing.
 
 ---
@@ -49,7 +49,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 - [x] **`async` / `await` / `Promise` / HTTP `fetch` / `fetchText` (MVP)**: [`IRFunction::is_async`](crates/ts2rs-hir/src/ir.rs), [`IRExpr::Await`](crates/ts2rs-hir/src/ir.rs) / [`FetchText`](crates/ts2rs-hir/src/ir.rs) / [`Fetch`](crates/ts2rs-hir/src/ir.rs) / [`PromiseAll`](crates/ts2rs-hir/src/ir.rs), [`#[tokio::main]`](crates/ts2rs-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/ts2rs-driver/src/crate_writer.rs) and **`futures-util`** when generated Rust uses streaming (`crate_writer` detects `futures_util` in source). **`await` in arbitrary control flow** is implemented; **`fetchText(url)`** → `Promise<string>`; **`fetch(url, init?)`** → `Promise<Response>` with **`status`**, **`ok`**, **`await .text()`**, **`await .json()`** (JSON **number** body → `f64` via **`serde_json`**, same as dynamic `JSON.parse`), **`response.body.getReader()`** + **`await reader.read()`** (chunked body via `bytes_stream()`), and **optional `init`** (`method` string literal, `headers` object with string-literal values, optional `body` string); **`.then`** is rejected with a diagnostic; **`Headers` iteration / Web `Request` parity / byte-level TLS·HTTP2 parity with Node** remain out of scope (see §Async / HTTP backlog).
 - [x] **Member access and call chains**: `string.length` (UTF-16), `string[i]` (single UTF-16 code unit as `string`), `number[]` / `string[]` index, `length` on objects; **`obj.m(args)`** → global `m(receiver,…)` ([`IRExpr::MethodCall`](crates/ts2rs-hir/src/ir.rs)); **one-level** `f().prop` / `f().m()` ([`chain_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/chain_call_ok.ts)); optional **`?.` / `f?.()` / `recv?.m()`** ([`optional_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/optional_call_ok.ts)); fixtures `member_length_ok.ts`, `method_call_ok.ts`, `string_utf16_length.ts`, `stdlib_hir_ok.ts`.
 - [x] **Optional chaining / nullish coalescing**: limited subset (`obj?.prop`, `??`; `optional_ok.ts`, `nullish_ok.ts`); full semantics tied to §3.3.
-- [x] **Logical short-circuit**: `&&`, `||`; `boolean` and `number` truthiness (`!= 0`), result type `boolean` (`logical_bool.ts`, `logical_truthy_ok.ts`); differs from TS value-preserving `&&`/`||`; under **hard typing** result is `boolean`; more complex truthiness or unions still limited.
+- [x] **Logical short-circuit**: `&&`, `||`; `boolean` and `number` truthiness (`!= 0`), result type `boolean` (`logical_bool.ts`, `logical_truthy_ok.ts`); differs from TS value-preserving `&&`/`||`; under **strong typing** result is `boolean`; more complex truthiness or unions still limited.
 - [x] **Ternary**: `cond ? a : b` (`ternary_ok.ts`).
 - [x] **Comma expression**: `comma_ok.ts`.
 - [x] **Template literals**: no tag; `template_ok.ts`.
@@ -65,7 +65,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 **Summary**
 
-- [x] **Literal types**, **union types**, **`interface`**, **`type` aliases**: aligned with **hard-typing** checker roadmap (sub-items below; **literal types**, **primitive/literal unions**, **limited `interface`→`ObjectNum`**, **limited `type` alias→named table**). **Generics** are a separate sub-item (document “still rejected” milestone, not semantics).
+- [x] **Literal types**, **union types**, **`interface`**, **`type` aliases**: aligned with **strong-typing** checker roadmap (sub-items below; **literal types**, **primitive/literal unions**, **limited `interface`→`ObjectNum`**, **limited `type` alias→named table**). **Generics** are a separate sub-item (document “still rejected” milestone, not semantics).
 
 **Relation to implemented subset**: §1.3 supports limited annotations `number[]`, `{ k: number }` ([`TsType::ArrayNumber`](crates/ts2rs-hir/src/ir.rs) / [`ObjectNum`](crates/ts2rs-hir/src/ir.rs)). **Literal types** (`NumberLit` / `StringLit` / `BoolLit`) and **unions** ([`TsType::Union`](crates/ts2rs-hir/src/ir.rs) + normalization) below; **top-level `interface`** is nominal `ObjectNum` in the type layer (same rules as object type literals); **top-level `type` aliases** via [`collect_named_types`](crates/ts2rs-hir/src/build.rs) into the same named table; **generic semantics** still not implemented — rejection table in [README §1.4](README.md) and sub-items below; full object/interface shapes and IR in §2.1; **static** null and branch narrowing crosses §3.3.
 
@@ -76,7 +76,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
   - **Done**: [`build.rs`](crates/ts2rs-hir/src/build.rs) parses `TsLitType`; [`sem.rs`](crates/ts2rs-hir/src/sem.rs) `type_assignable` / literal inference; `literal_type_ok.ts`, `literal_type_fail.ts` + [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
 
 - [x] **Union types** (`A | B`, primitives/literals first)  
-  - **Deps**: normalization and decidable union equality; **static** narrowing / branch types for `??` / `?.` (hard typing, decidable) with §3.3.  
+  - **Deps**: normalization and decidable union equality; **static** narrowing / branch types for `??` / `?.` (strong typing, decidable) with §3.3.  
   - **Done**: assign/branches consistent under limited unions; tests (`union_literal_ok`, `union_cond_ok`, negatives `union_heterogeneous_fail`, `intersection_type_fail`, `union_mixed_cond_fail`).
 
 - [x] **`interface` and object types** (body, optional props, `extends` staged)  
@@ -98,7 +98,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ### 2.1 Current structure
 
 - [x] **Statements**: `Assign`, `Break`, `Continue`, `DoWhile`, `FnDecl`, `Empty`; `for` lowered to `while`; no `Switch` IR stmt.
-- [x] **Expressions**: `LogicalAnd`/`LogicalOr`, `Conditional`, `Seq`, `Tpl`, `Member` / `OptionalMember`, [`Index`](crates/ts2rs-hir/src/ir.rs) (array `number`/`string` elements, string UTF-16), [`MethodCall`](crates/ts2rs-hir/src/ir.rs) / [`OptionalMethodCall`](crates/ts2rs-hir/src/ir.rs), one-level chained `f().prop` / `f().m()`, [`JsonBuiltin`](crates/ts2rs-hir/src/ir.rs) / [`UriBuiltin`](crates/ts2rs-hir/src/ir.rs), math/string/http builtins as in README matrix; **computed** `obj[expr](…)` call still unsupported. `ObjectNum` / `interface` shapes: §1.4; hard typing, static checks.
+- [x] **Expressions**: `LogicalAnd`/`LogicalOr`, `Conditional`, `Seq`, `Tpl`, `Member` / `OptionalMember`, [`Index`](crates/ts2rs-hir/src/ir.rs) (array `number`/`string` elements, string UTF-16), [`MethodCall`](crates/ts2rs-hir/src/ir.rs) / [`OptionalMethodCall`](crates/ts2rs-hir/src/ir.rs), one-level chained `f().prop` / `f().m()`, [`JsonBuiltin`](crates/ts2rs-hir/src/ir.rs) / [`UriBuiltin`](crates/ts2rs-hir/src/ir.rs), math/string/http builtins as in README matrix; **computed** `obj[expr](…)` call still unsupported. `ObjectNum` / `interface` shapes: §1.4; strong typing, static checks.
 - [x] **Top level**: multi-file graph — `parse_module_graph` + `validate_imports`; HIR merged to [`IRModule`](crates/ts2rs-hir/src/ir.rs) (`build_program_multi` / `compile_graph`); `main` in entry file; global function names unique; negatives `import_missing_export_*`, `circular_*`, `dup_*`.
 
 ### 2.2 Metadata and debugging
@@ -126,7 +126,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 - [x] **Tie-in with §1.4**: literal and union types and **static** `??` / `?.` narrowing must stay consistent with §1.4 (avoid conflict with limited `TsType`). Unions are in HIR. **Implemented (sem)**: when `Union` minus `null`/`undefined` matches the right-hand side of `??` as the same “family” (`number` / `string` / `boolean`, or **structurally matching** `Fn`), [`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) on `IRExpr::NullishCoalesce` calls `unify_ternary_branches` for a single result type. **Still future**: discriminated-union narrowing that relies on a **discriminant** (large scope). Done: README §3.3; `nullish_ok` / `optional_ok`; sem + `Fn` unions covered by `nullish_fn_ok.ts` (`ts2rs check`).
 - [x] **`null` / `undefined`**: [`TsType`](crates/ts2rs-hir/src/ir.rs) has `Null`/`Undefined` variants; checks follow **current sem static rules**, not tsc’s default “everything nullable”. Done: README §3.3; **no** `strictNullChecks`-style switch. If added later, make it an **explicit** compiler mode, not implicit JS looseness.
 - [x] **Structural vs nominal**: **trust** uses nominal table + static shape checks; Rust mapping strategy (mostly primitives today). Done: README §3.3; **not** implementing full TS structural subtyping as a goal.
-- [x] **Function types and HOF**: Align with [§13.2](PROJECT-TODO.md) and README — a **restricted** subset is implemented (function types, arrow values, calls, passing/returning functions); closure codegen remains the hard `(number) => number` subset. **Do not** claim “no first-class functions / no HOF”; distinguish “supported HOF subset” vs “further generalization / codegen work”.
+- [x] **Function types and HOF**: Align with [§13.2](PROJECT-TODO.md) and README — a **restricted** subset is implemented (function types, arrow values, calls, passing/returning functions); closure codegen remains the strict `(number) => number` subset. **Do not** claim “no first-class functions / no HOF”; distinguish “supported HOF subset” vs “further generalization / codegen work”.
 
 ### 3.4 Control-flow analysis (advanced)
 
@@ -218,7 +218,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ## 9. Documentation and developer experience
 
-- [x] **README**: matrix synced with implementation; “unsupported TS” summary (**also describes trust hard-type rejection**). **Done**: [`README.md`](README.md) (English default) and [`README.zh-CN.md`](README.zh-CN.md) — **Unsupported TypeScript (trust rejection boundary)** / **不支持的 TypeScript 特性（trust 硬类型拒斥边界）** and language matrix.
+- [x] **README**: matrix synced with implementation; “unsupported TS” summary (**also describes trust strong-type rejection**). **Done**: [`README.md`](README.md) (English default) and [`README.zh-CN.md`](README.zh-CN.md) — **Unsupported TypeScript (trust rejection boundary)** / **不支持的 TypeScript 特性（trust 强类型拒斥边界）** and language matrix.
 - [x] **Architecture diagram**: parse → HIR → sem → codegen → driver (Mermaid). **Done**: Mermaid `flowchart LR` under **Architecture** / **架构** in both READMEs (`ts2rs_parser` → HIR → sem → codegen → `ts2rs_lower` → `ts2rs_cli` / `ts2rs_driver`).
 - [x] **Contributing**: `CONTRIBUTING.md` (branch, test commands, MSRV). **Done**: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`CONTRIBUTING.zh-CN.md`](CONTRIBUTING.zh-CN.md); root [`Cargo.toml`](Cargo.toml) `rust-version = "1.74"` and per-crate `rust-version.workspace = true`.
 - [x] **Changelog**: `CHANGELOG.md` for releases. **Done**: [`CHANGELOG.md`](CHANGELOG.md) / [`CHANGELOG.zh-CN.md`](CHANGELOG.zh-CN.md), Keep a Changelog with `[Unreleased]` and `[0.1.0]`.
@@ -253,19 +253,19 @@ Aligned with **§14 — Performance and security**; **status and pointers are au
 | P1 | Nested functions or explicit long-term “unsupported” story | Less user confusion |
 | P2 | Multi-file + `import` | Driver-heavy |
 | P2 | Logic + ternary | Common TS patterns |
-| P3 | Generics, deeper static typing under hard typing | Long-term (**not** full tsc / soft typing); details in §13 |
+| P3 | Generics, deeper static typing under strong typing | Long-term (**not** full tsc / soft typing); details in §13 |
 
 ---
 
 ## 13. Large language features (milestones)
 
-Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → integration/unit tests** PRs. Semantics stay **trust hard-typing** (statically decidable); **no** need for full `tsc` equivalence. Update [README.md](README.md) matrix and this section when sub-milestones land.
+Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → integration/unit tests** PRs. Semantics stay **trust strong typing** (statically decidable); **no** need for full `tsc` equivalence. Update [README.md](README.md) matrix and this section when sub-milestones land.
 
 ### 13.1 Generics (functions / interfaces / type aliases / type arguments)
 
 - [x] **Design**: monomorphization, erasure, or limited strategy (document vs README generics table).（本轮采用单态化子集）
 - [x] **Parse + build**: `type_params`, generic bounds, `TsTypeRef` args into HIR.（已接入泛型声明与显式类型实参解析）
-- [x] **sem**: argument substitution and consistency (decidable subset under hard typing).（调用处显式类型实参校验、类型替换与实例化改写）
+- [x] **sem**: argument substitution and consistency (decidable subset under strong typing).（调用处显式类型实参校验、类型替换与实例化改写）
 - [x] **codegen**: monomorph expansion or equivalent Rust emission.（消费单态化结果；未实例化类型参数在 codegen 兜底报错）
 - [x] **Tests**: fixtures + `cli_e2e` + negatives (still reject overly broad cases).（新增 `generic_function_ok` / `generic_function_missing_type_args_fail` 与对应 e2e）
 
@@ -274,12 +274,12 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 - [x] **Design**: capture strategy, stack closures vs extending no-capture subset, `fn` types in HIR. (Current implementation uses typed arrow closures with `Rc<dyn Fn(i32) -> i32>` codegen path.)
 - [x] **HIR**: function types, `Callee` for member/var call paths. (Added `TsType::Fn` and `IRExpr::ArrowFn`; variable call path `f(...)` is type-checked as callable function value.)
 - [x] **build + sem**: arrow functions and function values, call/assign typing. (Build parses arrow functions and function type annotations; sem checks function-value assign/call and function-typed arguments/returns.)
-- [x] **codegen**: `Fn`/`fn` pointers or struct closures (per design). (Codegen emits typed Rust closures via `Rc<dyn Fn(i32) -> i32>` for the current hard-typed subset.)
+- [x] **codegen**: `Fn`/`fn` pointers or struct closures (per design). (Codegen emits typed Rust closures via `Rc<dyn Fn(i32) -> i32>` for the current strongly typed subset.)
 - [x] **Tests**: minimal HOF + relation to existing `nested_fn` no-capture semantics. (Added `hof_apply_ok.ts` and `hof_return_closure_ok.ts` plus corresponding `cli_e2e` tests; existing `nested_fn` remains valid.)
 
 ### 13.3 Full OO (`class`, `this`, ctor/inheritance)
 
-- [x] **Design**: Rust mapping (struct + impl, or explicit rejection of some TS); `export class` and modules. (Landed OO subset with class lowering + dyn-trait scaffold in codegen, while preserving hard-typing constraints.)
+- [x] **Design**: Rust mapping (struct + impl, or explicit rejection of some TS); `export class` and modules. (Landed OO subset with class lowering + dyn-trait scaffold in codegen, while preserving strong-typing constraints.)
 - [x] **build**: `ClassDecl`, methods, fields in HIR (possibly staged). (Added class collection/lowering, `new` calls, `this` rewriting, and subclass constructor `super(...)` lowering path.)
 - [x] **sem**: `this`, visibility, inheritance/override (per subset). (Added class validation: extends graph checks, `super(...)` placement checks, and baseline `override` signature/name validation.)
 - [x] **codegen**: dispatch, `super` (if in scope). (Added class dyn-trait emission scaffold and kept runtime path through lowered constructor/method functions.)
@@ -295,7 +295,7 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 
 ### 13.5 Full `switch` / `case`
 
-- [x] **Design**: hard-typing subset — no fall-through, `default` last, `case` only numeric/boolean literals; full ECMA fall-through/`default` placement TBD.
+- [x] **Design**: strong-typing subset — no fall-through, `default` last, `case` only numeric/boolean literals; full ECMA fall-through/`default` placement TBD.
 - [x] **HIR**: no `IRStmt::Switch`; `switch` lowered in [`build.rs`](crates/ts2rs-hir/src/build.rs) to nested [`IRStmt::If`](crates/ts2rs-hir/src/ir.rs) + [`IRExpr::Binary`](crates/ts2rs-hir/src/ir.rs) `Eq` (same idea as §2.1).
 - [x] **sem**: reuses `if` conditions and `Binary` `Eq`; no dedicated `switch` arm analysis.
 - [x] **codegen**: same `If`/`Eq` emission; no dedicated `match` for `switch`.
@@ -343,7 +343,7 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 - [x] **Reject `.then`** calls with a clear diagnostic (`Promise.prototype.then` is not supported). ([`build.rs`](crates/ts2rs-hir/src/build.rs) call lowering, [`promise_then_fail.ts`](crates/ts2rs-cli/tests/fixtures/promise_then_fail.ts), `compile_promise_then_fails`.)
 - [x] **TLS / HTTP stack (documented, not “Node parity”)**: generated crates use **reqwest** with **`rustls-tls`** ([`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs)). **TLS 1.2+** and **HTTP/2** (when the server and stack negotiate ALPN) are provided by that stack; **root stores, cipher suites, and HTTP/2 prioritization are not guaranteed to match any specific Node or browser version**. **Still backlog**: full **WHATWG** `fetch` (browser `ReadableStream` / `Request`/`Headers` objects, duplex, CORS in non-browser hosts, etc.); trust subset already supports **chunked body** via `getReader`/`read` (see streaming item above).
 
-### Language and typing (trust-hard subset)
+### Language and typing (trust strong-typing subset)
 
 - [x] **Optional call** `f?.()`; **static narrowing** for `??` / `?.` (decidable; §3.3). Done: [`OptionalCall` / `OptionalMethodCall`](crates/ts2rs-hir/src/ir.rs), [`build_opt_chain_call_expr`](crates/ts2rs-hir/src/build.rs)（含 `Expr::OptChain` callee）；[`optional_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/optional_call_ok.ts)、[`optional_chain_fail.ts`](crates/ts2rs-cli/tests/fixtures/optional_chain_fail.ts)（非标识符 callee）；[`NullishCoalesce`](crates/ts2rs-hir/src/sem.rs) 扩展 **同族** `Union` 去 `null`/`undefined` 后与右操作数合并。**完整** discriminated / 全联合收窄仍属后续。
 - [x] **Chained member/calls** `f().g()`（一层 `expr.prop` / `expr.m()`）。Done: [`chain_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/chain_call_ok.ts)，`run_chain_call_ok_prints_six`；一般实例方法类型仍见 §1.3 follow-ups。
