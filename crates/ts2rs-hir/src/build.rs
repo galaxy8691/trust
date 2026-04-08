@@ -1,15 +1,15 @@
 //! 从 swc `Program` 构建 IR。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, Decl, EmptyStmt, ExportDecl, Expr,
     ExprOrSpread, FnDecl, ForStmt, KeyValueProp, Lit, MemberExpr, MemberProp, ModuleDecl,
     ModuleItem, OptChainBase, OptChainExpr, Param, Pat, Program, Prop, PropName, PropOrSpread,
-    SimpleAssignTarget, Stmt, TsEntityName, TsIntersectionType, TsInterfaceDecl, TsKeywordTypeKind,
-    TsLit, TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsUnionOrIntersectionType,
-    TsUnionType, Tpl, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
+    SimpleAssignTarget, Stmt, SwitchStmt, TsEntityName, TsIntersectionType, TsInterfaceDecl,
+    TsKeywordTypeKind, TsLit, TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement,
+    TsUnionOrIntersectionType, TsUnionType, Tpl, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
 };
 
 use crate::error::{diag, diag_spanned, CompileError};
@@ -593,6 +593,195 @@ fn build_var_decl_from_vardecl(
     })
 }
 
+/// Strip trailing `break;` at the end of a `case` clause (switch is lowered to `if`, so these breaks are not emitted as `IRStmt::Break`).
+fn trim_trailing_breaks_in_case(cons: Vec<Stmt>) -> Vec<Stmt> {
+    let mut v = cons;
+    while matches!(v.last(), Some(Stmt::Break(_))) {
+        v.pop();
+    }
+    v
+}
+
+fn expr_to_case_literal_ir(expr: &Expr, cm: &Lrc<SourceMap>, path: &str) -> Result<IRExpr, CompileError> {
+    let e = match expr {
+        Expr::Paren(p) => &*p.expr,
+        _ => expr,
+    };
+    match e {
+        Expr::Lit(Lit::Num(n)) => {
+            let v = n.value;
+            if v.fract() != 0.0 || v > i32::MAX as f64 || v < i32::MIN as f64 {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    n,
+                    "`case` numeric label must be an integer in `i32` range",
+                ));
+            }
+            Ok(IRExpr::Number(v as i32, n.span))
+        }
+        Expr::Lit(Lit::Bool(b)) => Ok(IRExpr::Bool(b.value, b.span)),
+        _ => Err(diag_spanned(
+            cm,
+            path,
+            expr,
+            "`case` label must be a `number` or `boolean` literal",
+        )),
+    }
+}
+
+fn case_literal_key(lit: &IRExpr) -> String {
+    match lit {
+        IRExpr::Number(n, _) => format!("n:{n}"),
+        IRExpr::Bool(b, _) => format!("b:{b}"),
+        _ => unreachable!("case literal must be number or bool"),
+    }
+}
+
+fn build_switch_stmt(
+    sw: &SwitchStmt,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    next_id: &mut u32,
+    iface: &HashMap<String, TsType>,
+) -> Result<IRStmt, CompileError> {
+    if sw.cases.is_empty() {
+        return Err(diag_spanned(
+            cm,
+            path,
+            sw,
+            "`switch` must contain at least one `case` or `default` clause",
+        ));
+    }
+
+    let mut default_count = 0usize;
+    for (idx, case) in sw.cases.iter().enumerate() {
+        if case.test.is_none() {
+            default_count += 1;
+            if idx != sw.cases.len() - 1 {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    case,
+                    "`default` must be the last clause in `switch`",
+                ));
+            }
+        }
+    }
+    if default_count > 1 {
+        return Err(diag_spanned(
+            cm,
+            path,
+            sw,
+            "duplicate `default` clause in `switch`",
+        ));
+    }
+
+    let disc = build_expr(&sw.discriminant, cm, path, iface)?;
+
+    let mut labeled: Vec<(IRExpr, Vec<IRStmt>, Span)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let mut default_body: Option<Vec<IRStmt>> = None;
+
+    for case in &sw.cases {
+        if case.test.is_none() {
+            if case.cons.is_empty() {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    case,
+                    "`default` clause cannot be empty",
+                ));
+            }
+            let trimmed = trim_trailing_breaks_in_case(case.cons.clone());
+            if trimmed.is_empty() {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    case,
+                    "`default` clause cannot be empty after trailing `break` removal",
+                ));
+            }
+            default_body = Some(build_block_stmts(&trimmed, cm, path, next_id, iface)?);
+            break;
+        }
+
+        if case.cons.is_empty() {
+            return Err(diag_spanned(
+                cm,
+                path,
+                case,
+                "empty `case` body (fall-through between `case` clauses is not supported)",
+            ));
+        }
+
+        let test = case.test.as_ref().expect("case with test");
+        let lit_ir = expr_to_case_literal_ir(test, cm, path)?;
+        let key = case_literal_key(&lit_ir);
+        if !seen.insert(key) {
+            return Err(diag_spanned(
+                cm,
+                path,
+                test,
+                "duplicate `case` label",
+            ));
+        }
+
+        let trimmed = trim_trailing_breaks_in_case(case.cons.clone());
+        if trimmed.is_empty() {
+            return Err(diag_spanned(
+                cm,
+                path,
+                case,
+                "`case` body cannot be empty after trailing `break` removal",
+            ));
+        }
+
+        let then_b = build_block_stmts(&trimmed, cm, path, next_id, iface)?;
+        labeled.push((lit_ir, then_b, case.span));
+    }
+
+    if labeled.is_empty() {
+        let body = default_body.ok_or_else(|| {
+            diag_spanned(
+                cm,
+                path,
+                sw,
+                "`switch` must contain at least one `case` or `default` clause",
+            )
+        })?;
+        return Ok(IRStmt::Block {
+            stmts: body,
+            span: sw.span,
+        });
+    }
+
+    let mut rest = default_body;
+    for (lit_ir, then_b, case_span) in labeled.into_iter().rev() {
+        let cond = IRExpr::Binary {
+            op: IRBinOp::Eq,
+            left: Box::new(disc.clone()),
+            right: Box::new(lit_ir),
+            span: case_span,
+            kind: None,
+        };
+        rest = Some(vec![IRStmt::If {
+            cond,
+            cond_ty: TsType::Number,
+            then_b,
+            else_b: rest,
+            span: case_span,
+        }]);
+    }
+
+    Ok(rest
+        .expect("labeled non-empty implies chain built")
+        .into_iter()
+        .next()
+        .expect("one if"))
+}
+
 fn build_stmt(
     stmt: &Stmt,
     cm: &Lrc<SourceMap>,
@@ -711,12 +900,7 @@ fn build_stmt(
                 span: f.span(),
             })
         }
-        Stmt::Switch(_) => Err(diag_spanned(
-            cm,
-            path,
-            stmt,
-            "`switch` is not supported in this compiler version",
-        )),
+        Stmt::Switch(sw) => build_switch_stmt(sw, cm, path, next_id, iface),
         Stmt::ForIn(_) | Stmt::ForOf(_) => Err(diag_spanned(
             cm,
             path,

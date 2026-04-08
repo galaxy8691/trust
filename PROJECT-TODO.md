@@ -34,7 +34,7 @@
 - [x] **嵌套 `function`**：[`IRStmt::FnDecl`](crates/ts2rs-hir/src/ir.rs) + 无捕获子集；见 `nested_fn.ts`。
 - [x] **`const`**：与 `let` 对齐，语义禁止对 `const` 赋值；见 `const_ok.ts`、`const_reassign_fail.ts`。
 - [x] **表达式语句中的赋值**：`IRStmt::Assign` + 可变 `let`；见 `assign_simple.ts`。
-- [x] **`for` / `do-while`**：C 风格 `for`（含 update 赋值）、`do-while`；**`switch`** 仍显式拒绝（`switch_fail.ts`）。
+- [x] **`for` / `do-while`**：C 风格 `for`（含 update 赋值）、`do-while`；**`switch`**：在 `build` 降为 `If` 链（见 §13.5、`switch_ok.ts`）。
 - [x] **`break` / `continue`**：循环内；label 未支持。
 - [x] **空语句 / 块**：`Stmt::Empty`、`Block`；见 `empty_stmt.ts`。
 
@@ -183,9 +183,9 @@
 
 ## 7. CLI（[`ts2rs-cli`](crates/ts2rs-cli)）
 
-- [ ] **子命令**：`compile` / `run` 文档化；可选 `check`（只语义不生成）。
-- [ ] **选项**：`-O`、输出路径、`-q`、颜色、`--emit-ir`（调试用）。
-- [ ] **退出码**：约定编译失败非零、与诊断数量（可选）。
+- [x] **子命令**：`compile` / `run` / `check`；README「CLI」表与 `ts2rs --help`；`check` 仅 HIR+语义（[`check_module_graph`](crates/ts2rs-lower/src/lib.rs)）。（验收：`cli_e2e` `check_sample_ok`、`check_switch_fail_stderr`。）
+- [x] **选项**：`compile -o`；`run` 的 `-O`/`--release` 与 `--debug`（[`RustBuildOptions::release`](crates/ts2rs-driver/src/lib.rs)）；全局 `-q`/`--quiet`、`--color`、`--emit-ir`。（验收：`compile_emit_ir_stderr_contains_ir_module`、`driver` `debug_build_writes_binary_under_target_debug`。）
+- [x] **退出码**：README 约定；`run` 传播子进程 `ExitStatus::code`（无则 `1`）；`ts2rs` 错误统一 `1`。（验收：[`main.rs`](crates/ts2rs-cli/src/main.rs) `exit_code_for_failed_child` 单元测试。）
 
 ---
 
@@ -283,11 +283,11 @@
 
 ### 13.5 完整 `switch` / `case`
 
-- [ ] **设计**：穿透、`default`、与联合/字面量收窄的配合范围（硬类型下可静态实现子集）。
-- [ ] **HIR**：`IRStmt::Switch` 或等价（§2.1 曾记未实现）。
-- [ ] **sem**：穷尽性（可选）、fallthrough 规则。
-- [ ] **codegen**：`match` 映射与 `break` 行为。
-- [ ] **测试**：替换/补充现有 `switch_fail` 正例路径 + 负例。
+- [x] **设计**：硬类型子集——无穿透、`default` 须最后、`case` 仅数字/布尔字面量；完整 ECMA 穿透与 `default` 位置待后续。
+- [x] **HIR**：无 `IRStmt::Switch`；`switch` 在 [`build.rs`](crates/ts2rs-hir/src/build.rs) 降为嵌套 [`IRStmt::If`](crates/ts2rs-hir/src/ir.rs) + [`IRExpr::Binary`](crates/ts2rs-hir/src/ir.rs) `Eq`（与 §2.1「或等价」一致）。
+- [x] **sem**：沿用 `if` 条件与 `Binary` `Eq` 推断；无单独 `switch` 分支。
+- [x] **codegen**：沿用 `If`/`Eq` 发射；`switch` 专用 `match` 未做。
+- [x] **测试**：正例 [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts)（`run_switch_ok_prints_seven`、`compile_switch_ok_writes_rust`）；负例 [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts)（`compile_switch_fallthrough_fails`，穿透诊断）。
 
 ---
 

@@ -43,13 +43,31 @@ pub fn compile_graph(
     compile_graph_with_options(units, entry_path, &CodegenOptions::default())
 }
 
+/// 多文件模块图：构建 IR 并完成语义检查（不生成 Rust）。
+pub fn build_checked_module(
+    units: &[(String, Program, Lrc<SourceMap>)],
+    entry_path: &str,
+) -> Result<(IRModule, Vec<CompileWarning>), CompileError> {
+    let mut module = build_program_multi(units, entry_path)?;
+    let warnings = sem::check_module(&mut module)?;
+    Ok((module, warnings))
+}
+
+/// 仅语义检查（与 [`compile_graph`] 前半段相同，无 codegen）。
+pub fn check_graph(
+    units: &[(String, Program, Lrc<SourceMap>)],
+    entry_path: &str,
+) -> Result<Vec<CompileWarning>, CompileError> {
+    let (_, warnings) = build_checked_module(units, entry_path)?;
+    Ok(warnings)
+}
+
 pub fn compile_graph_with_options(
     units: &[(String, Program, Lrc<SourceMap>)],
     entry_path: &str,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
-    let mut module = build_program_multi(units, entry_path)?;
-    let warnings = sem::check_module(&mut module)?;
+    let (module, warnings) = build_checked_module(units, entry_path)?;
     let rust = emit_rust_with_options(&module, codegen)?;
     Ok((rust, warnings))
 }

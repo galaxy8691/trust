@@ -279,6 +279,7 @@ pub enum TplPart {
     Interp(Box<IRExpr>),
 }
 
+/// 语句 IR。源语言 `switch` 在 [`crate::build`] 中降为嵌套 [`IRStmt::If`]（与字面量 `===` 比较），无单独的 `Switch` 变体。
 #[derive(Debug, Clone)]
 pub enum IRStmt {
     /// `;` 空语句

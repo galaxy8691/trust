@@ -1,4 +1,4 @@
-//! 将 Rust 源码写入**临时目录**中的最小 crate，并调用 `cargo build --release` 得到可执行文件。
+//! 将 Rust 源码写入**临时目录**中的最小 crate，并调用 `cargo build`（默认 `--release`，见 [`RustBuildOptions::release`]）得到可执行文件。
 //!
 //! # 临时目录与 [`TempDir`]
 //!
@@ -48,10 +48,21 @@ pub enum DriverError {
 }
 
 /// Options for generated temporary crate / `cargo build` (e.g. optional `ts2rs_rt` path dependency).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RustBuildOptions {
     /// When true, `Cargo.toml` includes an optional path dependency on `ts2rs_rt` and a matching feature.
     pub link_ts2rs_rt: bool,
+    /// When true (default), runs `cargo build --release` and uses `target/release/`; when false, `cargo build` and `target/debug/`.
+    pub release: bool,
+}
+
+impl Default for RustBuildOptions {
+    fn default() -> Self {
+        Self {
+            link_ts2rs_rt: false,
+            release: true,
+        }
+    }
 }
 
 /// 从单个 TypeScript 入口文件编译：解析器构建相对路径 `import` 的**模块图**（不合并 AST），
@@ -89,11 +100,12 @@ pub fn build_rust_to_executable_with_options(
 
     write_minimal_crate(root, rust_source, opts)?;
 
-    let output = Command::new("cargo")
-        .args(["build", "--release"])
-        .current_dir(root)
-        .output()
-        .map_err(map_cargo_spawn_error)?;
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build").current_dir(root);
+    if opts.release {
+        cmd.arg("--release");
+    }
+    let output = cmd.output().map_err(map_cargo_spawn_error)?;
 
     if !output.status.success() {
         let combined = format!(
@@ -107,7 +119,8 @@ pub fn build_rust_to_executable_with_options(
         });
     }
 
-    let mut exe = root.join("target/release").join(CRATE_NAME);
+    let profile_dir = if opts.release { "release" } else { "debug" };
+    let mut exe = root.join("target").join(profile_dir).join(CRATE_NAME);
     if cfg!(windows) {
         exe.set_extension("exe");
     }
@@ -189,6 +202,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let opts = RustBuildOptions {
             link_ts2rs_rt: true,
+            ..Default::default()
         };
         write_minimal_crate(dir.path(), "fn main() {}", &opts).expect("write crate");
         let toml = fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
@@ -197,6 +211,26 @@ mod tests {
             "unexpected Cargo.toml:\n{toml}"
         );
         assert!(toml.contains("[features]") && toml.contains("dep:ts2rs_rt"));
+    }
+
+    #[test]
+    fn debug_build_writes_binary_under_target_debug() {
+        let (_dir, exe) = build_rust_to_executable_with_options(
+            "fn main() { println!(\"ok\"); }",
+            &RustBuildOptions {
+                release: false,
+                ..Default::default()
+            },
+        )
+        .expect("debug build");
+        assert!(
+            exe.to_string_lossy().contains("debug"),
+            "expected debug profile path, got {}",
+            exe.display()
+        );
+        let out = Command::new(&exe).output().expect("run");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "ok\n");
     }
 
     #[test]

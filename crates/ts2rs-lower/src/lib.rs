@@ -46,6 +46,14 @@ pub fn lower_module_graph_with_options(
     Ok(ts2rs_hir::compile_graph_with_options(units, entry_path, codegen)?)
 }
 
+/// 多文件：仅 HIR 构建与语义检查，不生成 Rust。
+pub fn check_module_graph(
+    units: &[(String, Program, Lrc<SourceMap>)],
+    entry_path: &str,
+) -> Result<Vec<CompileWarning>, LowerError> {
+    Ok(ts2rs_hir::check_graph(units, entry_path)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

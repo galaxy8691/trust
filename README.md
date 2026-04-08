@@ -64,7 +64,7 @@
 | 成员访问 | 部分支持 | `string.length` 为 JS **UTF-16 码元数**；`number[].length`；对象字段 `length` 为普通数字字段；**未**支持 `string` 下标（仅 `number[]` 下标）；**`obj.m(args)`** 脱糖为全局函数 **`m(receiver, ...args)`**（`receiver` 为 `obj` 的值；须存在对应顶层函数；与严格 `tsc` 对 interface 成员的检查可能不一致）；**未**支持 `obj[expr](...)`、`obj?.m(...)`；见 `string_utf16_length.ts`、`method_call_ok.ts`、`object_length_field.ts` |
 | `?.` / `??` | 部分支持 | `?.` 仅支持成员访问 `obj?.prop`，`??` 为受限空值子集；见 `optional_ok.ts`、`nullish_ok.ts`；完整语义见 §3.3 |
 | 数组 / 对象字面量 | 部分支持 | 仅 `number[]` 与 `{ k: number }` 子集；对象为值型 `HashMap`（无 `Rc`/`Arc`）；见 `array_ok.ts`、`object_ok.ts`；完整类型语法见 §1.4 / §2.1 |
-| `switch` | 不支持 | 显式诊断 |
+| `switch` | 部分支持 | `case` 仅 `number`/`boolean` **字面量**；`default` 须**最后**；**无** `case` 间穿透（空 `case` 体拒绝）；`case` 末尾 `break` 在 build 剥离；判别式与 `if` 条件类型规则一致；见 [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts)、负例 [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts) |
 | `return` | 支持 | 非 `void` 函数需满足 `fn_body_returns`（含提前穷尽返回 + 尾部规则，见上文「控制流与 return」） |
 | `void` 函数 | 支持 | 不要求 `return` 路径检查 |
 | `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 运算见下文「算术、`/` 与溢出」 |
@@ -137,7 +137,29 @@ cargo run -p ts2rs-cli -- compile path/to/app.ts -o out.rs
 cargo run -p ts2rs-cli -- compile path/to/entry.ts path/to/extra.ts -o out.rs
 cargo run -p ts2rs-cli -- run path/to/app.ts
 cargo run -p ts2rs-cli -- run --project path/to/tsconfig.json
+cargo run -p ts2rs-cli -- check path/to/app.ts
 ```
+
+### CLI（子命令与选项）
+
+| 子命令 | 作用 |
+|--------|------|
+| **`compile`** | 解析 → HIR → 语义 → 生成 Rust，写入 **`-o` / `--output`** 路径 |
+| **`run`** | 同上后写入临时 crate，**`cargo build`**（默认 **`--release`**）并运行生成的可执行文件 |
+| **`check`** | 仅解析 + HIR + **语义检查**，不写 `.rs`、**不**调用 `cargo` |
+
+**全局**（可写在子命令前，如 `ts2rs -q run …`）：
+
+| 选项 | 说明 |
+|------|------|
+| **`-q` / `--quiet`** | 成功时不打印 **warning**（错误仍输出） |
+| **`--color`** | `auto` / `always` / `never`，帮助文本等着色；`never` / `always` 在解析前会同步 `NO_COLOR`（亦可直接设 `NO_COLOR=1`） |
+
+**`compile`**：`--span-comments`、`--emit-ir`（将 [`IRModule`](crates/ts2rs-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、`--link-ts2rs-rt`（无效果，与 `run` 对齐）。
+
+**`run`**：`--link-ts2rs-rt`；**`--debug`** 使用非 release 的 `cargo build`（`target/debug/`）；**`-O` / `--release`** 显式要求 release 构建（与默认一致，与 `--debug` 互斥）。
+
+**退出码**：**`0`** 表示 ts2rs 与子程序均成功；**`ts2rs` 自身失败**（解析、语义、找不到 `cargo` 等）为 **`1`**；**`run`** 在已生成并成功启动子进程后，若子进程非零退出，则 **ts2rs 以该进程的退出码退出**（无 `code()` 时如信号则 **`1`**）。Warning **不**抬高退出码（与上文「诊断」一致）。
 
 - **多文件**：第一个位置参数为**入口**（须含 `export function main`），其余为**额外根**（入口 DFS 未覆盖的 `.ts` 仍会加入模块图）。
 - **极简 tsconfig**：`--project foo.json` 解析 JSON 中的 **`files`** 数组（路径相对该文件所在目录）；**第一项为入口**。与多个 `.ts` 位置参数**互斥**。

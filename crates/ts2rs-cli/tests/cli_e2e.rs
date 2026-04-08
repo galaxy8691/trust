@@ -522,8 +522,95 @@ fn compile_const_reassign_fails() {
 }
 
 #[test]
-fn compile_switch_fails() {
-    assert_compile_fails_stderr("switch_fail.ts", "switch` is not supported");
+fn compile_switch_fallthrough_fails() {
+    assert_compile_fails_stderr("switch_fail.ts", "fall-through");
+}
+
+#[test]
+fn check_sample_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("sample.ts");
+    let out = Command::new(exe)
+        .args(["check", ts.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs check");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn check_switch_fail_stderr() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("switch_fail.ts");
+    let out = Command::new(exe)
+        .args(["check", ts.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs check");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("fall-through"),
+        "expected fall-through diagnostic, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn compile_emit_ir_stderr_contains_ir_module() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("sample.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let out = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+            "--emit-ir",
+        ])
+        .output()
+        .expect("spawn ts2rs compile --emit-ir");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("IRModule"),
+        "expected IRModule Debug on stderr, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn run_switch_ok_prints_seven() {
+    assert_run_stdout("switch_ok.ts", "7\n");
+}
+
+#[test]
+fn compile_switch_ok_writes_rust() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("switch_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(&exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("=="),
+        "expected lowered switch to use equality in Rust: {body}"
+    );
 }
 
 // --- §1.3 expression extensions ---
