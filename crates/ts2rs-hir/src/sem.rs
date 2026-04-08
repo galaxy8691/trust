@@ -297,6 +297,7 @@ fn check_function(
     if f.is_async {
         check_async_mvp_stmts(&f.body, cm, path, f.span)?;
         reject_naked_fetchtext_in_stmts(&f.body, cm, path)?;
+        reject_readline_in_async_stmts(&f.body, cm, path)?;
     }
 
     let mut reachable = true;
@@ -657,6 +658,169 @@ fn reject_naked_fetchtext_in_stmts(
         }
     }
     Ok(())
+}
+
+fn reject_readline_in_async_stmts(
+    stmts: &[IRStmt],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+) -> Result<(), CompileError> {
+    for s in stmts {
+        match s {
+            IRStmt::Let { init, span, .. } => {
+                if let Some(e) = init {
+                    reject_readline_in_async_expr(e, cm, path, *span)?;
+                }
+            }
+            IRStmt::Return { arg: Some(e), span } => {
+                reject_readline_in_async_expr(e, cm, path, *span)?;
+            }
+            IRStmt::Expr { expr, span } => {
+                reject_readline_in_async_expr(expr, cm, path, *span)?;
+            }
+            IRStmt::Assign { rhs, span, .. } => {
+                reject_readline_in_async_expr(rhs, cm, path, *span)?;
+            }
+            IRStmt::MemberAssign { rhs, span, .. } => {
+                reject_readline_in_async_expr(rhs, cm, path, *span)?;
+            }
+            IRStmt::Block { stmts: inner, .. } => {
+                reject_readline_in_async_stmts(inner, cm, path)?;
+            }
+            IRStmt::If {
+                cond,
+                then_b,
+                else_b,
+                ..
+            } => {
+                reject_readline_in_async_expr(cond, cm, path, stmt_span(s))?;
+                reject_readline_in_async_stmts(then_b, cm, path)?;
+                if let Some(eb) = else_b {
+                    reject_readline_in_async_stmts(eb, cm, path)?;
+                }
+            }
+            IRStmt::While { cond, body, .. } => {
+                reject_readline_in_async_expr(cond, cm, path, stmt_span(s))?;
+                reject_readline_in_async_stmts(body, cm, path)?;
+            }
+            IRStmt::ForIn { target, body, .. } => {
+                reject_readline_in_async_expr(target, cm, path, stmt_span(s))?;
+                reject_readline_in_async_stmts(body, cm, path)?;
+            }
+            IRStmt::DoWhile { body, cond, .. } => {
+                reject_readline_in_async_stmts(body, cm, path)?;
+                reject_readline_in_async_expr(cond, cm, path, stmt_span(s))?;
+            }
+            IRStmt::FnDecl { func, .. } => {
+                reject_readline_in_async_stmts(&func.body, cm, path)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn reject_readline_in_async_expr(
+    e: &IRExpr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    span: Span,
+) -> Result<(), CompileError> {
+    match e {
+        IRExpr::ReadStdinLine { .. } => Err(diag(
+            cm,
+            path,
+            span,
+            "`readLine()` is not supported in `async` functions",
+        )),
+        IRExpr::Binary { left, right, .. } => {
+            reject_readline_in_async_expr(left, cm, path, span)?;
+            reject_readline_in_async_expr(right, cm, path, span)
+        }
+        IRExpr::Unary { arg, .. } => reject_readline_in_async_expr(arg, cm, path, span),
+        IRExpr::Call { args, .. } => {
+            for a in args {
+                reject_readline_in_async_expr(a, cm, path, span)?;
+            }
+            Ok(())
+        }
+        IRExpr::MethodCall { receiver, args, .. } => {
+            reject_readline_in_async_expr(receiver, cm, path, span)?;
+            for a in args {
+                reject_readline_in_async_expr(a, cm, path, span)?;
+            }
+            Ok(())
+        }
+        IRExpr::BuiltinLog { args, .. }
+        | IRExpr::MathBuiltin { args, .. }
+        | IRExpr::NumberBuiltin { args, .. }
+        | IRExpr::JsonBuiltin { args, .. } => {
+            for a in args {
+                reject_readline_in_async_expr(a, cm, path, span)?;
+            }
+            Ok(())
+        }
+        IRExpr::StringMethodBuiltin { receiver, args, .. } => {
+            reject_readline_in_async_expr(receiver, cm, path, span)?;
+            for a in args {
+                reject_readline_in_async_expr(a, cm, path, span)?;
+            }
+            Ok(())
+        }
+        IRExpr::Conditional { test, cons, alt, .. } => {
+            reject_readline_in_async_expr(test, cm, path, span)?;
+            reject_readline_in_async_expr(cons, cm, path, span)?;
+            reject_readline_in_async_expr(alt, cm, path, span)
+        }
+        IRExpr::Seq { exprs, .. } => {
+            for x in exprs {
+                reject_readline_in_async_expr(x, cm, path, span)?;
+            }
+            Ok(())
+        }
+        IRExpr::Tpl { parts, .. } => {
+            for p in parts {
+                if let TplPart::Interp(x) = p {
+                    reject_readline_in_async_expr(x, cm, path, span)?;
+                }
+            }
+            Ok(())
+        }
+        IRExpr::Member { obj, .. } | IRExpr::OptionalMember { obj, .. } => {
+            reject_readline_in_async_expr(obj, cm, path, span)
+        }
+        IRExpr::NullishCoalesce { left, right, .. } => {
+            reject_readline_in_async_expr(left, cm, path, span)?;
+            reject_readline_in_async_expr(right, cm, path, span)
+        }
+        IRExpr::ArrayLit { elems, .. } => {
+            for x in elems {
+                reject_readline_in_async_expr(x, cm, path, span)?;
+            }
+            Ok(())
+        }
+        IRExpr::ObjectLit { fields, .. } => {
+            for (_, v) in fields {
+                reject_readline_in_async_expr(v, cm, path, span)?;
+            }
+            Ok(())
+        }
+        IRExpr::Index { obj, index, .. } => {
+            reject_readline_in_async_expr(obj, cm, path, span)?;
+            reject_readline_in_async_expr(index, cm, path, span)
+        }
+        IRExpr::ArrowFn { body, .. } => reject_readline_in_async_stmts(body, cm, path),
+        IRExpr::Await { arg, .. } => reject_readline_in_async_expr(arg, cm, path, span),
+        IRExpr::FetchText { url, .. } => reject_readline_in_async_expr(url, cm, path, span),
+        IRExpr::Number(..)
+        | IRExpr::Bool(..)
+        | IRExpr::Str(..)
+        | IRExpr::Ident(..)
+        | IRExpr::Null(..)
+        | IRExpr::Undefined(..)
+        | IRExpr::This(..)
+        | IRExpr::Super(..) => Ok(()),
+    }
 }
 
 /// 当前语句执行后，同一块内后续语句是否均不可达（用于不可达警告）。
@@ -1566,7 +1730,7 @@ fn infer_expr_mut(
             }
             Err(diag(cm, path, *span, "unsupported optional member access"))
         }
-        IRExpr::MathBuiltin { args, span, .. } => {
+        IRExpr::MathBuiltin { kind, args, span } => {
             for a in args.iter_mut() {
                 let t = infer_expr_mut(a, stack, globals, cm, path)?;
                 if !is_numberish(&t) {
@@ -1578,8 +1742,213 @@ fn infer_expr_mut(
                     ));
                 }
             }
+            if *kind == MathBuiltinKind::Pow {
+                if let Some(e2) = args.get(1) {
+                    if let IRExpr::Number(n, _) = e2 {
+                        if *n < 0 {
+                            return Err(diag(
+                                cm,
+                                path,
+                                *span,
+                                "Math.pow: exponent literal must be non-negative",
+                            ));
+                        }
+                    }
+                }
+            }
             Ok(TsType::Number)
         }
+        IRExpr::NumberBuiltin { kind, args, span } => {
+            match kind {
+                NumberBuiltinKind::ParseInt => {
+                    if args.is_empty() || args.len() > 2 {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "internal: Number.parseInt arity",
+                        ));
+                    }
+                    let t0 = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                    if !is_stringish(&t0) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`Number.parseInt` first argument must be `string`",
+                        ));
+                    }
+                    if args.len() == 2 {
+                        let t1 = infer_expr_mut(&mut args[1], stack, globals, cm, path)?;
+                        if !is_numberish(&t1) {
+                            return Err(diag(
+                                cm,
+                                path,
+                                *span,
+                                "`Number.parseInt` radix must be `number`",
+                            ));
+                        }
+                        if let IRExpr::Number(r, _) = &args[1] {
+                            if *r < 2 || *r > 36 {
+                                return Err(diag(
+                                    cm,
+                                    path,
+                                    *span,
+                                    "`Number.parseInt` radix must be between 2 and 36",
+                                ));
+                            }
+                        }
+                    }
+                    Ok(TsType::Number)
+                }
+                NumberBuiltinKind::ParseFloat => {
+                    let t0 = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                    if !is_stringish(&t0) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`Number.parseFloat` argument must be `string`",
+                        ));
+                    }
+                    Ok(TsType::Number)
+                }
+            }
+        }
+        IRExpr::JsonBuiltin {
+            kind,
+            args,
+            span,
+            stringify_inferred_ty,
+        } => {
+            match kind {
+                JsonBuiltinKind::Stringify => {
+                    let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                    if !is_stringish(&t) && !is_numberish(&t) && !is_booleanish(&t) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`JSON.stringify` supports only `string`, `number`, or `boolean`",
+                        ));
+                    }
+                    *stringify_inferred_ty = Some(t.clone());
+                    Ok(TsType::String)
+                }
+                JsonBuiltinKind::Parse => {
+                    let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                    if !is_stringish(&t) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`JSON.parse` argument must be `string`",
+                        ));
+                    }
+                    Ok(TsType::Number)
+                }
+            }
+        }
+        IRExpr::StringMethodBuiltin {
+            kind,
+            receiver,
+            args,
+            span,
+        } => {
+            let rt = infer_expr_mut(receiver, stack, globals, cm, path)?;
+            if !is_stringish(&rt) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "string builtin method receiver must be `string`",
+                ));
+            }
+            match kind {
+                StringMethodKind::CharAt => {
+                    if args.len() != 1 {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "internal: charAt arity",
+                        ));
+                    }
+                    let at = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                    if !is_numberish(&at) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "argument must be `number`",
+                        ));
+                    }
+                    Ok(TsType::String)
+                }
+                StringMethodKind::CharCodeAt => {
+                    if args.len() != 1 {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "internal: charCodeAt arity",
+                        ));
+                    }
+                    let at = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                    if !is_numberish(&at) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "argument must be `number`",
+                        ));
+                    }
+                    Ok(TsType::Number)
+                }
+                StringMethodKind::Slice | StringMethodKind::Substring => {
+                    for a in args.iter_mut() {
+                        let at = infer_expr_mut(a, stack, globals, cm, path)?;
+                        if !is_numberish(&at) {
+                            return Err(diag(
+                                cm,
+                                path,
+                                *span,
+                                "`slice` / `substring` arguments must be `number`",
+                            ));
+                        }
+                    }
+                    Ok(TsType::String)
+                }
+                StringMethodKind::IndexOf | StringMethodKind::Includes => {
+                    let st = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+                    if !is_stringish(&st) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            "`indexOf` / `includes` search string must be `string`",
+                        ));
+                    }
+                    if args.len() == 2 {
+                        let at = infer_expr_mut(&mut args[1], stack, globals, cm, path)?;
+                        if !is_numberish(&at) {
+                            return Err(diag(
+                                cm,
+                                path,
+                                *span,
+                                "`indexOf` / `includes` position must be `number`",
+                            ));
+                        }
+                    }
+                    Ok(match *kind {
+                        StringMethodKind::IndexOf => TsType::Number,
+                        StringMethodKind::Includes => TsType::Boolean,
+                        _ => unreachable!(),
+                    })
+                }
+            }
+        }
+        IRExpr::ReadStdinLine { .. } => Ok(TsType::String),
         IRExpr::NullishCoalesce { left, right, span } => {
             let lt = infer_expr_mut(left, stack, globals, cm, path)?;
             let rt = infer_expr_mut(right, stack, globals, cm, path)?;
@@ -1701,20 +2070,29 @@ fn infer_expr_mut(
             *span,
             "`super` is only valid inside subclass constructor lowering",
         )),
-        IRExpr::Index { obj, index, span } => {
+        IRExpr::Index {
+            obj,
+            index,
+            span,
+            index_kind,
+        } => {
             let ot = infer_expr_mut(obj, stack, globals, cm, path)?;
             let it = infer_expr_mut(index, stack, globals, cm, path)?;
             if !is_numberish(&it) {
-                return Err(diag(cm, path, *span, "array index must be `number`"));
+                return Err(diag(cm, path, *span, "index must be `number`"));
             }
             if ot == TsType::ArrayNumber {
+                *index_kind = Some(IndexKind::ArrayNumber);
                 Ok(TsType::Number)
+            } else if is_stringish(&ot) {
+                *index_kind = Some(IndexKind::StringUtf16);
+                Ok(TsType::String)
             } else {
                 Err(diag(
                     cm,
                     path,
                     *span,
-                    "index access currently supports only `number[]`",
+                    "index access supports only `number[]` or `string`",
                 ))
             }
         }

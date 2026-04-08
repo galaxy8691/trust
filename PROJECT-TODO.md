@@ -164,9 +164,10 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 5.2 Minimal runtime ([`ts2rs_rt`](crates/ts2rs_rt))
 
-- [x] **Strings**: `string.length` is **UTF-16 code units** (`encode_utf16().count()`); `number[].length` → `Vec::len`; object field `length` via `HashMap::get` ([`MemberLengthDispatch`](crates/ts2rs-hir/src/ir.rs)) (`codegen_52_string_length_utf16`, `codegen_52_object_length_field_uses_get`; CLI tests). **Not done**: `string` subscript `s[i]` (only `number[]`; full UTF-16 semantics TBD).
-- [x] **Math**: `Math.abs` / `min` / `max` / `floor` / `ceil` integer subset ([`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs); [`build.rs`](crates/ts2rs-hir/src/build.rs); [`emit_expr`](crates/ts2rs-hir/src/codegen.rs); `floor`/`ceil` identity on pure `i32`).
-- [x] **I/O**: [`ts2rs_rt::read_stdin_line`](crates/ts2rs_rt/src/lib.rs) placeholder (`std::io`); **generated code and driver temp crate still do not depend on `ts2rs_rt`** end-to-end.
+- [x] **Strings**: `string.length` is **UTF-16 code units** (`encode_utf16().count()`); `number[].length` → `Vec::len`; object field `length` via `HashMap::get` ([`MemberLengthDispatch`](crates/ts2rs-hir/src/ir.rs)) (`codegen_52_string_length_utf16`, `codegen_52_object_length_field_uses_get`; CLI tests). **`string` subscript `s[i]`**: UTF-16 index → single-code-unit `string` ([`IndexKind::StringUtf16`](crates/ts2rs-hir/src/ir.rs); `stdlib_hir_ok.ts`).
+- [x] **Math**: `Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` integer subset ([`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs); [`build.rs`](crates/ts2rs-hir/src/build.rs); [`emit_expr`](crates/ts2rs-hir/src/codegen.rs); `floor`/`ceil`/`trunc`/`round` identity on pure `i32`; `pow` uses `checked_pow`).
+- [x] **HIR stdlib (no `ts2rs_rt` required)**: `Number.parseInt` / `parseFloat`; `JSON.stringify` / `JSON.parse` (integer JSON); `String` methods `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes`; global `readLine()` via inlined `std::io` (rejected in `async` bodies); [`stdlib_hir_ok.ts`](crates/ts2rs-cli/tests/fixtures/stdlib_hir_ok.ts).
+- [x] **I/O**: [`ts2rs_rt::read_stdin_line`](crates/ts2rs_rt/src/lib.rs) placeholder (`std::io`); **optional** — sync `readLine()` is emitted in generated Rust **without** linking `ts2rs_rt`; driver temp crate still does not depend on `ts2rs_rt` unless `--link-ts2rs-rt`.
 
 ---
 

@@ -195,6 +195,50 @@ pub enum MathBuiltinKind {
     Max,
     Floor,
     Ceil,
+    /// `Math.sign(x)` → `-1 | 0 | 1`
+    Sign,
+    /// 向零截断（`x` 为 `number` / `i32`）
+    Trunc,
+    /// 四舍五入到最近整数（`0.5` 远离零）
+    Round,
+    /// `Math.pow(base, exp)`：`exp` 须为非负且结果在 `i32` 可表示范围内（见 sem）
+    Pow,
+}
+
+/// `Number.parseInt` / `Number.parseFloat`（`parseFloat` 在 Rust 中向零截断为 `i32`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumberBuiltinKind {
+    ParseInt,
+    ParseFloat,
+}
+
+/// `JSON.stringify` / `JSON.parse` 子集。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsonBuiltinKind {
+    /// 参数：`number` | `boolean` | `string`
+    Stringify,
+    /// 参数：`string`，须为 JSON **number** 字面量（可选空白）；返回 `number`
+    Parse,
+}
+
+/// `String.prototype` 内建子集（UTF-16 码元语义与 `length` / `charCodeAt` 一致）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StringMethodKind {
+    CharAt,
+    CharCodeAt,
+    Slice,
+    Substring,
+    IndexOf,
+    Includes,
+}
+
+/// `arr[i]` / `s[i]` 的下标语义（由 sem 填入）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexKind {
+    /// `number[]` → `Vec<i32>`
+    ArrayNumber,
+    /// JS 字符串：下标为 UTF-16 码元索引
+    StringUtf16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +342,31 @@ pub enum IRExpr {
         args: Vec<IRExpr>,
         span: Span,
     },
+    /// `Number.parseInt` / `Number.parseFloat`
+    NumberBuiltin {
+        kind: NumberBuiltinKind,
+        args: Vec<IRExpr>,
+        span: Span,
+    },
+    /// `JSON.stringify` / `JSON.parse`
+    JsonBuiltin {
+        kind: JsonBuiltinKind,
+        args: Vec<IRExpr>,
+        span: Span,
+        /// `JSON.stringify`：由 sem 填入第一个参数的静态类型，供 codegen 选择分支
+        stringify_inferred_ty: Option<TsType>,
+    },
+    /// `String.prototype.*` 内建（不经过全局 `method(receiver, …)`）
+    StringMethodBuiltin {
+        kind: StringMethodKind,
+        receiver: Box<IRExpr>,
+        args: Vec<IRExpr>,
+        span: Span,
+    },
+    /// 从标准输入读取一行（无换行符），`string`
+    ReadStdinLine {
+        span: Span,
+    },
     /// 数组字面量 `[a, b, ...]`（无空洞、无 spread）
     ArrayLit {
         elems: Vec<IRExpr>,
@@ -308,11 +377,12 @@ pub enum IRExpr {
         fields: Vec<(String, IRExpr)>,
         span: Span,
     },
-    /// 下标访问 `arr[i]`
+    /// 下标访问 `arr[i]` / `s[i]`（`index_kind` 由 sem 填入）
     Index {
         obj: Box<IRExpr>,
         index: Box<IRExpr>,
         span: Span,
+        index_kind: Option<IndexKind>,
     },
     /// 箭头函数表达式（函数值）
     ArrowFn {

@@ -29,6 +29,82 @@ pub fn emit_rust_with_options(
             "async fn __ts2rs_fetch_text(url: String) -> String {\n    reqwest::get(url.as_str())\n        .await\n        .expect(\"HTTP GET failed\")\n        .text()\n        .await\n        .expect(\"read response body failed\")\n}\n\n",
         );
     }
+    if module_needs_utf16_stdlib_helpers(module) {
+        out.push_str(
+            r#"fn __ts2rs_utf16_slice(s: &str, start: i32, end: Option<i32>, substring_swap: bool) -> String {
+    let v: Vec<u16> = s.encode_utf16().collect();
+    let nlen = v.len() as i32;
+    let fix = |i: i32| -> i32 {
+        if i < 0 {
+            nlen + i
+        } else {
+            i
+        }
+    };
+    let mut a = fix(start).clamp(0, nlen);
+    let mut b = fix(end.unwrap_or(nlen)).clamp(0, nlen);
+    if substring_swap && a > b {
+        std::mem::swap(&mut a, &mut b);
+    }
+    if a > b {
+        return String::new();
+    }
+    String::from_utf16_lossy(&v[a as usize..b as usize])
+}
+
+fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> i32 {
+    let h: Vec<u16> = haystack.encode_utf16().collect();
+    let n: Vec<u16> = needle.encode_utf16().collect();
+    let hl = h.len() as i32;
+    let nl = n.len() as i32;
+    let mut start = from_utf16;
+    if from_utf16 < 0 {
+        start = hl + from_utf16;
+    }
+    if start < 0 {
+        start = 0;
+    }
+    let usize_start = (start as usize).min(h.len());
+    if n.is_empty() {
+        return (usize_start as i32).min(hl);
+    }
+    if nl > hl || usize_start > h.len().saturating_sub(n.len()) {
+        return -1;
+    }
+    let last = h.len() - n.len();
+    for i in usize_start..=last {
+        if h[i..i + n.len()] == n[..] {
+            return i as i32;
+        }
+    }
+    -1
+}
+
+"#,
+        );
+    }
+    if module_needs_json_stringify_helper(module) {
+        out.push_str(
+            r#"fn __ts2rs_json_escape_string(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for ch in s.chars() {
+        match ch {
+            '\\' => o.push_str("\\\\"),
+            '"' => o.push_str("\\\""),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+"#,
+        );
+    }
 
     for c in &module.classes {
         let trait_name = format!("{}Dyn", c.name);
@@ -93,6 +169,186 @@ fn module_needs_fetch_helper(module: &IRModule) -> bool {
     module.fns.iter().any(|f| stmts_maybe_fetch(&f.body))
 }
 
+fn module_needs_json_stringify_helper(module: &IRModule) -> bool {
+    module
+        .fns
+        .iter()
+        .any(|f| stmts_maybe_json_stringify(&f.body))
+}
+
+fn stmts_maybe_json_stringify(stmts: &[IRStmt]) -> bool {
+    stmts.iter().any(stmt_maybe_json_stringify)
+}
+
+fn stmt_maybe_json_stringify(s: &IRStmt) -> bool {
+    match s {
+        IRStmt::Let { init, .. } => init.as_ref().is_some_and(expr_maybe_json_stringify),
+        IRStmt::Assign { rhs, .. } | IRStmt::MemberAssign { rhs, .. } => {
+            expr_maybe_json_stringify(rhs)
+        }
+        IRStmt::Expr { expr, .. } => expr_maybe_json_stringify(expr),
+        IRStmt::Return { arg, .. } => arg.as_ref().is_some_and(expr_maybe_json_stringify),
+        IRStmt::Block { stmts, .. } => stmts_maybe_json_stringify(stmts),
+        IRStmt::If {
+            cond,
+            then_b,
+            else_b,
+            ..
+        } => {
+            expr_maybe_json_stringify(cond)
+                || stmts_maybe_json_stringify(then_b)
+                || else_b.as_deref().is_some_and(stmts_maybe_json_stringify)
+        }
+        IRStmt::While { cond, body, .. } => {
+            expr_maybe_json_stringify(cond) || stmts_maybe_json_stringify(body)
+        }
+        IRStmt::ForIn { target, body, .. } => {
+            expr_maybe_json_stringify(target) || stmts_maybe_json_stringify(body)
+        }
+        IRStmt::DoWhile { body, cond, .. } => {
+            stmts_maybe_json_stringify(body) || expr_maybe_json_stringify(cond)
+        }
+        IRStmt::FnDecl { func, .. } => stmts_maybe_json_stringify(&func.body),
+        _ => false,
+    }
+}
+
+fn module_needs_utf16_stdlib_helpers(module: &IRModule) -> bool {
+    module
+        .fns
+        .iter()
+        .any(|f| stmts_maybe_utf16_stdlib(&f.body))
+}
+
+fn stmts_maybe_utf16_stdlib(stmts: &[IRStmt]) -> bool {
+    stmts.iter().any(stmt_maybe_utf16_stdlib)
+}
+
+fn stmt_maybe_utf16_stdlib(s: &IRStmt) -> bool {
+    match s {
+        IRStmt::Let { init, .. } => init.as_ref().is_some_and(expr_maybe_utf16_stdlib),
+        IRStmt::Assign { rhs, .. } | IRStmt::MemberAssign { rhs, .. } => {
+            expr_maybe_utf16_stdlib(rhs)
+        }
+        IRStmt::Expr { expr, .. } => expr_maybe_utf16_stdlib(expr),
+        IRStmt::Return { arg, .. } => arg.as_ref().is_some_and(expr_maybe_utf16_stdlib),
+        IRStmt::Block { stmts, .. } => stmts_maybe_utf16_stdlib(stmts),
+        IRStmt::If {
+            cond,
+            then_b,
+            else_b,
+            ..
+        } => {
+            expr_maybe_utf16_stdlib(cond)
+                || stmts_maybe_utf16_stdlib(then_b)
+                || else_b.as_deref().is_some_and(stmts_maybe_utf16_stdlib)
+        }
+        IRStmt::While { cond, body, .. } => {
+            expr_maybe_utf16_stdlib(cond) || stmts_maybe_utf16_stdlib(body)
+        }
+        IRStmt::ForIn { target, body, .. } => {
+            expr_maybe_utf16_stdlib(target) || stmts_maybe_utf16_stdlib(body)
+        }
+        IRStmt::DoWhile { body, cond, .. } => {
+            stmts_maybe_utf16_stdlib(body) || expr_maybe_utf16_stdlib(cond)
+        }
+        IRStmt::FnDecl { func, .. } => stmts_maybe_utf16_stdlib(&func.body),
+        _ => false,
+    }
+}
+
+fn expr_maybe_utf16_stdlib(e: &IRExpr) -> bool {
+    match e {
+        IRExpr::StringMethodBuiltin { .. } => true,
+        IRExpr::Binary { left, right, .. } => {
+            expr_maybe_utf16_stdlib(left) || expr_maybe_utf16_stdlib(right)
+        }
+        IRExpr::Unary { arg, .. } => expr_maybe_utf16_stdlib(arg),
+        IRExpr::Call { args, .. }
+        | IRExpr::MethodCall { args, .. }
+        | IRExpr::BuiltinLog { args, .. }
+        | IRExpr::MathBuiltin { args, .. }
+        | IRExpr::NumberBuiltin { args, .. }
+        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_utf16_stdlib),
+        IRExpr::Conditional {
+            test, cons, alt, ..
+        } => {
+            expr_maybe_utf16_stdlib(test)
+                || expr_maybe_utf16_stdlib(cons)
+                || expr_maybe_utf16_stdlib(alt)
+        }
+        IRExpr::Seq { exprs, .. } => exprs.iter().any(expr_maybe_utf16_stdlib),
+        IRExpr::Tpl { parts, .. } => parts.iter().any(|p| match p {
+            TplPart::Interp(x) => expr_maybe_utf16_stdlib(x),
+            TplPart::Static(_) => false,
+        }),
+        IRExpr::Member { obj, .. } | IRExpr::OptionalMember { obj, .. } => {
+            expr_maybe_utf16_stdlib(obj)
+        }
+        IRExpr::NullishCoalesce { left, right, .. } => {
+            expr_maybe_utf16_stdlib(left) || expr_maybe_utf16_stdlib(right)
+        }
+        IRExpr::ArrayLit { elems, .. } => elems.iter().any(expr_maybe_utf16_stdlib),
+        IRExpr::ObjectLit { fields, .. } => fields.iter().any(|(_, v)| expr_maybe_utf16_stdlib(v)),
+        IRExpr::Index { obj, index, .. } => {
+            expr_maybe_utf16_stdlib(obj) || expr_maybe_utf16_stdlib(index)
+        }
+        IRExpr::ArrowFn { body, .. } => stmts_maybe_utf16_stdlib(body),
+        IRExpr::Await { arg, .. } => expr_maybe_utf16_stdlib(arg),
+        IRExpr::FetchText { url, .. } => expr_maybe_utf16_stdlib(url),
+        _ => false,
+    }
+}
+
+fn expr_maybe_json_stringify(e: &IRExpr) -> bool {
+    match e {
+        IRExpr::JsonBuiltin {
+            kind: JsonBuiltinKind::Stringify,
+            ..
+        } => true,
+        IRExpr::Binary { left, right, .. } => {
+            expr_maybe_json_stringify(left) || expr_maybe_json_stringify(right)
+        }
+        IRExpr::Unary { arg, .. } => expr_maybe_json_stringify(arg),
+        IRExpr::Call { args, .. }
+        | IRExpr::MethodCall { args, .. }
+        | IRExpr::BuiltinLog { args, .. }
+        | IRExpr::MathBuiltin { args, .. }
+        | IRExpr::NumberBuiltin { args, .. }
+        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_json_stringify),
+        IRExpr::StringMethodBuiltin { receiver, args, .. } => {
+            expr_maybe_json_stringify(receiver) || args.iter().any(expr_maybe_json_stringify)
+        }
+        IRExpr::Conditional {
+            test, cons, alt, ..
+        } => {
+            expr_maybe_json_stringify(test)
+                || expr_maybe_json_stringify(cons)
+                || expr_maybe_json_stringify(alt)
+        }
+        IRExpr::Seq { exprs, .. } => exprs.iter().any(expr_maybe_json_stringify),
+        IRExpr::Tpl { parts, .. } => parts.iter().any(|p| match p {
+            TplPart::Interp(x) => expr_maybe_json_stringify(x),
+            TplPart::Static(_) => false,
+        }),
+        IRExpr::Member { obj, .. } | IRExpr::OptionalMember { obj, .. } => {
+            expr_maybe_json_stringify(obj)
+        }
+        IRExpr::NullishCoalesce { left, right, .. } => {
+            expr_maybe_json_stringify(left) || expr_maybe_json_stringify(right)
+        }
+        IRExpr::ArrayLit { elems, .. } => elems.iter().any(expr_maybe_json_stringify),
+        IRExpr::ObjectLit { fields, .. } => fields.iter().any(|(_, v)| expr_maybe_json_stringify(v)),
+        IRExpr::Index { obj, index, .. } => {
+            expr_maybe_json_stringify(obj) || expr_maybe_json_stringify(index)
+        }
+        IRExpr::ArrowFn { body, .. } => stmts_maybe_json_stringify(body),
+        IRExpr::Await { arg, .. } => expr_maybe_json_stringify(arg),
+        IRExpr::FetchText { url, .. } => expr_maybe_json_stringify(url),
+        _ => false,
+    }
+}
+
 fn stmts_maybe_fetch(stmts: &[IRStmt]) -> bool {
     stmts.iter().any(stmt_maybe_fetch)
 }
@@ -131,7 +387,12 @@ fn expr_maybe_fetch(e: &IRExpr) -> bool {
         IRExpr::Call { args, .. }
         | IRExpr::MethodCall { args, .. }
         | IRExpr::BuiltinLog { args, .. }
-        | IRExpr::MathBuiltin { args, .. } => args.iter().any(expr_maybe_fetch),
+        | IRExpr::MathBuiltin { args, .. }
+        | IRExpr::NumberBuiltin { args, .. }
+        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_fetch),
+        IRExpr::StringMethodBuiltin { receiver, args, .. } => {
+            expr_maybe_fetch(receiver) || args.iter().any(expr_maybe_fetch)
+        }
         IRExpr::Conditional {
             test, cons, alt, ..
         } => expr_maybe_fetch(test) || expr_maybe_fetch(cons) || expr_maybe_fetch(alt),
@@ -148,6 +409,7 @@ fn expr_maybe_fetch(e: &IRExpr) -> bool {
         IRExpr::ObjectLit { fields, .. } => fields.iter().any(|(_, v)| expr_maybe_fetch(v)),
         IRExpr::Index { obj, index, .. } => expr_maybe_fetch(obj) || expr_maybe_fetch(index),
         IRExpr::ArrowFn { body, .. } => stmts_maybe_fetch(body),
+        IRExpr::ReadStdinLine { .. } => false,
         _ => false,
     }
 }
@@ -158,6 +420,14 @@ fn rust_fn_name(name: &str) -> &str {
 
 fn is_numberish(t: &TsType) -> bool {
     helpers::is_numberish(t)
+}
+
+fn is_booleanish(t: &TsType) -> bool {
+    helpers::is_booleanish(t)
+}
+
+fn is_stringish(t: &TsType) -> bool {
+    helpers::is_stringish(t)
 }
 
 fn rust_ty(t: &TsType, f: &IRFunction) -> Result<&'static str, CompileError> {
@@ -692,12 +962,106 @@ fn emit_expr(
                     let b = emit_expr(&args[1], f, stmt_level, module)?;
                     Ok(format!("(({a}) as i32).max(({b}) as i32)"))
                 }
-                Floor | Ceil => {
+                Floor | Ceil | Trunc | Round => {
                     let n = emit_expr(&args[0], f, stmt_level, module)?;
                     Ok(format!("({n})"))
                 }
+                Sign => {
+                    let a = emit_expr(&args[0], f, stmt_level, module)?;
+                    Ok(format!(
+                        "((((({a}) as i32) > 0) as i32) - (((({a}) as i32) < 0) as i32))"
+                    ))
+                }
+                Pow => {
+                    let a = emit_expr(&args[0], f, stmt_level, module)?;
+                    let b = emit_expr(&args[1], f, stmt_level, module)?;
+                    Ok(format!(
+                        "({{ let __e = ({b}) as i32; if __e < 0 {{ panic!(\"Math.pow: negative exponent\"); }} ({a} as i32).checked_pow(__e as u32).expect(\"Math.pow\") }})"
+                    ))
+                }
             }
         }
+        IRExpr::NumberBuiltin { kind, args, .. } => {
+            use NumberBuiltinKind::*;
+            match kind {
+                ParseInt => {
+                    let s = emit_expr(&args[0], f, stmt_level, module)?;
+                    if args.len() == 1 {
+                        Ok(format!("({s}).trim().parse::<i32>().unwrap_or(0)"))
+                    } else {
+                        let radix = emit_expr(&args[1], f, stmt_level, module)?;
+                        Ok(format!(
+                            "i32::from_str_radix(({s}).trim(), ({radix}) as u32).unwrap_or(0)"
+                        ))
+                    }
+                }
+                ParseFloat => {
+                    let s = emit_expr(&args[0], f, stmt_level, module)?;
+                    Ok(format!(
+                        "(({s}).trim().parse::<f64>().unwrap_or(0.0) as i32)"
+                    ))
+                }
+            }
+        }
+        IRExpr::JsonBuiltin {
+            kind,
+            args,
+            span,
+            stringify_inferred_ty,
+        } => {
+            match kind {
+                JsonBuiltinKind::Stringify => {
+                    let inner = emit_expr(&args[0], f, stmt_level, module)?;
+                    let ty = stringify_inferred_ty.as_ref().ok_or_else(|| {
+                        diag(
+                            f.cm.as_ref(),
+                            &f.source_path,
+                            *span,
+                            "JSON.stringify: missing inferred type (sem bug)",
+                        )
+                    })?;
+                    if is_stringish(ty) {
+                        Ok(format!("__ts2rs_json_escape_string(&({inner}))"))
+                    } else if is_numberish(ty) || is_booleanish(ty) {
+                        Ok(format!("format!(\"{{}}\", {inner})"))
+                    } else {
+                        Err(diag(
+                            f.cm.as_ref(),
+                            &f.source_path,
+                            *span,
+                            "JSON.stringify: unsupported type for codegen",
+                        ))
+                    }
+                }
+                JsonBuiltinKind::Parse => {
+                    let s = emit_expr(&args[0], f, stmt_level, module)?;
+                    Ok(format!(
+                        "({s}).trim().parse::<i32>().expect(\"JSON.parse: expected JSON integer\")"
+                    ))
+                }
+            }
+        }
+        IRExpr::StringMethodBuiltin {
+            kind,
+            receiver,
+            args,
+            span,
+        } => emit_string_method_builtin(kind, receiver, args, *span, f, stmt_level, module),
+        IRExpr::ReadStdinLine { .. } => Ok(
+            r#"({
+    use std::io::BufRead;
+    let mut __line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut __line);
+    if __line.ends_with('\n') {
+        __line.pop();
+        if __line.ends_with('\r') {
+            __line.pop();
+        }
+    }
+    __line
+})"#
+            .to_string(),
+        ),
         IRExpr::NullishCoalesce { left, right, .. } => {
             if matches!(&**left, IRExpr::Null(_) | IRExpr::Undefined(_)) {
                 emit_expr(right, f, stmt_level, module)
@@ -729,10 +1093,20 @@ fn emit_expr(
                 pairs.join(", ")
             ))
         }
-        IRExpr::Index { obj, index, .. } => {
+        IRExpr::Index {
+            obj,
+            index,
+            index_kind,
+            ..
+        } => {
             let o = emit_expr(obj, f, stmt_level, module)?;
             let i = emit_expr(index, f, stmt_level, module)?;
-            Ok(format!("({o}[({i}) as usize])"))
+            match index_kind {
+                Some(IndexKind::StringUtf16) => Ok(format!(
+                    "({{ let __s = &({o}); let __ii = ({i}) as i32; let __v: Vec<u16> = __s.encode_utf16().collect(); let __len = __v.len() as i32; let __j = if __ii < 0 {{ __len + __ii }} else {{ __ii }}; if __j < 0 || __j >= __len {{ String::new() }} else {{ String::from_utf16_lossy(&[__v[__j as usize]]) }} }})"
+                )),
+                _ => Ok(format!("({o}[({i}) as usize])")),
+            }
         }
         IRExpr::FetchText { url, .. } => {
             let u = emit_expr(url, f, stmt_level, module)?;
@@ -741,6 +1115,81 @@ fn emit_expr(
         IRExpr::Await { arg, .. } => {
             let inner = emit_expr(arg, f, stmt_level, module)?;
             Ok(format!("({inner}).await"))
+        }
+    }
+}
+
+fn emit_string_method_builtin(
+    kind: &StringMethodKind,
+    receiver: &IRExpr,
+    args: &[IRExpr],
+    _span: Span,
+    f: &IRFunction,
+    stmt_level: usize,
+    module: &IRModule,
+) -> Result<String, CompileError> {
+    let recv = emit_expr(receiver, f, stmt_level, module)?;
+    use StringMethodKind::*;
+    match kind {
+        CharAt => {
+            let i = emit_expr(&args[0], f, stmt_level, module)?;
+            Ok(format!(
+                "({{ let __s = &({recv}); let __ii = ({i}) as i32; let __v: Vec<u16> = __s.encode_utf16().collect(); let __len = __v.len() as i32; let __j = if __ii < 0 {{ __len + __ii }} else {{ __ii }}; if __j < 0 || __j >= __len {{ String::new() }} else {{ String::from_utf16_lossy(&[__v[__j as usize]]) }} }})"
+            ))
+        }
+        CharCodeAt => {
+            let i = emit_expr(&args[0], f, stmt_level, module)?;
+            Ok(format!(
+                "({{ let __s = &({recv}); let __ii = ({i}) as i32; let __v: Vec<u16> = __s.encode_utf16().collect(); let __len = __v.len() as i32; let __j = if __ii < 0 {{ __len + __ii }} else {{ __ii }}; if __j < 0 || __j >= __len {{ 0i32 }} else {{ __v[__j as usize] as i32 }} }})"
+            ))
+        }
+        Slice => {
+            let a0 = emit_expr(&args[0], f, stmt_level, module)?;
+            if args.len() == 1 {
+                Ok(format!(
+                    "__ts2rs_utf16_slice(&({recv}), ({a0}) as i32, None, false)"
+                ))
+            } else {
+                let a1 = emit_expr(&args[1], f, stmt_level, module)?;
+                Ok(format!(
+                    "__ts2rs_utf16_slice(&({recv}), ({a0}) as i32, Some(({a1}) as i32), false)"
+                ))
+            }
+        }
+        Substring => {
+            let a0 = emit_expr(&args[0], f, stmt_level, module)?;
+            if args.len() == 1 {
+                Ok(format!(
+                    "__ts2rs_utf16_slice(&({recv}), ({a0}) as i32, None, true)"
+                ))
+            } else {
+                let a1 = emit_expr(&args[1], f, stmt_level, module)?;
+                Ok(format!(
+                    "__ts2rs_utf16_slice(&({recv}), ({a0}) as i32, Some(({a1}) as i32), true)"
+                ))
+            }
+        }
+        IndexOf => {
+            let needle = emit_expr(&args[0], f, stmt_level, module)?;
+            let from = if args.len() == 1 {
+                "0i32".to_string()
+            } else {
+                emit_expr(&args[1], f, stmt_level, module)?
+            };
+            Ok(format!(
+                "__ts2rs_utf16_index_of(&({recv}), &({needle}), ({from}) as i32)"
+            ))
+        }
+        Includes => {
+            let needle = emit_expr(&args[0], f, stmt_level, module)?;
+            let from = if args.len() == 1 {
+                "0i32".to_string()
+            } else {
+                emit_expr(&args[1], f, stmt_level, module)?
+            };
+            Ok(format!(
+                "(__ts2rs_utf16_index_of(&({recv}), &({needle}), ({from}) as i32) >= 0)"
+            ))
         }
     }
 }
@@ -831,5 +1280,18 @@ mod tests {
         let rs = emit_rust_with_options(&m, &CodegenOptions::default()).unwrap();
         assert!(rs.contains("fn ts_main"), "{rs}");
         assert!(rs.contains("println!"), "{rs}");
+    }
+
+    #[test]
+    fn emit_rust_stdlib_helpers_when_needed() {
+        let src = r#"function main(): number {
+  return "ab".slice(0, 1).length + JSON.stringify(1).length;
+}"#;
+        let p = parse_typescript_file("t.ts", src).unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        check_module(&mut m).unwrap();
+        let rs = emit_rust_with_options(&m, &CodegenOptions::default()).unwrap();
+        assert!(rs.contains("__ts2rs_utf16_slice"), "{rs}");
+        assert!(rs.contains("__ts2rs_json_escape_string"), "{rs}");
     }
 }

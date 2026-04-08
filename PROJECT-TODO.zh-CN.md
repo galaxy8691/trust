@@ -162,9 +162,10 @@
 
 ### 5.2 最小运行时（[`ts2rs_rt`](crates/ts2rs_rt)）
 
-- [x] **字符串操作**：`string.length` 为 **UTF-16 码元数**（`encode_utf16().count()`）；`number[].length` → `Vec::len`；对象数字字段名为 `length` 时走 `HashMap::get`（见 [`MemberLengthDispatch`](crates/ts2rs-hir/src/ir.rs)）。（验收：`ts2rs-lower` `codegen_52_string_length_utf16`、`codegen_52_object_length_field_uses_get`；`ts2rs-cli` `run_string_utf16_length_prints_two`、`run_array_length_prints_three`、`run_object_length_field_prints_value`；`cargo test --workspace`。）**未实现**：`string` 下标 `s[i]`（仅 `number[]` 下标；完整 UTF-16 单元语义留后续）。
-- [x] **数学**：`Math.abs` / `Math.min` / `Math.max` / `Math.floor` / `Math.ceil` 整数子集（[`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs)；[`build.rs`](crates/ts2rs-hir/src/build.rs) `Math`；[`emit_expr`](crates/ts2rs-hir/src/codegen.rs)；`floor`/`ceil` 在纯 `i32` 下为恒等）。（验收：`ts2rs-lower` `codegen_52_math_builtins`；`ts2rs-cli` `run_math_builtin_prints_sum`；`cargo test --workspace`。）
-- [x] **I/O**：[`ts2rs_rt::read_stdin_line`](crates/ts2rs_rt/src/lib.rs) 占位（`std::io`）；**生成代码与 driver 临时 crate 仍未依赖 `ts2rs_rt`**，全量接入留后续。（验收：crate 文档与 API 存在；`cargo test --workspace`。）
+- [x] **字符串操作**：`string.length` 为 **UTF-16 码元数**（`encode_utf16().count()`）；`number[].length` → `Vec::len`；对象数字字段名为 `length` 时走 `HashMap::get`（见 [`MemberLengthDispatch`](crates/ts2rs-hir/src/ir.rs)）。（验收：`ts2rs-lower` `codegen_52_string_length_utf16`、`codegen_52_object_length_field_uses_get`；`ts2rs-cli` 等；`cargo test --workspace`。）**`string` 下标 `s[i]`**：UTF-16 索引 → 单码元 `string`（[`IndexKind::StringUtf16`](crates/ts2rs-hir/src/ir.rs)；`stdlib_hir_ok.ts`）。
+- [x] **数学**：`Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` 整数子集（[`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs)；[`build.rs`](crates/ts2rs-hir/src/build.rs)；[`emit_expr`](crates/ts2rs-hir/src/codegen.rs)；`floor`/`ceil`/`trunc`/`round` 在纯 `i32` 下为恒等；`pow` 使用 `checked_pow`）。（验收：`ts2rs-lower` `codegen_52_math_builtins`；`ts2rs-cli` `run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`；`cargo test --workspace`。）
+- [x] **HIR 标准库（可不链 `ts2rs_rt`）**：`Number.parseInt` / `parseFloat`；`JSON.stringify` / `JSON.parse`（整数 JSON）；`String` 方法 `charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`；全局 `readLine()` 内联 `std::io`（`async` 函数体中拒绝）。（验收：`stdlib_hir_ok.ts`；`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`。）
+- [x] **I/O**：[`ts2rs_rt::read_stdin_line`](crates/ts2rs_rt/src/lib.rs) 仍为可选占位；**同步** `readLine()` 已在生成 Rust 中实现且**无需**链接 `ts2rs_rt`；driver 临时 crate 默认仍不依赖 `ts2rs_rt`（除非 `--link-ts2rs-rt`）。
 
 ---
 

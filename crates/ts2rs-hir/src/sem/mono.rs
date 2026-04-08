@@ -261,11 +261,21 @@ fn rewrite_expr(
             rewrite_expr(left, templates, queue, cm, path, fn_span)?;
             rewrite_expr(right, templates, queue, cm, path, fn_span)?;
         }
-        IRExpr::MathBuiltin { args, .. } | IRExpr::BuiltinLog { args, .. } => {
+        IRExpr::MathBuiltin { args, .. }
+        | IRExpr::BuiltinLog { args, .. }
+        | IRExpr::NumberBuiltin { args, .. }
+        | IRExpr::JsonBuiltin { args, .. } => {
             for a in args {
                 rewrite_expr(a, templates, queue, cm, path, fn_span)?;
             }
         }
+        IRExpr::StringMethodBuiltin { receiver, args, .. } => {
+            rewrite_expr(receiver, templates, queue, cm, path, fn_span)?;
+            for a in args {
+                rewrite_expr(a, templates, queue, cm, path, fn_span)?;
+            }
+        }
+        IRExpr::ReadStdinLine { .. } => {}
         IRExpr::ArrayLit { elems, .. } => {
             for a in elems {
                 rewrite_expr(a, templates, queue, cm, path, fn_span)?;
@@ -449,7 +459,27 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
             subst_expr(left, subst);
             subst_expr(right, subst);
         }
-        IRExpr::MathBuiltin { args, .. } | IRExpr::BuiltinLog { args, .. } => {
+        IRExpr::MathBuiltin { args, .. }
+        | IRExpr::BuiltinLog { args, .. }
+        | IRExpr::NumberBuiltin { args, .. } => {
+            for a in args {
+                subst_expr(a, subst);
+            }
+        }
+        IRExpr::JsonBuiltin {
+            args,
+            stringify_inferred_ty,
+            ..
+        } => {
+            for a in args {
+                subst_expr(a, subst);
+            }
+            if let Some(t) = stringify_inferred_ty {
+                *t = subst_type(t, subst);
+            }
+        }
+        IRExpr::StringMethodBuiltin { receiver, args, .. } => {
+            subst_expr(receiver, subst);
             for a in args {
                 subst_expr(a, subst);
             }
@@ -486,7 +516,8 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
         | IRExpr::Null(..)
         | IRExpr::Undefined(..)
         | IRExpr::This(..)
-        | IRExpr::Super(..) => {}
+        | IRExpr::Super(..)
+        | IRExpr::ReadStdinLine { .. } => {}
     }
 }
 

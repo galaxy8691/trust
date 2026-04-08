@@ -770,6 +770,33 @@ fn run_math_builtin_prints_sum() {
 }
 
 #[test]
+fn run_stdlib_hir_ok_prints_expected() {
+    assert_run_stdout("stdlib_hir_ok.ts", "318\n");
+}
+
+#[test]
+fn compile_stdlib_hir_ok_writes_utf16_and_json_helpers() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("stdlib_hir_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(&exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("__ts2rs_utf16_slice"));
+    assert!(body.contains("__ts2rs_utf16_index_of"));
+    assert!(body.contains("__ts2rs_json_escape_string"));
+}
+
+#[test]
 fn run_member_length_ok_prints_two() {
     assert_run_stdout("member_length_ok.ts", "2\n");
 }

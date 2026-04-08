@@ -91,14 +91,15 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | Ternary `?:` | Supported | Same type branches; `ternary_ok.ts` |
 | Template literals | Supported | No tag; `template_ok.ts` |
 | Comma expression | Supported | `comma_ok.ts` |
-| Member access | Partial | `string.length` UTF-16 code units; `number[].length`; `length` on objects; no `string` indexing; `obj.m(args)` → global `m(receiver,…)`; no `obj[expr](…)`, `obj?.m(…)`; fixtures `string_utf16_length.ts`, `method_call_ok.ts`, `object_length_field.ts` |
+| Member access | Partial | `string.length` UTF-16 code units; `string[i]` UTF-16 index (single code unit as `string`); `number[].length`; `length` on objects; `obj.m(args)` → global `m(receiver,…)`; no `obj[expr](…)`, `obj?.m(…)`; fixtures `string_utf16_length.ts`, `method_call_ok.ts`, `object_length_field.ts`, `stdlib_hir_ok.ts` |
 | `?.` / `??` | Partial | `?.` member only; `??` restricted; `optional_ok.ts`, `nullish_ok.ts`; §3.3 |
 | Array / object literals | Partial | `number[]`, `{ k: number }` subset; `HashMap` objects; `array_ok.ts`, `object_ok.ts` |
 | `switch` | Partial | `case` only `number`/`boolean` literals; `default` last; no fall-through; `switch_ok.ts`, `switch_fail.ts` |
 | `return` | Supported | `fn_body_returns` |
 | `void` functions | Supported | No return-path requirement |
 | `+ - * /`, compares, `!`, unary `-` | Supported | String only `+` concat; §4.1 for `/` |
-| `Math.*` builtins | Partial | `math_builtin.ts` |
+| `Math.*` builtins | Partial | `abs`, `min`, `max`, `floor`, `ceil`, `sign`, `trunc`, `round`, `pow` (integer `number` subset; `pow` non-negative exponent, checked); `math_builtin.ts`, `stdlib_hir_ok.ts` |
+| `Number.*` / `JSON.*` / string methods | Partial | `Number.parseInt` (1–2 args), `Number.parseFloat` (truncate to `i32`); `JSON.stringify` (`string` \| `number` \| `boolean`), `JSON.parse` (JSON **integer** text); `String` builtins: `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes` (UTF-16 semantics); `readLine()` sync stdin (not in `async`); `stdlib_hir_ok.ts` |
 | `console.log` / `error` / `debug` | Supported | §4.1 |
 | Literal types | Partial | `literal_type_ok.ts`; `bigint` / template literal types in type position rejected |
 | Union `A \| B` | Partial | Normalization; must map to one Rust type; `number \| string` heterogeneous fails; `A & B` rejected; `union_*`, `intersection_type_fail.ts` |
@@ -123,7 +124,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Semantics (shadow, void branch) | `let_dup_same_block_fail.ts`, `void_log_in_branch.ts`, … | `compile_*`, `run_void_log_in_branch_prints_branch` |
 | Control flow / unreachable | `while_early.ts`, `for_loop.ts`, `for_in_*.ts`, `early_return_unreachable.ts`, … | `run_while_early_prints_three`, `run_for_in_object_keys_ok_prints_three`, `compile_for_in_non_object_fails`, … |
 | Logic / ternary / template / comma | `logical_bool.ts`, `ternary_ok.ts`, … | … |
-| Members / Math / length | `string_utf16_length.ts`, `math_builtin.ts`, … | … |
+| Members / Math / length / HIR stdlib | `string_utf16_length.ts`, `math_builtin.ts`, `stdlib_hir_ok.ts`, … | `run_stdlib_hir_ok_prints_expected`, `compile_stdlib_hir_ok_writes_utf16_and_json_helpers` |
 | `?.` / `??` | `optional_ok.ts`, `nullish_ok.ts` | … |
 | Arrays / objects | `array_ok.ts`, `object_ok.ts`, `array_fail.ts` | `compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`, `switch_fail.ts` | … |

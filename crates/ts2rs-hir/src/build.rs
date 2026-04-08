@@ -496,11 +496,21 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
                 rewrite_this_in_expr(a, span);
             }
         }
-        IRExpr::BuiltinLog { args, .. } | IRExpr::MathBuiltin { args, .. } => {
+        IRExpr::BuiltinLog { args, .. }
+        | IRExpr::MathBuiltin { args, .. }
+        | IRExpr::NumberBuiltin { args, .. }
+        | IRExpr::JsonBuiltin { args, .. } => {
             for a in args {
                 rewrite_this_in_expr(a, span);
             }
         }
+        IRExpr::StringMethodBuiltin { receiver, args, .. } => {
+            rewrite_this_in_expr(receiver, span);
+            for a in args {
+                rewrite_this_in_expr(a, span);
+            }
+        }
+        IRExpr::ReadStdinLine { .. } => {}
         IRExpr::Conditional {
             test, cons, alt, ..
         } => {
@@ -1795,20 +1805,24 @@ fn build_expr(
                                     ("ceil", 1) => MathBuiltinKind::Ceil,
                                     ("min", 2) => MathBuiltinKind::Min,
                                     ("max", 2) => MathBuiltinKind::Max,
-                                    ("abs" | "floor" | "ceil", _) => {
+                                    ("sign", 1) => MathBuiltinKind::Sign,
+                                    ("trunc", 1) => MathBuiltinKind::Trunc,
+                                    ("round", 1) => MathBuiltinKind::Round,
+                                    ("pow", 2) => MathBuiltinKind::Pow,
+                                    ("abs" | "floor" | "ceil" | "sign" | "trunc" | "round", _) => {
                                         return Err(diag_spanned(
                                             cm,
                                             path,
                                             c,
-                                            "`Math.abs`, `Math.floor`, and `Math.ceil` expect exactly 1 argument",
+                                            "this `Math` method expects exactly 1 argument",
                                         ));
                                     }
-                                    ("min" | "max", _) => {
+                                    ("min" | "max" | "pow", _) => {
                                         return Err(diag_spanned(
                                             cm,
                                             path,
                                             c,
-                                            "`Math.min` and `Math.max` expect exactly 2 arguments",
+                                            "`Math.min`, `Math.max`, and `Math.pow` expect exactly 2 arguments",
                                         ));
                                     }
                                     _ => {
@@ -1816,7 +1830,7 @@ fn build_expr(
                                             cm,
                                             path,
                                             c,
-                                            "only `Math.abs`, `Math.min`, `Math.max`, `Math.floor`, and `Math.ceil` are supported",
+                                            "unsupported `Math` builtin (see README for supported methods)",
                                         ));
                                     }
                                 };
@@ -1843,8 +1857,156 @@ fn build_expr(
                                 });
                             }
                         }
+                        if obj.sym == "Number" {
+                            if let MemberProp::Ident(prop) = &m.prop {
+                                let kind = match (prop.sym.as_ref(), c.args.len()) {
+                                    ("parseInt", 1 | 2) => NumberBuiltinKind::ParseInt,
+                                    ("parseFloat", 1) => NumberBuiltinKind::ParseFloat,
+                                    ("parseInt", _) => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`Number.parseInt` expects 1 or 2 arguments",
+                                        ));
+                                    }
+                                    ("parseFloat", _) => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`Number.parseFloat` expects exactly 1 argument",
+                                        ));
+                                    }
+                                    _ => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "only `Number.parseInt` and `Number.parseFloat` are supported",
+                                        ));
+                                    }
+                                };
+                                let mut args = Vec::new();
+                                for a in &c.args {
+                                    match a {
+                                        ExprOrSpread { spread: None, expr } => {
+                                            args.push(build_expr(expr, cm, path, iface, in_async)?);
+                                        }
+                                        _ => {
+                                            return Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                c,
+                                                "spread arguments are not supported",
+                                            ));
+                                        }
+                                    }
+                                }
+                                return Ok(IRExpr::NumberBuiltin {
+                                    kind,
+                                    args,
+                                    span: c.span,
+                                });
+                            }
+                        }
+                        if obj.sym == "JSON" {
+                            if let MemberProp::Ident(prop) = &m.prop {
+                                let kind = match (prop.sym.as_ref(), c.args.len()) {
+                                    ("stringify", 1) => JsonBuiltinKind::Stringify,
+                                    ("parse", 1) => JsonBuiltinKind::Parse,
+                                    ("stringify", _) => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`JSON.stringify` expects exactly 1 argument",
+                                        ));
+                                    }
+                                    ("parse", _) => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`JSON.parse` expects exactly 1 argument",
+                                        ));
+                                    }
+                                    _ => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "only `JSON.stringify` and `JSON.parse` are supported",
+                                        ));
+                                    }
+                                };
+                                let mut args = Vec::new();
+                                for a in &c.args {
+                                    match a {
+                                        ExprOrSpread { spread: None, expr } => {
+                                            args.push(build_expr(expr, cm, path, iface, in_async)?);
+                                        }
+                                        _ => {
+                                            return Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                c,
+                                                "spread arguments are not supported",
+                                            ));
+                                        }
+                                    }
+                                }
+                                return Ok(IRExpr::JsonBuiltin {
+                                    kind,
+                                    args,
+                                    span: c.span,
+                                    stringify_inferred_ty: None,
+                                });
+                            }
+                        }
                     }
                     if let MemberProp::Ident(prop) = &m.prop {
+                        if let Some(kind) = string_method_kind(prop.sym.as_ref()) {
+                            if !type_args.is_empty() {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "string prototype builtins do not take type arguments",
+                                ));
+                            }
+                            if !string_method_arity_matches(kind, c.args.len()) {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "wrong argument count for this string method",
+                                ));
+                            }
+                            let mut args = Vec::new();
+                            for a in &c.args {
+                                match a {
+                                    ExprOrSpread { spread: None, expr } => {
+                                        args.push(build_expr(expr, cm, path, iface, in_async)?);
+                                    }
+                                    _ => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "spread arguments are not supported",
+                                        ));
+                                    }
+                                }
+                            }
+                            let receiver = Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);
+                            return Ok(IRExpr::StringMethodBuiltin {
+                                kind,
+                                receiver,
+                                args,
+                                span: c.span,
+                            });
+                        }
                         let mut args = Vec::new();
                         for a in &c.args {
                             match a {
@@ -1878,6 +2040,25 @@ fn build_expr(
                     ));
                 }
                 if let Expr::Ident(i) = &**ce {
+                    if i.sym == "readLine" {
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`readLine` does not take type arguments",
+                            ));
+                        }
+                        if !c.args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`readLine` expects no arguments",
+                            ));
+                        }
+                        return Ok(IRExpr::ReadStdinLine { span: c.span });
+                    }
                     let mut args = Vec::new();
                     for a in &c.args {
                         match a {
@@ -1906,10 +2087,32 @@ fn build_expr(
                 cm,
                 path,
                 c,
-                "only direct calls `f(...)`, `obj.m(...)` (desugared to global `m`), `console.log` / `console.error` / `console.debug`, or `Math.*` builtins are supported",
+                "unsupported call expression (see README for supported builtins and call forms)",
             ))
         }
         _ => Err(diag_spanned(cm, path, expr, "unsupported expression")),
+    }
+}
+
+fn string_method_kind(name: &str) -> Option<StringMethodKind> {
+    match name {
+        "charAt" => Some(StringMethodKind::CharAt),
+        "charCodeAt" => Some(StringMethodKind::CharCodeAt),
+        "slice" => Some(StringMethodKind::Slice),
+        "substring" => Some(StringMethodKind::Substring),
+        "indexOf" => Some(StringMethodKind::IndexOf),
+        "includes" => Some(StringMethodKind::Includes),
+        _ => None,
+    }
+}
+
+fn string_method_arity_matches(kind: StringMethodKind, argc: usize) -> bool {
+    match kind {
+        StringMethodKind::CharAt | StringMethodKind::CharCodeAt => argc == 1,
+        StringMethodKind::Slice
+        | StringMethodKind::Substring
+        | StringMethodKind::IndexOf
+        | StringMethodKind::Includes => argc == 1 || argc == 2,
     }
 }
 
@@ -1967,6 +2170,7 @@ fn build_member_expr(
             obj,
             index: Box::new(build_expr(&c.expr, cm, path, iface, in_async)?),
             span: m.span,
+            index_kind: None,
         }),
         _ => Err(diag_spanned(
             cm,

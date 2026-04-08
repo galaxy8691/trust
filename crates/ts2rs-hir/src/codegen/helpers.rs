@@ -19,6 +19,22 @@ pub(super) fn is_numberish(t: &TsType) -> bool {
     }
 }
 
+pub(super) fn is_booleanish(t: &TsType) -> bool {
+    match t {
+        TsType::Boolean | TsType::BoolLit(_) => true,
+        TsType::Union(m) => m.iter().all(is_booleanish),
+        _ => false,
+    }
+}
+
+pub(super) fn is_stringish(t: &TsType) -> bool {
+    match t {
+        TsType::String | TsType::StringLit(_) => true,
+        TsType::Union(m) => m.iter().all(is_stringish),
+        _ => false,
+    }
+}
+
 pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
     match t {
         TsType::Number | TsType::NumberLit(_) => "i32",

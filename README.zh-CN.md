@@ -96,14 +96,15 @@ flowchart LR
 | 三元 `?:` | 支持 | 两分支需同类型；条件为 `number` 或 `boolean`；见 `ternary_ok.ts` |
 | 模板字符串 | 支持 | 无 tag；插值须非 `void`；见 `template_ok.ts` |
 | 逗号表达式 | 支持 | 取最后一项类型与值；见 `comma_ok.ts` |
-| 成员访问 | 部分支持 | `string.length` 为 JS **UTF-16 码元数**；`number[].length`；对象字段 `length` 为普通数字字段；**未**支持 `string` 下标（仅 `number[]` 下标）；**`obj.m(args)`** 脱糖为全局函数 **`m(receiver, ...args)`**（`receiver` 为 `obj` 的值；须存在对应顶层函数；与严格 `tsc` 对 interface 成员的检查可能不一致）；**未**支持 `obj[expr](...)`、`obj?.m(...)`；见 `string_utf16_length.ts`、`method_call_ok.ts`、`object_length_field.ts` |
+| 成员访问 | 部分支持 | `string.length` 为 JS **UTF-16 码元数**；`string[i]` 为 UTF-16 下标（单码元 `string`）；`number[].length`；对象字段 `length` 为普通数字字段；**`obj.m(args)`** 脱糖为全局函数 **`m(receiver, ...args)`**（`receiver` 为 `obj` 的值；须存在对应顶层函数；与严格 `tsc` 对 interface 成员的检查可能不一致）；**未**支持 `obj[expr](...)`、`obj?.m(...)`；见 `string_utf16_length.ts`、`method_call_ok.ts`、`object_length_field.ts`、`stdlib_hir_ok.ts` |
 | `?.` / `??` | 部分支持 | `?.` 仅支持成员访问 `obj?.prop`，`??` 为受限空值子集；见 `optional_ok.ts`、`nullish_ok.ts`；完整语义见 §3.3 |
 | 数组 / 对象字面量 | 部分支持 | 仅 `number[]` 与 `{ k: number }` 子集；对象为值型 `HashMap`（无 `Rc`/`Arc`）；见 `array_ok.ts`、`object_ok.ts`；完整类型语法见 §1.4 / §2.1 |
 | `switch` | 部分支持 | `case` 仅 `number`/`boolean` **字面量**；`default` 须**最后**；**无** `case` 间穿透（空 `case` 体拒绝）；`case` 末尾 `break` 在 build 剥离；判别式与 `if` 条件类型规则一致；见 [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts)、负例 [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts) |
 | `return` | 支持 | 非 `void` 函数需满足 `fn_body_returns`（含提前穷尽返回 + 尾部规则，见上文「控制流与 return」） |
 | `void` 函数 | 支持 | 不要求 `return` 路径检查 |
 | `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 运算见下文「算术、`/` 与溢出」 |
-| `Math.abs` / `min` / `max` / `floor` / `ceil` | 部分支持 | 整数 `number`；`floor`/`ceil` 在纯 `i32` 下为恒等；见 `math_builtin.ts` |
+| `Math.*` 内建 | 部分支持 | `abs`、`min`、`max`、`floor`、`ceil`、`sign`、`trunc`、`round`、`pow`（整数子集；`pow` 非负指数、`checked_pow`）；见 `math_builtin.ts`、`stdlib_hir_ok.ts` |
+| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt`（1–2 参）、`Number.parseFloat`（向零截断为 `i32`）；`JSON.stringify`（`string` \| `number` \| `boolean`）、`JSON.parse`（JSON **整数**文本）；`charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`（UTF-16）；同步 `readLine()`（`async` 中拒绝）；见 `stdlib_hir_ok.ts` |
 | `console.log` / `console.error` / `console.debug` | 支持 | `log` → `println!`；`error` / `debug` → `eprintln!`；多参数均为 `"{}"` **空格分隔**（与 §4.1 一致） |
 | 字面量类型 | 部分支持 | `42`、`"a"`、`true` 等类型位置；向 `number`/`string`/`boolean` 拓宽；见 `literal_type_ok.ts`；`bigint`/模板字面量类型位置拒绝 |
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
@@ -128,7 +129,7 @@ flowchart LR
 | 语义边界（重复/shadow/void 分支） | `let_dup_same_block_fail.ts`、`let_shadow_nested_ok.ts`、`param_let_same_name_fail.ts`、`void_log_in_branch.ts` | 对应 `compile_*` / `run_void_log_in_branch_prints_branch` |
 | 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`for_in_*.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`run_for_in_object_keys_ok_prints_three`、`compile_for_in_non_object_fails` 等 |
 | 逻辑/三元/模板/逗号 | `logical_bool.ts`、`logical_truthy_ok.ts`、`ternary_ok.ts`、`template_ok.ts`、`comma_ok.ts` | `run_logical_bool_prints_one`、`run_ternary_ok_prints_one` 等 |
-| 成员 / `Math` / 数组长度 | `string_utf16_length.ts`、`member_length_ok.ts`、`method_call_ok.ts`、`object_length_field.ts`、`array_length.ts`、`math_builtin.ts` | `run_string_utf16_length_prints_two`、`run_math_builtin_prints_sum` 等 |
+| 成员 / `Math` / HIR 标准库 / 数组长度 | `string_utf16_length.ts`、`member_length_ok.ts`、`method_call_ok.ts`、`object_length_field.ts`、`array_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts` | `run_string_utf16_length_prints_two`、`run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers` 等 |
 | `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one` |
 | 数组 / 对象字面量 | `array_ok.ts`、`object_ok.ts`；负例 `array_fail.ts` | `run_array_ok_prints_two`、`run_object_ok_prints_three`、`compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |
