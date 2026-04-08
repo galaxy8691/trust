@@ -10,6 +10,16 @@ pub(crate) fn write_minimal_crate(
 ) -> Result<(), DriverError> {
     let needs_async = rust_source.contains("#[tokio::main]");
     let needs_futures_util = rust_source.contains("futures_util");
+    let serde_json_dep = if rust_source.contains("serde_json::") {
+        "serde_json = \"1.0\"\n"
+    } else {
+        ""
+    };
+    let urlencoding_dep = if rust_source.contains("urlencoding::") {
+        "urlencoding = \"2\"\n"
+    } else {
+        ""
+    };
     let async_deps = if needs_async {
         let mut s = String::from(
             r#"tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -38,13 +48,15 @@ edition = "2021"
 
 [dependencies]
 ts2rs_rt = {{ path = "{path}", optional = true }}
-{async_deps}
+{serde_json_dep}{urlencoding_dep}{async_deps}
 [features]
 default = []
 ts2rs_rt = ["dep:ts2rs_rt"]
 "#,
             name = CRATE_NAME,
             path = path_toml,
+            serde_json_dep = serde_json_dep,
+            urlencoding_dep = urlencoding_dep,
             async_deps = async_deps,
         )
     } else {
@@ -55,8 +67,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-{async_deps}"#,
+{serde_json_dep}{urlencoding_dep}{async_deps}"#,
             name = CRATE_NAME,
+            serde_json_dep = serde_json_dep,
+            urlencoding_dep = urlencoding_dep,
             async_deps = async_deps,
         )
     };

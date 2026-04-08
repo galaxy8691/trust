@@ -275,8 +275,15 @@ pub enum NumberBuiltinKind {
 pub enum JsonBuiltinKind {
     /// 参数：`number` | `boolean` | `string`
     Stringify,
-    /// 参数：`string`，须为 JSON **number** 字面量（可选空白）；返回 `number`
+    /// 参数：`string`；动态调用须为合法 JSON **number** 文档（`trim()` 后）；字符串字面量可走编译期折叠
     Parse,
+}
+
+/// 全局 `encodeURIComponent` / `decodeURIComponent`（trust：`string` → `string`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UriBuiltinKind {
+    EncodeComponent,
+    DecodeComponent,
 }
 
 /// `String.prototype` 内建子集（UTF-16 码元语义与 `length` / `charCodeAt` 一致）。
@@ -294,7 +301,7 @@ pub enum StringMethodKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpResponseMethodKind {
     Text,
-    /// 与 `JSON.parse` 整数子集一致（读 body 后 `trim().parse::<i32>`）
+    /// 与动态 `JSON.parse` 一致：读 body 后 `serde_json::from_str::<f64>(trim())`
     Json,
 }
 
@@ -461,6 +468,12 @@ pub enum IRExpr {
         span: Span,
         /// `JSON.stringify`：由 sem 填入第一个参数的静态类型，供 codegen 选择分支
         stringify_inferred_ty: Option<TsType>,
+    },
+    /// `encodeURIComponent` / `decodeURIComponent`
+    UriBuiltin {
+        kind: UriBuiltinKind,
+        args: Vec<IRExpr>,
+        span: Span,
     },
     /// `String.prototype.*` 内建（不经过全局 `method(receiver, …)`）
     StringMethodBuiltin {

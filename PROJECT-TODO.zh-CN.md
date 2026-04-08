@@ -342,7 +342,7 @@
 - [x] **可选调用** `f?.()`；**`??` / `?.` 的静态收窄**（可判定；§3.3）。已实现：`OptionalCall` / `OptionalMethodCall`、`build_opt_chain_call_expr`；`optional_call_ok.ts`、`optional_chain_fail.ts`；`NullishCoalesce` 对同族 `Union` 去空值合并。**完整** discriminated 收窄仍属后续。
 - [x] **链式调用** `f().g()`（一层）。`chain_call_ok.ts`，`run_chain_call_ok_prints_six`；更一般实例方法类型仍见 §1.3。
 - [x] **数值模型**：全局 `number` → Rust **`f64`**（`IRExpr::Number(f64)`、codegen）；下标等仍 `as i32`。与旧 `i32` 截断不兼容；见 README。
-- [ ] **HIR 标准库 / JSON / 字符串**：更完整的 `JSON.parse`、非整数 JSON、URI 类内建 — 仅在 trust 下类型可闭合时。
+- [x] **HIR 标准库 / JSON / 字符串**：`JSON.parse` 对**字符串字面量**在构建期用 `serde_json` 折叠为 trust 闭合 IR（`number` / `boolean` / `string` / `null` / 同质 `number[]` \| `string[]` / 扁平 `{ k: number }`）；**非常量**实参仍为 JSON **number** 文档 → `f64`（`serde_json::from_str`，与 `await response.json()` 一致）。全局 **`encodeURIComponent`** / **`decodeURIComponent`** → `urlencoding`。生成 crate 按需注入 `serde_json` / `urlencoding`。见 `json_uri_trust_ok.ts`、`json_parse_hetero_array_fail.ts` 与对应 `run_` / `compile_` 测试。
 
 ### 文档与示例
 

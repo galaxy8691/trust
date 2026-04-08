@@ -272,7 +272,8 @@ fn expr_maybe_http_stream(e: &IRExpr) -> bool {
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_http_stream),
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => args.iter().any(expr_maybe_http_stream),
         IRExpr::MethodCall { receiver, args, .. }
         | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             expr_maybe_http_stream(receiver) || args.iter().any(expr_maybe_http_stream)
@@ -410,7 +411,8 @@ fn expr_maybe_fetch_text_only(e: &IRExpr) -> bool {
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_fetch_text_only),
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => args.iter().any(expr_maybe_fetch_text_only),
         IRExpr::MethodCall { receiver, args, .. }
         | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             expr_maybe_fetch_text_only(receiver) || args.iter().any(expr_maybe_fetch_text_only)
@@ -477,7 +479,8 @@ fn expr_maybe_fetch_request(e: &IRExpr) -> bool {
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_fetch_request),
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => args.iter().any(expr_maybe_fetch_request),
         IRExpr::MethodCall { receiver, args, .. }
         | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             expr_maybe_fetch_request(receiver) || args.iter().any(expr_maybe_fetch_request)
@@ -632,7 +635,8 @@ fn expr_maybe_utf16_stdlib(e: &IRExpr) -> bool {
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_utf16_stdlib),
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => args.iter().any(expr_maybe_utf16_stdlib),
         IRExpr::Conditional {
             test, cons, alt, ..
         } => {
@@ -692,7 +696,8 @@ fn expr_maybe_json_stringify(e: &IRExpr) -> bool {
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_json_stringify),
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => args.iter().any(expr_maybe_json_stringify),
         IRExpr::StringMethodBuiltin { receiver, args, .. } => {
             expr_maybe_json_stringify(receiver) || args.iter().any(expr_maybe_json_stringify)
         }
@@ -1450,8 +1455,19 @@ fn emit_expr(
             JsonBuiltinKind::Parse => {
                 let s = emit_expr(&args[0], f, stmt_level, module)?;
                 Ok(format!(
-                    "({s}).trim().parse::<f64>().expect(\"JSON.parse: expected JSON number\")"
+                    "serde_json::from_str::<f64>(({s}).trim()).expect(\"JSON.parse: expected JSON number\")"
                 ))
+            }
+        },
+        IRExpr::UriBuiltin { kind, args, .. } => {
+            let s = emit_expr(&args[0], f, stmt_level, module)?;
+            match kind {
+                UriBuiltinKind::EncodeComponent => Ok(format!(
+                    "urlencoding::encode(&({s})).into_owned()"
+                )),
+                UriBuiltinKind::DecodeComponent => Ok(format!(
+                    "urlencoding::decode(&({s})).expect(\"decodeURIComponent: invalid percent-encoding\").into_owned()"
+                )),
             }
         },
         IRExpr::StringMethodBuiltin {
@@ -1565,7 +1581,7 @@ fn emit_expr(
                         "({r}).text().await.expect(\"read body failed\")"
                     )),
                     HttpResponseMethodKind::Json => Ok(format!(
-                        "({r}).text().await.expect(\"read body failed\").trim().parse::<f64>().expect(\"JSON.parse: expected JSON number\")"
+                        "serde_json::from_str::<f64>(({r}).text().await.expect(\"read body failed\").trim()).expect(\"response.json: expected JSON number\")"
                     )),
                 }
             }

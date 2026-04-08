@@ -14,6 +14,7 @@ use swc_ecma_ast::{
 
 use crate::error::{diag, diag_spanned, CompileError};
 use crate::ir::*;
+use crate::json_parse_fold::{fold_json_parse_arg, JsonParseFold};
 
 mod build_types;
 
@@ -501,7 +502,8 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
         IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => {
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => {
             for a in args {
                 rewrite_this_in_expr(a, span);
             }
@@ -1834,6 +1836,49 @@ fn build_expr(
                             span: c.span,
                         });
                     }
+                    if matches!(
+                        fname.sym.as_ref(),
+                        "encodeURIComponent" | "decodeURIComponent"
+                    ) {
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`encodeURIComponent` / `decodeURIComponent` do not take type arguments",
+                            ));
+                        }
+                        if c.args.len() != 1 {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`encodeURIComponent` / `decodeURIComponent` expect exactly one argument (string)",
+                            ));
+                        }
+                        let a0 = match &c.args[0] {
+                            ExprOrSpread { spread: None, expr } => expr,
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "spread arguments are not supported",
+                                ));
+                            }
+                        };
+                        let arg = build_expr(a0, cm, path, iface, in_async)?;
+                        let kind = if fname.sym == "encodeURIComponent" {
+                            UriBuiltinKind::EncodeComponent
+                        } else {
+                            UriBuiltinKind::DecodeComponent
+                        };
+                        return Ok(IRExpr::UriBuiltin {
+                            kind,
+                            args: vec![arg],
+                            span: c.span,
+                        });
+                    }
                 }
                 if let Expr::Member(m) = &**ce {
                     if let Expr::Ident(obj) = &*m.obj {
@@ -2079,6 +2124,15 @@ fn build_expr(
                                                 c,
                                                 "spread arguments are not supported",
                                             ));
+                                        }
+                                    }
+                                }
+                                if kind == JsonBuiltinKind::Parse {
+                                    match fold_json_parse_arg(args[0].clone()) {
+                                        Ok(JsonParseFold::Folded(e)) => return Ok(e),
+                                        Ok(JsonParseFold::NotStringLiteral) => {}
+                                        Err(msg) => {
+                                            return Err(diag_spanned(cm, path, c, &msg));
                                         }
                                     }
                                 }

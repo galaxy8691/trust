@@ -105,7 +105,7 @@ flowchart LR
 | `void` 函数 | 支持 | 不要求 `return` 路径检查 |
 | `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 在 Rust 侧为 **`f64`**；见下文 §4.1 |
 | `Math.*` 内建 | 部分支持 | `abs`、`min`、`max`、`floor`、`ceil`、`sign`、`trunc`、`round`、`pow`（`f64`；`pow` 非负指数）；见 `math_builtin.ts`、`stdlib_hir_ok.ts` |
-| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`、`JSON.parse`（JSON **number** 文本 → `f64`）；`charAt` 等（UTF-16）；`readLine()`；见 `stdlib_hir_ok.ts` |
+| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`；`JSON.parse`（字面量折叠为 trust 闭合形状；非常量仍为 JSON number 文档 → `f64`，`serde_json`）；`encodeURIComponent` / `decodeURIComponent`（`urlencoding`）；`charAt` 等（UTF-16）；`readLine()`；见 `stdlib_hir_ok.ts`、`json_uri_trust_ok.ts` |
 | `console.log` / `console.error` / `console.debug` | 支持 | `log` → `println!`；`error` / `debug` → `eprintln!`；多参数均为 `"{}"` **空格分隔**（与 §4.1 一致） |
 | 字面量类型 | 部分支持 | `42`、`"a"`、`true` 等类型位置；向 `number`/`string`/`boolean` 拓宽；见 `literal_type_ok.ts`；`bigint`/模板字面量类型位置拒绝 |
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
@@ -113,7 +113,7 @@ flowchart LR
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types`](crates/ts2rs-hir/src/build.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化子集：泛型调用需显式类型实参；泛型声明可解析；更宽泛语义仍拒绝 |
 | 高阶函数 | 部分支持 | 函数类型与箭头闭包（`(number) => number` → `(f64) -> f64`）；变量调用 `f(...)` 等 |
-| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` 整数 JSON）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
+| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` JSON number → `f64`，`serde_json`）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
 
@@ -130,7 +130,7 @@ flowchart LR
 | 语义边界（重复/shadow/void 分支） | `let_dup_same_block_fail.ts`、`let_shadow_nested_ok.ts`、`param_let_same_name_fail.ts`、`void_log_in_branch.ts` | 对应 `compile_*` / `run_void_log_in_branch_prints_branch` |
 | 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`for_in_*.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`run_for_in_object_keys_ok_prints_three`、`compile_for_in_non_object_fails` 等 |
 | 逻辑/三元/模板/逗号 | `logical_bool.ts`、`logical_truthy_ok.ts`、`ternary_ok.ts`、`template_ok.ts`、`comma_ok.ts` | `run_logical_bool_prints_one`、`run_ternary_ok_prints_one` 等 |
-| 成员 / `Math` / HIR 标准库 / 链式 | `string_utf16_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts`、`chain_call_ok.ts` 等 | `run_stdlib_hir_ok_prints_expected`、`run_chain_call_ok_prints_six`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers` 等 |
+| 成员 / `Math` / HIR 标准库 / 链式 | `string_utf16_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`、`chain_call_ok.ts` 等 | `run_stdlib_hir_ok_prints_expected`、`run_json_uri_trust_ok_prints_expected`、`run_chain_call_ok_prints_six`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`、`compile_json_uri_trust_ok_emits_serde_json_and_urlencoding` 等 |
 | `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts`、`optional_call_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one`、`run_optional_call_ok_prints_five` |
 | 数组 / 对象字面量 | `array_ok.ts`、`object_ok.ts`；负例 `array_fail.ts` | `run_array_ok_prints_two`、`run_object_ok_prints_three`、`compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |

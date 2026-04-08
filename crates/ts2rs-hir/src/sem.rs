@@ -904,7 +904,8 @@ fn reject_readline_in_async_expr(
         IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => {
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => {
             for a in args {
                 reject_readline_in_async_expr(a, cm, path, span)?;
             }
@@ -2159,6 +2160,18 @@ fn infer_expr_mut(
                 Ok(TsType::Number)
             }
         },
+        IRExpr::UriBuiltin { args, span, .. } => {
+            let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+            if !is_stringish(&t) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`encodeURIComponent` / `decodeURIComponent` require a `string` argument",
+                ));
+            }
+            Ok(TsType::String)
+        },
         IRExpr::StringMethodBuiltin {
             kind,
             receiver,
@@ -2283,18 +2296,28 @@ fn infer_expr_mut(
             }
         }
         IRExpr::ArrayLit { elems, span } => {
-            for e in elems {
-                let t = infer_expr_mut(e, stack, globals, cm, path)?;
-                if !is_numberish(&t) {
-                    return Err(diag(
-                        cm,
-                        path,
-                        *span,
-                        "array literal currently supports only `number` elements",
-                    ));
-                }
+            if elems.is_empty() {
+                return Ok(TsType::ArrayNumber);
             }
-            Ok(TsType::ArrayNumber)
+            let mut all_num = true;
+            let mut all_str = true;
+            for e in elems.iter_mut() {
+                let t = infer_expr_mut(e, stack, globals, cm, path)?;
+                all_num = all_num && is_numberish(&t);
+                all_str = all_str && is_stringish(&t);
+            }
+            if all_num {
+                Ok(TsType::ArrayNumber)
+            } else if all_str {
+                Ok(TsType::ArrayString)
+            } else {
+                Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "array literal must be homogeneous `number[]` or `string[]`",
+                ))
+            }
         }
         IRExpr::ObjectLit { fields, span } => {
             let mut keys = Vec::with_capacity(fields.len());

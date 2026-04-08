@@ -914,6 +914,43 @@ fn compile_stdlib_hir_ok_writes_utf16_and_json_helpers() {
 }
 
 #[test]
+fn run_json_uri_trust_ok_prints_expected() {
+    assert_run_stdout("json_uri_trust_ok.ts", "162.5\n");
+}
+
+#[test]
+fn compile_json_uri_trust_ok_emits_serde_json_and_urlencoding() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("json_uri_trust_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(&exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("serde_json::"),
+        "expected dynamic JSON.parse to use serde_json: {body}"
+    );
+    assert!(
+        body.contains("urlencoding::"),
+        "expected URI builtins to use urlencoding: {body}"
+    );
+}
+
+#[test]
+fn compile_json_parse_hetero_array_literal_fails() {
+    assert_compile_fails_stderr("json_parse_hetero_array_fail.ts", "homogeneous");
+}
+
+#[test]
 fn run_member_length_ok_prints_two() {
     assert_run_stdout("member_length_ok.ts", "2\n");
 }

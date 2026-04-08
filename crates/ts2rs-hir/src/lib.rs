@@ -4,6 +4,7 @@ mod build;
 mod codegen;
 mod error;
 mod ir;
+mod json_parse_fold;
 mod sem;
 
 pub use build::{build_module, build_program_multi};

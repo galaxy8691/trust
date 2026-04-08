@@ -276,7 +276,8 @@ fn rewrite_expr(
         IRExpr::MathBuiltin { args, .. }
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
-        | IRExpr::JsonBuiltin { args, .. } => {
+        | IRExpr::JsonBuiltin { args, .. }
+        | IRExpr::UriBuiltin { args, .. } => {
             for a in args {
                 rewrite_expr(a, templates, queue, cm, path, fn_span)?;
             }
@@ -517,6 +518,11 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
             }
             if let Some(t) = stringify_inferred_ty {
                 *t = subst_type(t, subst);
+            }
+        }
+        IRExpr::UriBuiltin { args, .. } => {
+            for a in args {
+                subst_expr(a, subst);
             }
         }
         IRExpr::StringMethodBuiltin { receiver, args, .. } => {
