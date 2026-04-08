@@ -887,13 +887,14 @@ fn reject_readline_in_async_expr(
             reject_readline_in_async_expr(right, cm, path, span)
         }
         IRExpr::Unary { arg, .. } => reject_readline_in_async_expr(arg, cm, path, span),
-        IRExpr::Call { args, .. } => {
+        IRExpr::Call { args, .. } | IRExpr::OptionalCall { args, .. } => {
             for a in args {
                 reject_readline_in_async_expr(a, cm, path, span)?;
             }
             Ok(())
         }
-        IRExpr::MethodCall { receiver, args, .. } => {
+        IRExpr::MethodCall { receiver, args, .. }
+        | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             reject_readline_in_async_expr(receiver, cm, path, span)?;
             for a in args {
                 reject_readline_in_async_expr(a, cm, path, span)?;
@@ -1580,7 +1581,14 @@ fn infer_expr_mut(
     path: &str,
 ) -> Result<TsType, CompileError> {
     match e {
-        IRExpr::Number(n, _) => Ok(TsType::NumberLit(*n)),
+        IRExpr::Number(n, _) => {
+            let v = *n;
+            if v.fract() == 0.0 && v >= (i32::MIN as f64) && v <= (i32::MAX as f64) {
+                Ok(TsType::NumberLit(v as i32))
+            } else {
+                Ok(TsType::Number)
+            }
+        }
         IRExpr::Bool(b, _) => Ok(TsType::BoolLit(*b)),
         IRExpr::Str(s, _) => Ok(TsType::StringLit(s.clone())),
         IRExpr::Null(_) => Ok(TsType::Null),
@@ -1710,6 +1718,12 @@ fn infer_expr_mut(
             args,
             type_args,
             span,
+        }
+        | IRExpr::OptionalCall {
+            callee,
+            args,
+            type_args,
+            span,
         } => {
             let from_global = globals.get(callee).map(|sig| {
                 (
@@ -1797,6 +1811,13 @@ fn infer_expr_mut(
             }
         }
         IRExpr::MethodCall {
+            receiver,
+            method,
+            args,
+            type_args: _,
+            span,
+        }
+        | IRExpr::OptionalMethodCall {
             receiver,
             method,
             args,
@@ -2043,7 +2064,7 @@ fn infer_expr_mut(
             if *kind == MathBuiltinKind::Pow {
                 if let Some(e2) = args.get(1) {
                     if let IRExpr::Number(n, _) = e2 {
-                        if *n < 0 {
+                        if *n < 0.0 {
                             return Err(diag(
                                 cm,
                                 path,
@@ -2081,7 +2102,7 @@ fn infer_expr_mut(
                         ));
                     }
                     if let IRExpr::Number(r, _) = &args[1] {
-                        if *r < 2 || *r > 36 {
+                        if r.fract() != 0.0 || *r < 2.0 || *r > 36.0 {
                             return Err(diag(
                                 cm,
                                 path,
@@ -2228,6 +2249,27 @@ fn infer_expr_mut(
             }
             if lt == rt {
                 return Ok(lt);
+            }
+            if let TsType::Union(members) = &lt {
+                if members
+                    .iter()
+                    .any(|t| *t == TsType::Null || *t == TsType::Undefined)
+                {
+                    let nn: Vec<TsType> = members
+                        .iter()
+                        .filter(|t| *t != &TsType::Null && *t != &TsType::Undefined)
+                        .cloned()
+                        .collect();
+                    if !nn.is_empty() {
+                        let nn_ty = normalize_union(nn);
+                        if (is_numberish(&nn_ty) && is_numberish(&rt))
+                            || (is_stringish(&nn_ty) && is_stringish(&rt))
+                            || (is_booleanish(&nn_ty) && is_booleanish(&rt))
+                        {
+                            return unify_ternary_branches(nn_ty, rt.clone(), cm, path, *span);
+                        }
+                    }
+                }
             }
             match &**left {
                 IRExpr::Null(_) | IRExpr::Undefined(_) => Ok(rt),

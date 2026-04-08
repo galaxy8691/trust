@@ -156,11 +156,11 @@ function main(): number {
         let (rs, _) = lower_program(&p.program, &p.source_map, "comma.ts").unwrap();
         assert!(rs.contains("return ({"), "{rs}");
         assert!(
-            rs.contains("        1;\n") && rs.contains("        2;\n"),
+            rs.contains("        1_f64;\n") && rs.contains("        2_f64;\n"),
             "expected 8-space-indented seq arms: {rs}"
         );
         assert!(
-            rs.contains("\n        3\n    })"),
+            rs.contains("\n        3_f64\n    })"),
             "expected last arm indented and `}})` aligned to return stmt: {rs}"
         );
     }
@@ -213,7 +213,7 @@ function main(): number {
             "expected stderr console with spaced format: {rs}"
         );
         assert!(
-            rs.contains("eprintln!(\"{}\", 2)"),
+            rs.contains("eprintln!(\"{}\", 2_f64)"),
             "expected single-arg eprintln for debug: {rs}"
         );
     }

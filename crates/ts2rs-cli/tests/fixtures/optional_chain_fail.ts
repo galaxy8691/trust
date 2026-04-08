@@ -1,7 +1,4 @@
-// Negative: optional call `?.()` is not supported (matrix: member / `?.` row boundary).
-function f(): number {
-  return 1;
-}
+// Negative: optional call with callee that is not identifier / `obj.prop` (arrow expression).
 function main(): number {
-  return f?.();
+  return ((): number => 1)?.();
 }

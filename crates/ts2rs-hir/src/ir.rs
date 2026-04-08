@@ -338,7 +338,8 @@ pub enum BinaryKind {
 
 #[derive(Debug, Clone)]
 pub enum IRExpr {
-    Number(i32, Span),
+    /// 数值字面量/运行时 `number`（Rust 侧为 `f64`）。
+    Number(f64, Span),
     Bool(bool, Span),
     Str(String, Span),
     Ident(String, Span),
@@ -364,6 +365,21 @@ pub enum IRExpr {
     },
     /// `obj.m(args)`：脱糖为全局函数 `m(receiver, ...args)`（`receiver` 为 `obj` 的值）。
     MethodCall {
+        receiver: Box<IRExpr>,
+        method: String,
+        args: Vec<IRExpr>,
+        type_args: Vec<TsType>,
+        span: Span,
+    },
+    /// `f?.(args)`：可选调用（callee 为顶层标识符）；类型检查与 [`IRExpr::Call`] 一致，代码生成同 [`IRExpr::Call`]（非空 callee 下与 `f(args)` 等价）。
+    OptionalCall {
+        callee: String,
+        args: Vec<IRExpr>,
+        type_args: Vec<TsType>,
+        span: Span,
+    },
+    /// `obj?.m(args)`：可选方法调用；类型检查与 [`IRExpr::MethodCall`] 一致，代码生成同 [`IRExpr::MethodCall`]。
+    OptionalMethodCall {
         receiver: Box<IRExpr>,
         method: String,
         args: Vec<IRExpr>,

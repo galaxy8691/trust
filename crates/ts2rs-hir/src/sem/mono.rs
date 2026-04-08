@@ -178,6 +178,12 @@ fn rewrite_expr(
             args,
             type_args,
             span,
+        }
+        | IRExpr::OptionalCall {
+            callee,
+            args,
+            type_args,
+            span,
         } => {
             for a in args {
                 rewrite_expr(a, templates, queue, cm, path, fn_span)?;
@@ -215,6 +221,12 @@ fn rewrite_expr(
             }
         }
         IRExpr::MethodCall {
+            receiver,
+            args,
+            type_args,
+            ..
+        }
+        | IRExpr::OptionalMethodCall {
             receiver,
             args,
             type_args,
@@ -420,6 +432,9 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
     match e {
         IRExpr::Call {
             args, type_args, ..
+        }
+        | IRExpr::OptionalCall {
+            args, type_args, ..
         } => {
             for a in args {
                 subst_expr(a, subst);
@@ -429,6 +444,12 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
             }
         }
         IRExpr::MethodCall {
+            receiver,
+            args,
+            type_args,
+            ..
+        }
+        | IRExpr::OptionalMethodCall {
             receiver,
             args,
             type_args,

@@ -4,9 +4,9 @@ use std::collections::{HashMap, HashSet};
 
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
-    AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, ClassDecl, ClassMember, Decl,
+    AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, CallExpr, ClassDecl, ClassMember, Decl,
     EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, KeyValueProp, Lit,
-    MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, ObjectLit, OptChainBase,
+    MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, ObjectLit, OptCall, OptChainBase,
     OptChainExpr, Param, ParamOrTsParamProp, Pat, Program, Prop, PropName, PropOrSpread,
     SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind,
     VarDeclOrExpr,
@@ -338,7 +338,7 @@ fn lower_classes_to_functions(
                     init: Some(IRExpr::ObjectLit {
                         fields: field_keys
                             .iter()
-                            .map(|k| (k.clone(), IRExpr::Number(0, c.span)))
+                            .map(|k| (k.clone(), IRExpr::Number(0.0, c.span)))
                             .collect(),
                         span: c.span,
                     }),
@@ -388,7 +388,7 @@ fn lower_classes_to_functions(
                     arg: Some(IRExpr::ObjectLit {
                         fields: field_keys
                             .iter()
-                            .map(|k| (k.clone(), IRExpr::Number(0, cls.span)))
+                            .map(|k| (k.clone(), IRExpr::Number(0.0, cls.span)))
                             .collect(),
                         span: cls.span,
                     }),
@@ -486,12 +486,13 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
             rewrite_this_in_expr(right, span);
         }
         IRExpr::Unary { arg, .. } => rewrite_this_in_expr(arg, span),
-        IRExpr::Call { args, .. } => {
+        IRExpr::Call { args, .. } | IRExpr::OptionalCall { args, .. } => {
             for a in args {
                 rewrite_this_in_expr(a, span);
             }
         }
-        IRExpr::MethodCall { receiver, args, .. } => {
+        IRExpr::MethodCall { receiver, args, .. }
+        | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             rewrite_this_in_expr(receiver, span);
             for a in args {
                 rewrite_this_in_expr(a, span);
@@ -895,7 +896,7 @@ fn build_for_stmt(
     let cond = if let Some(t) = &f.test {
         build_expr(t, cm, path, iface, in_async)?
     } else {
-        IRExpr::Number(1, f.span)
+        IRExpr::Number(1.0, f.span)
     };
     let mut body = match &*f.body {
         Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
@@ -1024,7 +1025,7 @@ fn expr_to_case_literal_ir(
                     "`case` numeric label must be an integer in `i32` range",
                 ));
             }
-            Ok(IRExpr::Number(v as i32, n.span))
+            Ok(IRExpr::Number(v as f64, n.span))
         }
         Expr::Lit(Lit::Bool(b)) => Ok(IRExpr::Bool(b.value, b.span)),
         _ => Err(diag_spanned(
@@ -1559,23 +1560,15 @@ fn build_expr(
         Expr::Lit(ref l) => match l {
             Lit::Num(n) => {
                 let v = n.value;
-                if v.fract() != 0.0 {
+                if v.is_nan() || v.is_infinite() {
                     return Err(diag_spanned(
                         cm,
                         path,
                         n,
-                        "only integer numeric literals are supported",
+                        "numeric literal must be finite",
                     ));
                 }
-                if v < (i32::MIN as f64) || v > (i32::MAX as f64) {
-                    return Err(diag_spanned(
-                        cm,
-                        path,
-                        n,
-                        "numeric literal out of i32 range",
-                    ));
-                }
-                Ok(IRExpr::Number(v as i32, n.span))
+                Ok(IRExpr::Number(v, n.span))
             }
             Lit::Bool(b) => Ok(IRExpr::Bool(b.value, b.span)),
             Lit::Str(s) => Ok(IRExpr::Str(s.value.to_string_lossy().into_owned(), s.span)),
@@ -2583,6 +2576,139 @@ fn build_fetch_init(
     })
 }
 
+fn peel_expr_parens<'a>(mut e: &'a Expr) -> &'a Expr {
+    while let Expr::Paren(p) = e {
+        e = &p.expr;
+    }
+    e
+}
+
+fn build_opt_chain_call_expr(
+    c: &OptCall,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+) -> Result<IRExpr, CompileError> {
+    let call: CallExpr = c.clone().into();
+    let type_args = call_type_args(&call, cm, path, iface)?;
+    let mut args = Vec::new();
+    for a in &call.args {
+        match a {
+            ExprOrSpread { spread: None, expr } => {
+                args.push(build_expr(expr, cm, path, iface, in_async)?);
+            }
+            _ => {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    c,
+                    "spread arguments are not supported",
+                ));
+            }
+        }
+    }
+    let Callee::Expr(ce) = &call.callee else {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            "optional call (`?.()`) does not support this callee form",
+        ));
+    };
+    let inner = peel_expr_parens(ce);
+    if let Expr::Member(m) = inner {
+        if let MemberProp::Ident(prop) = &m.prop {
+            if prop.sym == "then" {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    c,
+                    "`Promise.prototype.then` is not supported; use `async`/`await` instead",
+                ));
+            }
+        }
+    }
+    match inner {
+        Expr::Ident(i) => Ok(IRExpr::OptionalCall {
+            callee: i.sym.to_string(),
+            args,
+            type_args,
+            span: call.span,
+        }),
+        Expr::Member(m) => {
+            if let MemberProp::Ident(prop) = &m.prop {
+                let receiver = Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);
+                Ok(IRExpr::OptionalMethodCall {
+                    receiver,
+                    method: prop.sym.to_string(),
+                    args,
+                    type_args,
+                    span: call.span,
+                })
+            } else {
+                Err(diag_spanned(
+                    cm,
+                    path,
+                    c,
+                    "computed method optional calls `obj?.[expr](...)` are not supported",
+                ))
+            }
+        }
+        Expr::OptChain(och) => {
+            // e.g. `make()?.get_v()`：`OptCall` 的 callee 为 `obj?.prop` 形式的 `Expr::OptChain`。
+            if !och.optional {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    c,
+                    "optional call (`?.()`) supports only a plain identifier or `obj.prop` callee",
+                ));
+            }
+            if let OptChainBase::Member(m) = &*och.base {
+                if let MemberProp::Ident(prop) = &m.prop {
+                    if prop.sym == "then" {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            c,
+                            "`Promise.prototype.then` is not supported; use `async`/`await` instead",
+                        ));
+                    }
+                    let receiver = Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);
+                    Ok(IRExpr::OptionalMethodCall {
+                        receiver,
+                        method: prop.sym.to_string(),
+                        args,
+                        type_args,
+                        span: call.span,
+                    })
+                } else {
+                    Err(diag_spanned(
+                        cm,
+                        path,
+                        c,
+                        "computed method optional calls `obj?.[expr](...)` are not supported",
+                    ))
+                }
+            } else {
+                Err(diag_spanned(
+                    cm,
+                    path,
+                    c,
+                    "optional call (`?.()`) supports only a plain identifier or `obj.prop` callee",
+                ))
+            }
+        }
+        _ => Err(diag_spanned(
+            cm,
+            path,
+            c,
+            "optional call (`?.()`) supports only a plain identifier or `obj.prop` callee",
+        )),
+    }
+}
+
 fn build_member_expr(
     m: &MemberExpr,
     cm: &Lrc<SourceMap>,
@@ -2623,12 +2749,7 @@ fn build_opt_chain_expr(
     in_async: bool,
 ) -> Result<IRExpr, CompileError> {
     match &*o.base {
-        OptChainBase::Call(_) => Err(diag_spanned(
-            cm,
-            path,
-            o,
-            "optional call (`?.()`) is not supported in this compiler version",
-        )),
+        OptChainBase::Call(c) => build_opt_chain_call_expr(c, cm, path, iface, in_async),
         OptChainBase::Member(m) => {
             let prop = match &m.prop {
                 MemberProp::Ident(id) => id.sym.to_string(),

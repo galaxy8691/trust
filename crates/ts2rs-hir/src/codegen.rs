@@ -88,7 +88,7 @@ async fn __ts2rs_fetch(url: String, init: Option<__Ts2rsFetchInit>) -> reqwest::
     String::from_utf16_lossy(&v[a as usize..b as usize])
 }
 
-fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> i32 {
+fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> f64 {
     let h: Vec<u16> = haystack.encode_utf16().collect();
     let n: Vec<u16> = needle.encode_utf16().collect();
     let hl = h.len() as i32;
@@ -102,18 +102,18 @@ fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> i32 
     }
     let usize_start = (start as usize).min(h.len());
     if n.is_empty() {
-        return (usize_start as i32).min(hl);
+        return ((usize_start as i32).min(hl)) as f64;
     }
     if nl > hl || usize_start > h.len().saturating_sub(n.len()) {
-        return -1;
+        return -1_f64;
     }
     let last = h.len() - n.len();
     for i in usize_start..=last {
         if h[i..i + n.len()] == n[..] {
-            return i as i32;
+            return (i as i32) as f64;
         }
     }
-    -1
+    -1_f64
 }
 
 "#,
@@ -149,7 +149,7 @@ fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> i32 
         out.push_str("    fn __class_name(&self) -> &'static str;\n");
         out.push_str("}\n");
         out.push_str(&format!(
-            "struct {struct_name} {{ data: std::collections::HashMap<String, i32> }}\n"
+            "struct {struct_name} {{ data: std::collections::HashMap<String, f64> }}\n"
         ));
         out.push_str(&format!("impl {trait_name} for {struct_name} {{\n"));
         out.push_str("    fn __class_name(&self) -> &'static str {\n");
@@ -180,13 +180,13 @@ fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> i32 
         "()" => {
             out.push_str(&format!("    ts_main(){await_main};\n"));
         }
-        "i32" | "bool" | "String" => {
+        "f64" | "bool" | "String" => {
             out.push_str(&format!("    println!(\"{{}}\", ts_main(){await_main});\n"));
         }
-        "Vec<i32>"
+        "Vec<f64>"
         | "Vec<String>"
         | "Vec<reqwest::Response>"
-        | "std::collections::HashMap<String, i32>" => {
+        | "std::collections::HashMap<String, f64>" => {
             out.push_str(&format!(
                 "    println!(\"{{:?}}\", ts_main(){await_main});\n"
             ));
@@ -268,11 +268,13 @@ fn expr_maybe_http_stream(e: &IRExpr) -> bool {
         }
         IRExpr::Unary { arg, .. } => expr_maybe_http_stream(arg),
         IRExpr::Call { args, .. }
+        | IRExpr::OptionalCall { args, .. }
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
         | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_http_stream),
-        IRExpr::MethodCall { receiver, args, .. } => {
+        IRExpr::MethodCall { receiver, args, .. }
+        | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             expr_maybe_http_stream(receiver) || args.iter().any(expr_maybe_http_stream)
         }
         IRExpr::StringMethodBuiltin { receiver, args, .. } => {
@@ -404,11 +406,13 @@ fn expr_maybe_fetch_text_only(e: &IRExpr) -> bool {
         }
         IRExpr::Unary { arg, .. } => expr_maybe_fetch_text_only(arg),
         IRExpr::Call { args, .. }
+        | IRExpr::OptionalCall { args, .. }
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
         | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_fetch_text_only),
-        IRExpr::MethodCall { receiver, args, .. } => {
+        IRExpr::MethodCall { receiver, args, .. }
+        | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             expr_maybe_fetch_text_only(receiver) || args.iter().any(expr_maybe_fetch_text_only)
         }
         IRExpr::StringMethodBuiltin { receiver, args, .. } => {
@@ -469,11 +473,13 @@ fn expr_maybe_fetch_request(e: &IRExpr) -> bool {
         }
         IRExpr::Unary { arg, .. } => expr_maybe_fetch_request(arg),
         IRExpr::Call { args, .. }
+        | IRExpr::OptionalCall { args, .. }
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
         | IRExpr::JsonBuiltin { args, .. } => args.iter().any(expr_maybe_fetch_request),
-        IRExpr::MethodCall { receiver, args, .. } => {
+        IRExpr::MethodCall { receiver, args, .. }
+        | IRExpr::OptionalMethodCall { receiver, args, .. } => {
             expr_maybe_fetch_request(receiver) || args.iter().any(expr_maybe_fetch_request)
         }
         IRExpr::StringMethodBuiltin { receiver, args, .. } => {
@@ -620,7 +626,9 @@ fn expr_maybe_utf16_stdlib(e: &IRExpr) -> bool {
         }
         IRExpr::Unary { arg, .. } => expr_maybe_utf16_stdlib(arg),
         IRExpr::Call { args, .. }
+        | IRExpr::OptionalCall { args, .. }
         | IRExpr::MethodCall { args, .. }
+        | IRExpr::OptionalMethodCall { args, .. }
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
@@ -678,7 +686,9 @@ fn expr_maybe_json_stringify(e: &IRExpr) -> bool {
         }
         IRExpr::Unary { arg, .. } => expr_maybe_json_stringify(arg),
         IRExpr::Call { args, .. }
+        | IRExpr::OptionalCall { args, .. }
         | IRExpr::MethodCall { args, .. }
+        | IRExpr::OptionalMethodCall { args, .. }
         | IRExpr::BuiltinLog { args, .. }
         | IRExpr::MathBuiltin { args, .. }
         | IRExpr::NumberBuiltin { args, .. }
@@ -915,7 +925,7 @@ fn emit_stmt(
             out.push_str("if ");
             let c = emit_expr(cond, f, level, module)?;
             if is_numberish(cond_ty) {
-                out.push_str(&format!("({c}) != 0"));
+                out.push_str(&format!("({c}) != 0.0"));
             } else {
                 out.push_str(&format!("({c})"));
             }
@@ -946,7 +956,7 @@ fn emit_stmt(
             out.push_str("while ");
             let c = emit_expr(cond, f, level, module)?;
             if is_numberish(cond_ty) {
-                out.push_str(&format!("({c}) != 0"));
+                out.push_str(&format!("({c}) != 0.0"));
             } else {
                 out.push_str(&format!("({c})"));
             }
@@ -1082,7 +1092,7 @@ fn emit_expr(
     module: &IRModule,
 ) -> Result<String, CompileError> {
     match e {
-        IRExpr::Number(n, _) => Ok(format!("{n}")),
+        IRExpr::Number(n, _) => Ok(helpers::rust_f64_literal(*n)),
         IRExpr::Bool(b, _) => Ok(format!("{b}")),
         IRExpr::Str(s, _) => Ok(format!("{:?}.to_string()", s)),
         IRExpr::Null(_) | IRExpr::Undefined(_) => Ok("()".to_string()),
@@ -1143,8 +1153,8 @@ fn emit_expr(
                             ));
                         }
                     };
-                    let ls = if lhs_n { format!("({l} != 0)") } else { l };
-                    let rs = if rhs_n { format!("({r} != 0)") } else { r };
+                    let ls = if lhs_n { format!("({l} != 0.0)") } else { l };
+                    let rs = if rhs_n { format!("({r} != 0.0)") } else { r };
                     match op {
                         LogicalAnd => format!("({ls} && {rs})"),
                         LogicalOr => format!("({ls} || {rs})"),
@@ -1154,7 +1164,7 @@ fn emit_expr(
             };
             Ok(mid)
         }
-        IRExpr::Call { callee, args, .. } => {
+        IRExpr::Call { callee, args, .. } | IRExpr::OptionalCall { callee, args, .. } => {
             let name = rust_fn_name(callee);
             let mut a = Vec::new();
             for x in args {
@@ -1199,6 +1209,12 @@ fn emit_expr(
             method,
             args,
             ..
+        }
+        | IRExpr::OptionalMethodCall {
+            receiver,
+            method,
+            args,
+            ..
         } => {
             let name = rust_fn_name(method);
             let mut a = vec![emit_expr(receiver, f, stmt_level, module)?];
@@ -1231,7 +1247,7 @@ fn emit_expr(
             })?;
             let c = emit_expr(test, f, stmt_level, module)?;
             let cond_s = if is_numberish(ct) {
-                format!("({c}) != 0")
+                format!("({c}) != 0.0")
             } else {
                 format!("({c})")
             };
@@ -1254,7 +1270,7 @@ fn emit_expr(
             if let Some(h) = http_response_member {
                 return match h {
                     HttpResponseMember::Status => {
-                        Ok(format!("(({o}).status().as_u16() as i32)"))
+                        Ok(format!("(({o}).status().as_u16() as f64)"))
                     }
                     HttpResponseMember::Ok => Ok(format!("(({o}).status().is_success())")),
                     HttpResponseMember::Body => Err(diag(
@@ -1274,11 +1290,11 @@ fn emit_expr(
             if prop == "length" {
                 match length_dispatch {
                     Some(MemberLengthDispatch::JsStringUtf16) => {
-                        Ok(format!("(({o}.encode_utf16().count()) as i32)"))
+                        Ok(format!("(({o}.encode_utf16().count() as f64))"))
                     }
-                    Some(MemberLengthDispatch::VecLen) => Ok(format!("({o}.len() as i32)")),
+                    Some(MemberLengthDispatch::VecLen) => Ok(format!("({o}.len() as f64)")),
                     Some(MemberLengthDispatch::Uint8ArrayLen) => {
-                        Ok(format!("({o}.len() as i32)"))
+                        Ok(format!("({o}.len() as f64)"))
                     }
                     None => Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop)),
                 }
@@ -1301,7 +1317,7 @@ fn emit_expr(
                 if let Some(h) = http_response_member {
                     return match h {
                         HttpResponseMember::Status => {
-                            Ok(format!("(({o}).status().as_u16() as i32)"))
+                            Ok(format!("(({o}).status().as_u16() as f64)"))
                         }
                         HttpResponseMember::Ok => Ok(format!("(({o}).status().is_success())")),
                         HttpResponseMember::Body => Err(diag(
@@ -1321,11 +1337,11 @@ fn emit_expr(
                 if prop == "length" {
                     match length_dispatch {
                         Some(MemberLengthDispatch::JsStringUtf16) => {
-                            Ok(format!("(({o}.encode_utf16().count()) as i32)"))
+                            Ok(format!("(({o}.encode_utf16().count() as f64))"))
                         }
-                        Some(MemberLengthDispatch::VecLen) => Ok(format!("({o}.len() as i32)")),
+                        Some(MemberLengthDispatch::VecLen) => Ok(format!("({o}.len() as f64)")),
                         Some(MemberLengthDispatch::Uint8ArrayLen) => {
-                            Ok(format!("({o}.len() as i32)"))
+                            Ok(format!("({o}.len() as f64)"))
                         }
                         None => Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop)),
                     }
@@ -1339,33 +1355,43 @@ fn emit_expr(
             match kind {
                 Abs => {
                     let a = emit_expr(&args[0], f, stmt_level, module)?;
-                    Ok(format!("(({a}) as i32).abs()"))
+                    Ok(format!("(({a}).abs())"))
                 }
                 Min => {
                     let a = emit_expr(&args[0], f, stmt_level, module)?;
                     let b = emit_expr(&args[1], f, stmt_level, module)?;
-                    Ok(format!("(({a}) as i32).min(({b}) as i32)"))
+                    Ok(format!("(({a}).min({b}))"))
                 }
                 Max => {
                     let a = emit_expr(&args[0], f, stmt_level, module)?;
                     let b = emit_expr(&args[1], f, stmt_level, module)?;
-                    Ok(format!("(({a}) as i32).max(({b}) as i32)"))
+                    Ok(format!("(({a}).max({b}))"))
                 }
-                Floor | Ceil | Trunc | Round => {
+                Floor => {
                     let n = emit_expr(&args[0], f, stmt_level, module)?;
-                    Ok(format!("({n})"))
+                    Ok(format!("(({n}).floor())"))
+                }
+                Ceil => {
+                    let n = emit_expr(&args[0], f, stmt_level, module)?;
+                    Ok(format!("(({n}).ceil())"))
+                }
+                Trunc => {
+                    let n = emit_expr(&args[0], f, stmt_level, module)?;
+                    Ok(format!("(({n}).trunc())"))
+                }
+                Round => {
+                    let n = emit_expr(&args[0], f, stmt_level, module)?;
+                    Ok(format!("(({n}).round())"))
                 }
                 Sign => {
                     let a = emit_expr(&args[0], f, stmt_level, module)?;
-                    Ok(format!(
-                        "((((({a}) as i32) > 0) as i32) - (((({a}) as i32) < 0) as i32))"
-                    ))
+                    Ok(format!("(({a}).signum())"))
                 }
                 Pow => {
                     let a = emit_expr(&args[0], f, stmt_level, module)?;
                     let b = emit_expr(&args[1], f, stmt_level, module)?;
                     Ok(format!(
-                        "({{ let __e = ({b}) as i32; if __e < 0 {{ panic!(\"Math.pow: negative exponent\"); }} ({a} as i32).checked_pow(__e as u32).expect(\"Math.pow\") }})"
+                        "({{ let __b = {b}; if __b < 0.0 {{ panic!(\"Math.pow: negative exponent\"); }} ({a}).powf(__b) }})"
                     ))
                 }
             }
@@ -1376,19 +1402,19 @@ fn emit_expr(
                 ParseInt => {
                     let s = emit_expr(&args[0], f, stmt_level, module)?;
                     if args.len() == 1 {
-                        Ok(format!("({s}).trim().parse::<i32>().unwrap_or(0)"))
+                        Ok(format!(
+                            "({{ let __p = ({s}).trim().parse::<i64>().unwrap_or(0); __p as f64 }})"
+                        ))
                     } else {
                         let radix = emit_expr(&args[1], f, stmt_level, module)?;
                         Ok(format!(
-                            "i32::from_str_radix(({s}).trim(), ({radix}) as u32).unwrap_or(0)"
+                            "({{ let __r = ({radix}) as u32; i64::from_str_radix(({s}).trim(), __r).unwrap_or(0) as f64 }})"
                         ))
                     }
                 }
                 ParseFloat => {
                     let s = emit_expr(&args[0], f, stmt_level, module)?;
-                    Ok(format!(
-                        "(({s}).trim().parse::<f64>().unwrap_or(0.0) as i32)"
-                    ))
+                    Ok(format!("(({s}).trim().parse::<f64>().unwrap_or(0.0))"))
                 }
             }
         }
@@ -1424,7 +1450,7 @@ fn emit_expr(
             JsonBuiltinKind::Parse => {
                 let s = emit_expr(&args[0], f, stmt_level, module)?;
                 Ok(format!(
-                    "({s}).trim().parse::<i32>().expect(\"JSON.parse: expected JSON integer\")"
+                    "({s}).trim().parse::<f64>().expect(\"JSON.parse: expected JSON number\")"
                 ))
             }
         },
@@ -1539,7 +1565,7 @@ fn emit_expr(
                         "({r}).text().await.expect(\"read body failed\")"
                     )),
                     HttpResponseMethodKind::Json => Ok(format!(
-                        "({r}).text().await.expect(\"read body failed\").trim().parse::<i32>().expect(\"JSON.parse: expected JSON integer\")"
+                        "({r}).text().await.expect(\"read body failed\").trim().parse::<f64>().expect(\"JSON.parse: expected JSON number\")"
                     )),
                 }
             }
@@ -1627,7 +1653,7 @@ fn emit_string_method_builtin(
         CharCodeAt => {
             let i = emit_expr(&args[0], f, stmt_level, module)?;
             Ok(format!(
-                "({{ let __s = &({recv}); let __ii = ({i}) as i32; let __v: Vec<u16> = __s.encode_utf16().collect(); let __len = __v.len() as i32; let __j = if __ii < 0 {{ __len + __ii }} else {{ __ii }}; if __j < 0 || __j >= __len {{ 0i32 }} else {{ __v[__j as usize] as i32 }} }})"
+                "({{ let __s = &({recv}); let __ii = ({i}) as i32; let __v: Vec<u16> = __s.encode_utf16().collect(); let __len = __v.len() as i32; let __j = if __ii < 0 {{ __len + __ii }} else {{ __ii }}; if __j < 0 || __j >= __len {{ 0.0_f64 }} else {{ __v[__j as usize] as f64 }} }})"
             ))
         }
         Slice => {
@@ -1675,7 +1701,7 @@ fn emit_string_method_builtin(
                 emit_expr(&args[1], f, stmt_level, module)?
             };
             Ok(format!(
-                "(__ts2rs_utf16_index_of(&({recv}), &({needle}), ({from}) as i32) >= 0)"
+                "(__ts2rs_utf16_index_of(&({recv}), &({needle}), ({from}) as i32) >= 0.0)"
             ))
         }
     }

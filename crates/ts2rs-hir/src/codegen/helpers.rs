@@ -3,6 +3,22 @@ use swc_common::Span;
 use crate::error::{diag, CompileError};
 use crate::ir::{IRFunction, IRStmt, TsType};
 
+/// 生成可嵌入 Rust 源码的 `f64` 字面量（`number` → `f64`）。
+pub(super) fn rust_f64_literal(n: f64) -> String {
+    if n.is_nan() {
+        return "f64::NAN".to_string();
+    }
+    if n.is_infinite() {
+        return if n.is_sign_positive() {
+            "f64::INFINITY".to_string()
+        } else {
+            "f64::NEG_INFINITY".to_string()
+        };
+    }
+    let s = n.to_string();
+    format!("{}_f64", s)
+}
+
 pub(super) fn rust_fn_name(name: &str) -> &str {
     if name == "main" {
         "ts_main"
@@ -37,13 +53,13 @@ pub(super) fn is_stringish(t: &TsType) -> bool {
 
 pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
     match t {
-        TsType::Number | TsType::NumberLit(_) => "i32",
+        TsType::Number | TsType::NumberLit(_) => "f64",
         TsType::Boolean | TsType::BoolLit(_) => "bool",
         TsType::String | TsType::StringLit(_) => "String",
         TsType::Void => "()",
         TsType::Null => "()",
         TsType::Undefined => "()",
-        TsType::ArrayNumber => "Vec<i32>",
+        TsType::ArrayNumber => "Vec<f64>",
         TsType::ArrayString => "Vec<String>",
         TsType::ArrayHttpResponse => "Vec<reqwest::Response>",
         TsType::HttpResponse => "reqwest::Response",
@@ -51,10 +67,10 @@ pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
         TsType::ReadableStreamDefaultReader => "()",
         TsType::StreamReadResult => "__Ts2rsStreamReadResult",
         TsType::Uint8Array => "Vec<u8>",
-        TsType::ObjectNum(_) => "std::collections::HashMap<String, i32>",
+        TsType::ObjectNum(_) => "std::collections::HashMap<String, f64>",
         TsType::TypeParam(_) => unreachable!("type params must be monomorphized before codegen"),
-        TsType::Fn { .. } => "std::rc::Rc<dyn Fn(i32) -> i32>",
-        TsType::ClassInstance(_) => "std::collections::HashMap<String, i32>",
+        TsType::Fn { .. } => "std::rc::Rc<dyn Fn(f64) -> f64>",
+        TsType::ClassInstance(_) => "std::collections::HashMap<String, f64>",
         TsType::Promise(_) => unreachable!("rust_ty_scalar: Promise is not a Rust value type"),
         TsType::Union(_) => unreachable!("rust_ty_scalar: use rust_ty for unions"),
     }

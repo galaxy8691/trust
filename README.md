@@ -92,22 +92,22 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | Ternary `?:` | Supported | Same type branches; `ternary_ok.ts` |
 | Template literals | Supported | No tag; `template_ok.ts` |
 | Comma expression | Supported | `comma_ok.ts` |
-| Member access | Partial | `string.length` UTF-16 code units; `string[i]` UTF-16 index (single code unit as `string`); `number[].length`; `length` on objects; `obj.m(args)` → global `m(receiver,…)`; no `obj[expr](…)`, `obj?.m(…)`; fixtures `string_utf16_length.ts`, `method_call_ok.ts`, `object_length_field.ts`, `stdlib_hir_ok.ts` |
-| `?.` / `??` | Partial | `?.` member only; `??` restricted; `optional_ok.ts`, `nullish_ok.ts`; §3.3 |
+| Member access | Partial | `string.length` UTF-16 code units; `string[i]` UTF-16 index (single code unit as `string`); `number[].length`; `length` on objects; `obj.m(args)` → global `m(receiver,…)`; **chained** `f().prop` / `f().m()` (`chain_call_ok.ts`); no computed `obj[expr](…)`; fixtures `string_utf16_length.ts`, `method_call_ok.ts`, `object_length_field.ts`, `stdlib_hir_ok.ts` |
+| `?.` / `??` | Partial | `?.` **member** and **call** `f?.()` / `recv?.m()` (`optional_call_ok.ts`); `??` extended for same-family unions with `null`/`undefined`; `optional_ok.ts`, `nullish_ok.ts`; §3.3 |
 | Array / object literals | Partial | `number[]`, `{ k: number }` subset; `HashMap` objects; `array_ok.ts`, `object_ok.ts` |
 | `switch` | Partial | `case` only `number`/`boolean` literals; `default` last; no fall-through; `switch_ok.ts`, `switch_fail.ts` |
 | `return` | Supported | `fn_body_returns` |
 | `void` functions | Supported | No return-path requirement |
-| `+ - * /`, compares, `!`, unary `-` | Supported | String only `+` concat; §4.1 for `/` |
-| `Math.*` builtins | Partial | `abs`, `min`, `max`, `floor`, `ceil`, `sign`, `trunc`, `round`, `pow` (integer `number` subset; `pow` non-negative exponent, checked); `math_builtin.ts`, `stdlib_hir_ok.ts` |
-| `Number.*` / `JSON.*` / string methods | Partial | `Number.parseInt` (1–2 args), `Number.parseFloat` (truncate to `i32`); `JSON.stringify` (`string` \| `number` \| `boolean`), `JSON.parse` (JSON **integer** text); `String` builtins: `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes` (UTF-16 semantics); `readLine()` sync stdin (not in `async`); `stdlib_hir_ok.ts` |
+| `+ - * /`, compares, `!`, unary `-` | Supported | String only `+` concat; numeric ops lower to **`f64`** (Rust); §4.1 |
+| `Math.*` builtins | Partial | `abs`, `min`, `max`, `floor`, `ceil`, `sign`, `trunc`, `round`, `pow` (`f64` semantics; `pow` non-negative exponent); `math_builtin.ts`, `stdlib_hir_ok.ts` |
+| `Number.*` / `JSON.*` / string methods | Partial | `Number.parseInt` / `parseFloat` → **`f64`**; `JSON.stringify` (`string` \| `number` \| `boolean`), `JSON.parse` (JSON **number** text → `f64`); `String` builtins: `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes` (UTF-16 semantics); `readLine()` sync stdin (not in `async`); `stdlib_hir_ok.ts` |
 | `console.log` / `error` / `debug` | Supported | §4.1 |
 | Literal types | Partial | `literal_type_ok.ts`; `bigint` / template literal types in type position rejected |
 | Union `A \| B` | Partial | Normalization; must map to one Rust type; `number \| string` heterogeneous fails; `A & B` rejected; `union_*`, `intersection_type_fail.ts` |
 | `interface` | Partial | Top-level; `TsType::ObjectNum`; `interface_ok.ts`, negatives |
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
 | Generics / type args | Partial | Monomorphization subset: explicit type args required at generic call sites; generic declarations are allowed; unsupported broad shapes still rejected |
-| Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` closure codegen path); variable-call `f(...)`, function args/returns covered by e2e fixtures |
+| Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` → `(f64) -> f64`); variable-call `f(...)`, function args/returns covered by e2e fixtures |
 | `async` / `await` / `Promise` / `fetch` / `fetchText` | Partial | `async function` with return `Promise<T>` (`T` is `number` \| `string` \| `void`); **`fetchText(url)`** → `Promise<string>` (`__ts2rs_fetch_text`); **`fetch(url, init?)`** → `Promise<Response>` (`reqwest::Response`: `status`, `ok`, `await .text()`, `await .json()` integer-only JSON body); **`response.body.getReader()`** + **`await reader.read()`** → `{ done, value }` with **`Uint8Array`** as `Vec<u8>` (`bytes_stream()` + `futures-util` `StreamExt`); optional **`init`** with string-literal `method`, `headers` map (string literal values), optional `body` string; **`Promise.all([...])`** homogeneous `number` / `string` / `fetch` responses (sequential `.await`); **`.then`** rejected; TLS via **rustls**; HTTP/2 when negotiated — **not** byte-parity with a specific Node release; full WHATWG `fetch` (`Headers`, duplex, etc.) still backlog; see `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, and other `compile_async_*` / `promise_*` tests |
 | Class / this / extends / super | Partial | Class subset is lowered to constructor/method functions, with sem checks for extends graph, `super(...)` placement, and baseline `override`; e2e: `class_*` fixtures |
 | Full TypeScript / `tsc` | Not implemented | Long-term |
@@ -125,8 +125,8 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Semantics (shadow, void branch) | `let_dup_same_block_fail.ts`, `void_log_in_branch.ts`, … | `compile_*`, `run_void_log_in_branch_prints_branch` |
 | Control flow / unreachable | `while_early.ts`, `for_loop.ts`, `for_in_*.ts`, `early_return_unreachable.ts`, … | `run_while_early_prints_three`, `run_for_in_object_keys_ok_prints_three`, `compile_for_in_non_object_fails`, … |
 | Logic / ternary / template / comma | `logical_bool.ts`, `ternary_ok.ts`, … | … |
-| Members / Math / length / HIR stdlib | `string_utf16_length.ts`, `math_builtin.ts`, `stdlib_hir_ok.ts`, … | `run_stdlib_hir_ok_prints_expected`, `compile_stdlib_hir_ok_writes_utf16_and_json_helpers` |
-| `?.` / `??` | `optional_ok.ts`, `nullish_ok.ts` | … |
+| Members / Math / length / HIR stdlib / chain | `string_utf16_length.ts`, `math_builtin.ts`, `stdlib_hir_ok.ts`, `chain_call_ok.ts`, … | `run_stdlib_hir_ok_prints_expected`, `run_chain_call_ok_prints_six`, `compile_stdlib_hir_ok_writes_utf16_and_json_helpers` |
+| `?.` / `??` | `optional_ok.ts`, `nullish_ok.ts`, `optional_call_ok.ts` | … |
 | Arrays / objects | `array_ok.ts`, `object_ok.ts`, `array_fail.ts` | `compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`, `switch_fail.ts` | … |
 | Console | `console_stderr.ts`, `void_log.ts` | … |
@@ -137,7 +137,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
 | Async / `Promise` / HTTP | `async_mvp_compile_ok.ts`, `async_control_flow_ok.ts`, `promise_all_fetch_ok.ts`, `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`, `compile_async_control_flow_if_while_await_ok`, `compile_promise_all_fetch_alias_ok`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, `compile_promise_then_fails` |
 | CLI `check` / `--emit-ir` | `sample.ts`, `switch_fail.ts` | `check_sample_ok`, `compile_emit_ir_stderr_contains_ir_module` |
-| Negative optional / nullish / object | `optional_chain_fail.ts`, `nullish_fail.ts`, `object_fail.ts` | `compile_optional_call_not_supported_fails`, … |
+| Negative optional / nullish / object | `optional_chain_fail.ts`, `nullish_fail.ts`, `object_fail.ts` | `compile_optional_call_bad_callee_fails`, … |
 | Regression anchor | [`tests/regression/switch_fallthrough_regression.ts`](crates/ts2rs-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |
 
 ## Type roadmap (§1.4)
@@ -153,13 +153,13 @@ Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJ
 
 ## Semantics roadmap (§3.3)
 
-See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). `??` / `?.` full narrowing is future work; `null` / `undefined` have no `strictNullChecks` switch; nominal `interface`/`type` vs structural TS; higher-order functions are currently a restricted typed subset.
+See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). `??` / `?.` **full** discriminated narrowing is future work; `null` / `undefined` have no `strictNullChecks` switch; nominal `interface`/`type` vs structural TS; higher-order functions are currently a restricted typed subset.
 
 ## Arithmetic, `/`, overflow (§4.1)
 
-- **`number` → `i32`** for `+`, `-`, `*`.
-- **`/`**: Rust integer division, **truncate toward zero** (not TS IEEE float `1/2 === 0.5`).
-- **Overflow**: `i32` range; Rust `i32` semantics (UB in release for overflow); no `checked_*` by default.
+- **`number` → `f64`** in generated Rust (`+`, `-`, `*`, `/`, compares, `Math.*`, etc.).
+- **`/`**: IEEE-754 double semantics via `f64` (closer to TS than the former `i32` division).
+- **Overflow / NaN**: `f64` infinity and NaN are possible; not identical to V8’s `number` edge cases in every scenario.
 - **`console.*` multi-arg**: spaced `"{}"` formatting ([`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs)).
 
 ## Build

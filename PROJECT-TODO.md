@@ -342,9 +342,9 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 ### Language and typing (trust-hard subset)
 
-- [ ] **Optional call** `f?.()`; **full static narrowing** for `??` / `?.` consistent with §3.3 (decidable only).
-- [ ] **Chained member/calls** `f().g()`, general method-instance typing (§1.3 follow-ups).
-- [ ] **Numeric model**: `number` beyond `i32` (e.g. `f64`) or explicit policy — large cross-cutting change.
+- [x] **Optional call** `f?.()`; **static narrowing** for `??` / `?.` (decidable; §3.3). Done: [`OptionalCall` / `OptionalMethodCall`](crates/ts2rs-hir/src/ir.rs), [`build_opt_chain_call_expr`](crates/ts2rs-hir/src/build.rs)（含 `Expr::OptChain` callee）；[`optional_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/optional_call_ok.ts)、[`optional_chain_fail.ts`](crates/ts2rs-cli/tests/fixtures/optional_chain_fail.ts)（非标识符 callee）；[`NullishCoalesce`](crates/ts2rs-hir/src/sem.rs) 扩展 **同族** `Union` 去 `null`/`undefined` 后与右操作数合并。**完整** discriminated / 全联合收窄仍属后续。
+- [x] **Chained member/calls** `f().g()`（一层 `expr.prop` / `expr.m()`）。Done: [`chain_call_ok.ts`](crates/ts2rs-cli/tests/fixtures/chain_call_ok.ts)，`run_chain_call_ok_prints_six`；一般实例方法类型仍见 §1.3 follow-ups。
+- [x] **Numeric model**: 全局 `number` → Rust **`f64`**（[`IRExpr::Number(f64)`](crates/ts2rs-hir/src/ir.rs)，[`rust_ty_scalar`](crates/ts2rs-hir/src/codegen/helpers.rs)，`Math`/`Number`/`JSON.parse` / `indexOf` 等）；下标与 UTF-16 内部仍 `as i32`。破坏性：原 `i32` 截断语义不再；与 Node/IEEE 细节见 README。
 - [ ] **HIR stdlib / JSON / strings**: fuller `JSON.parse`, non-integer JSON, URI builtins — only where result types stay closed under trust.
 
 ### Documentation and examples

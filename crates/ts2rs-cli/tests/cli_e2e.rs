@@ -769,8 +769,8 @@ fn compile_array_return_type_mismatch_fails() {
 }
 
 #[test]
-fn compile_optional_call_not_supported_fails() {
-    assert_compile_fails_stderr("optional_chain_fail.ts", "optional call");
+fn compile_optional_call_bad_callee_fails() {
+    assert_compile_fails_stderr("optional_chain_fail.ts", "optional call (`?.()`)");
 }
 
 #[test]
@@ -888,7 +888,7 @@ fn run_math_builtin_prints_sum() {
 
 #[test]
 fn run_stdlib_hir_ok_prints_expected() {
-    assert_run_stdout("stdlib_hir_ok.ts", "318\n");
+    assert_run_stdout("stdlib_hir_ok.ts", "318.9\n");
 }
 
 #[test]
@@ -1042,6 +1042,16 @@ fn run_project_tsconfig_prints_main() {
 #[test]
 fn run_method_call_ok_prints_three() {
     assert_run_stdout("method_call_ok.ts", "3\n");
+}
+
+#[test]
+fn run_chain_call_ok_prints_six() {
+    assert_run_stdout("chain_call_ok.ts", "6\n");
+}
+
+#[test]
+fn run_optional_call_ok_prints_five() {
+    assert_run_stdout("optional_call_ok.ts", "5\n");
 }
 
 #[test]

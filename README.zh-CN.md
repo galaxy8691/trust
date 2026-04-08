@@ -97,22 +97,22 @@ flowchart LR
 | 三元 `?:` | 支持 | 两分支需同类型；条件为 `number` 或 `boolean`；见 `ternary_ok.ts` |
 | 模板字符串 | 支持 | 无 tag；插值须非 `void`；见 `template_ok.ts` |
 | 逗号表达式 | 支持 | 取最后一项类型与值；见 `comma_ok.ts` |
-| 成员访问 | 部分支持 | `string.length` 为 JS **UTF-16 码元数**；`string[i]` 为 UTF-16 下标（单码元 `string`）；`number[].length`；对象字段 `length` 为普通数字字段；**`obj.m(args)`** 脱糖为全局函数 **`m(receiver, ...args)`**（`receiver` 为 `obj` 的值；须存在对应顶层函数；与严格 `tsc` 对 interface 成员的检查可能不一致）；**未**支持 `obj[expr](...)`、`obj?.m(...)`；见 `string_utf16_length.ts`、`method_call_ok.ts`、`object_length_field.ts`、`stdlib_hir_ok.ts` |
-| `?.` / `??` | 部分支持 | `?.` 仅支持成员访问 `obj?.prop`，`??` 为受限空值子集；见 `optional_ok.ts`、`nullish_ok.ts`；完整语义见 §3.3 |
+| 成员访问 | 部分支持 | `string.length` 为 JS **UTF-16 码元数**；`string[i]` 为 UTF-16 下标（单码元 `string`）；`number[].length`；对象字段 `length`；**`obj.m(args)`** 脱糖为全局 **`m(receiver, ...args)`**；**一层链式** `f().prop` / `f().m()`（`chain_call_ok.ts`）；**未**支持 `obj[expr](...)`；见 `string_utf16_length.ts`、`method_call_ok.ts`、`stdlib_hir_ok.ts` 等 |
+| `?.` / `??` | 部分支持 | `?.` **成员**与**调用** `f?.()` / `recv?.m()`（`optional_call_ok.ts`）；`??` 对同族 `Union` 去 `null`/`undefined` 合并扩展；`optional_ok.ts`、`nullish_ok.ts`；完整 discriminated 收窄见 §3.3 |
 | 数组 / 对象字面量 | 部分支持 | 仅 `number[]` 与 `{ k: number }` 子集；对象为值型 `HashMap`（无 `Rc`/`Arc`）；见 `array_ok.ts`、`object_ok.ts`；完整类型语法见 §1.4 / §2.1 |
 | `switch` | 部分支持 | `case` 仅 `number`/`boolean` **字面量**；`default` 须**最后**；**无** `case` 间穿透（空 `case` 体拒绝）；`case` 末尾 `break` 在 build 剥离；判别式与 `if` 条件类型规则一致；见 [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts)、负例 [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts) |
 | `return` | 支持 | 非 `void` 函数需满足 `fn_body_returns`（含提前穷尽返回 + 尾部规则，见上文「控制流与 return」） |
 | `void` 函数 | 支持 | 不要求 `return` 路径检查 |
-| `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 运算见下文「算术、`/` 与溢出」 |
-| `Math.*` 内建 | 部分支持 | `abs`、`min`、`max`、`floor`、`ceil`、`sign`、`trunc`、`round`、`pow`（整数子集；`pow` 非负指数、`checked_pow`）；见 `math_builtin.ts`、`stdlib_hir_ok.ts` |
-| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt`（1–2 参）、`Number.parseFloat`（向零截断为 `i32`）；`JSON.stringify`（`string` \| `number` \| `boolean`）、`JSON.parse`（JSON **整数**文本）；`charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`（UTF-16）；同步 `readLine()`（`async` 中拒绝）；见 `stdlib_hir_ok.ts` |
+| `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 在 Rust 侧为 **`f64`**；见下文 §4.1 |
+| `Math.*` 内建 | 部分支持 | `abs`、`min`、`max`、`floor`、`ceil`、`sign`、`trunc`、`round`、`pow`（`f64`；`pow` 非负指数）；见 `math_builtin.ts`、`stdlib_hir_ok.ts` |
+| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`、`JSON.parse`（JSON **number** 文本 → `f64`）；`charAt` 等（UTF-16）；`readLine()`；见 `stdlib_hir_ok.ts` |
 | `console.log` / `console.error` / `console.debug` | 支持 | `log` → `println!`；`error` / `debug` → `eprintln!`；多参数均为 `"{}"` **空格分隔**（与 §4.1 一致） |
 | 字面量类型 | 部分支持 | `42`、`"a"`、`true` 等类型位置；向 `number`/`string`/`boolean` 拓宽；见 `literal_type_ok.ts`；`bigint`/模板字面量类型位置拒绝 |
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
 | `interface`（受限） | 部分支持 | 顶层 `interface` / `export interface`；声明体与 `{ k: number }` 相同规则，解析为 [`TsType::ObjectNum`](crates/ts2rs-hir/src/ir.rs)（`build.rs` 中具名表）；类型位置用 `Point` 形式引用；**单文件**内按出现顺序声明，引用尚未声明的接口名会报错；**不**从依赖模块导入接口名；`extends`、泛型、可选属性拒绝；见 `interface_ok.ts`、`export_interface_ok.ts`、负例 `interface_extends_fail.ts`、`interface_generic_fail.ts` |
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types`](crates/ts2rs-hir/src/build.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化子集：泛型调用需显式类型实参；泛型声明可解析；更宽泛语义仍拒绝 |
-| 高阶函数 | 部分支持 | 当前支持函数类型注解与带类型箭头闭包（codegen 子集为 `(number) => number`）；支持变量调用 `f(...)`、函数作参数与返回值 |
+| 高阶函数 | 部分支持 | 函数类型与箭头闭包（`(number) => number` → `(f64) -> f64`）；变量调用 `f(...)` 等 |
 | `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` 整数 JSON）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
@@ -130,8 +130,8 @@ flowchart LR
 | 语义边界（重复/shadow/void 分支） | `let_dup_same_block_fail.ts`、`let_shadow_nested_ok.ts`、`param_let_same_name_fail.ts`、`void_log_in_branch.ts` | 对应 `compile_*` / `run_void_log_in_branch_prints_branch` |
 | 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`for_in_*.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`run_for_in_object_keys_ok_prints_three`、`compile_for_in_non_object_fails` 等 |
 | 逻辑/三元/模板/逗号 | `logical_bool.ts`、`logical_truthy_ok.ts`、`ternary_ok.ts`、`template_ok.ts`、`comma_ok.ts` | `run_logical_bool_prints_one`、`run_ternary_ok_prints_one` 等 |
-| 成员 / `Math` / HIR 标准库 / 数组长度 | `string_utf16_length.ts`、`member_length_ok.ts`、`method_call_ok.ts`、`object_length_field.ts`、`array_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts` | `run_string_utf16_length_prints_two`、`run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers` 等 |
-| `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one` |
+| 成员 / `Math` / HIR 标准库 / 链式 | `string_utf16_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts`、`chain_call_ok.ts` 等 | `run_stdlib_hir_ok_prints_expected`、`run_chain_call_ok_prints_six`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers` 等 |
+| `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts`、`optional_call_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one`、`run_optional_call_ok_prints_five` |
 | 数组 / 对象字面量 | `array_ok.ts`、`object_ok.ts`；负例 `array_fail.ts` | `run_array_ok_prints_two`、`run_object_ok_prints_three`、`compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |
 | `console` | `console_stderr.ts`、`void_log.ts` | `compile_console_stderr_writes_eprintln`、`run_void_log_in_branch_prints_branch` |
@@ -142,7 +142,7 @@ flowchart LR
 | 极简 tsconfig / `--project` | `multi_entry_tsconfig.json` + `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
 | async / `Promise` / HTTP | `async_mvp_compile_ok.ts`、`async_control_flow_ok.ts`、`promise_all_fetch_ok.ts`、`fetch_response_ok.ts`、`fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`、`compile_async_control_flow_if_while_await_ok`、`compile_promise_all_fetch_alias_ok`、`compile_fetch_response_ok`、`compile_fetch_post_init_ok`、`compile_promise_then_fails` |
 | CLI：`check` / `--emit-ir` | `sample.ts`、`switch_fail.ts` | `check_sample_ok`、`compile_emit_ir_stderr_contains_ir_module` |
-| 可选链 / `??` / 对象字段（负例边界） | `optional_chain_fail.ts`、`nullish_fail.ts`、`object_fail.ts` | `compile_optional_call_not_supported_fails` 等 |
+| 可选链 / `??` / 对象字段（负例边界） | `optional_chain_fail.ts`、`nullish_fail.ts`、`object_fail.ts` | `compile_optional_call_bad_callee_fails` 等 |
 | 回归锚点（与 fixture 重复语义） | [`tests/regression/switch_fallthrough_regression.ts`](crates/ts2rs-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |
 
 ## 类型层路线（§1.4）
@@ -180,9 +180,9 @@ flowchart LR
 
 ## 算术、`/` 与溢出（codegen，§4.1）
 
-- **`number` → `i32`**：`+`、`-`、`*` 为 `i32` 上的运算。
-- **除法 `/`**：生成 Rust 整数除法，**向零截断**（与 `i32` / `/` 一致）。**与 TypeScript 不同**：TS 中 `number` 的 `/` 为 IEEE-754 **浮点**除法（例如 `1 / 2 === 0.5`），本子集不复现该行为。
-- **范围与溢出**：可表示范围即 `i32`，与 TS `number` 双精度全集不一致。算术溢出遵循 **Rust** 对 `i32` 的语义（如在 Release 配置下溢出可为未定义行为）；**默认不**插入 `checked_*` 或运行时 panic；若需可检测溢出，属后续可选工作（见 [PROJECT-TODO.zh-CN.md §4.1](PROJECT-TODO.zh-CN.md)）。
+- **`number` → `f64`**：算术、`Math.*`、`Number.*` 等与 IEEE-754 双精度更接近 TS。
+- **除法 `/`**：`f64` 除法（与旧版 `i32` 向零截断不同）。
+- **NaN / ∞**：可能出现；与 V8 的 `number` 边界情况未必逐位一致。
 - **`console.log` / `console.error` / `console.debug`**：多参数时格式串为 `"{}"` 之间带**空格**（如 `println!("{} {}", …)` / `eprintln!(…)`），与 [`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) 实现一致。
 
 ## 构建
