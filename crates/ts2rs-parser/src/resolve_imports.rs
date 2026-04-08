@@ -101,9 +101,8 @@ fn process_import(
     })?;
     let dep_path = dir.join(raw);
 
-    let text = fs::read_to_string(&dep_path).map_err(|e| {
-        ParseError::Message(format!("cannot read `{}`: {e}", dep_path.display()))
-    })?;
+    let text = fs::read_to_string(&dep_path)
+        .map_err(|e| ParseError::Message(format!("cannot read `{}`: {e}", dep_path.display())))?;
 
     let dep_parsed = parse_ts_resolved(&dep_path, &text, visited)?;
     let Program::Module(dm) = dep_parsed.program else {

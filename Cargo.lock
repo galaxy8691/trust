@@ -1084,6 +1084,7 @@ dependencies = [
  "swc_common",
  "swc_ecma_ast",
  "thiserror",
+ "ts2rs-parser",
 ]
 
 [[package]]

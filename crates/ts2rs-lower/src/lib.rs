@@ -43,7 +43,9 @@ pub fn lower_module_graph_with_options(
     entry_path: &str,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), LowerError> {
-    Ok(ts2rs_hir::compile_graph_with_options(units, entry_path, codegen)?)
+    Ok(ts2rs_hir::compile_graph_with_options(
+        units, entry_path, codegen,
+    )?)
 }
 
 /// 多文件：仅 HIR 构建与语义检查，不生成 Rust。
@@ -58,8 +60,8 @@ pub fn check_module_graph(
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    use ts2rs_parser::{parse_module_graph, validate_imports};
     use ts2rs_parser::parse_typescript_file;
+    use ts2rs_parser::{parse_module_graph, validate_imports};
 
     #[test]
     fn lowers_add_and_main() {
@@ -175,8 +177,7 @@ function main(): number {
             span_comments: true,
             ..Default::default()
         };
-        let (rs, _) =
-            lower_program_with_options(&p.program, &p.source_map, "x.ts", &opts).unwrap();
+        let (rs, _) = lower_program_with_options(&p.program, &p.source_map, "x.ts", &opts).unwrap();
         assert!(
             rs.contains("// ts: x.ts:2:"),
             "expected span comment on `return` line (line 2): {rs}"

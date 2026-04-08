@@ -3,8 +3,12 @@ name = "ts2rs-hir"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 swc_common = "21.0.0"
 swc_ecma_ast = "23.0.0"
 thiserror = "2.0.18"
+
+[dev-dependencies]
+ts2rs-parser = { path = "../ts2rs-parser" }

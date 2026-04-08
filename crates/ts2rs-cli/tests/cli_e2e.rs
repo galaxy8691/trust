@@ -9,6 +9,12 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn regression_case(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/regression")
+        .join(name)
+}
+
 fn assert_run_stdout(name: &str, expected: &str) {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
     let ts = fixture(name);
@@ -239,17 +245,26 @@ fn run_export_interface_ok_prints_twelve() {
 
 #[test]
 fn compile_interface_extends_fails() {
-    assert_compile_fails_stderr("interface_extends_fail.ts", "interface extends clauses are not supported");
+    assert_compile_fails_stderr(
+        "interface_extends_fail.ts",
+        "interface extends clauses are not supported",
+    );
 }
 
 #[test]
 fn compile_interface_generic_fails() {
-    assert_compile_fails_stderr("interface_generic_fail.ts", "generic interfaces are not supported");
+    assert_compile_fails_stderr(
+        "interface_generic_fail.ts",
+        "generic interfaces are not supported",
+    );
 }
 
 #[test]
 fn compile_generic_function_fails() {
-    assert_compile_fails_stderr("generic_function_fail.ts", "generic functions are not supported");
+    assert_compile_fails_stderr(
+        "generic_function_fail.ts",
+        "generic functions are not supported",
+    );
 }
 
 #[test]
@@ -503,7 +518,10 @@ fn run_import_add_main_prints_three() {
 
 #[test]
 fn compile_import_missing_export_fails() {
-    assert_compile_fails_stderr("import_missing_export_main.ts", "no exported function `foo`");
+    assert_compile_fails_stderr(
+        "import_missing_export_main.ts",
+        "no exported function `foo`",
+    );
 }
 
 #[test]
@@ -555,6 +573,42 @@ fn check_switch_fail_stderr() {
         stderr.contains("fall-through"),
         "expected fall-through diagnostic, got:\n{stderr}"
     );
+}
+
+#[test]
+fn regression_switch_fallthrough_check_fails() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = regression_case("switch_fallthrough_regression.ts");
+    let out = Command::new(exe)
+        .args(["check", ts.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs check regression");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("fall-through"),
+        "expected fall-through diagnostic, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn compile_array_return_type_mismatch_fails() {
+    assert_compile_fails_stderr("array_fail.ts", "return type mismatch");
+}
+
+#[test]
+fn compile_optional_call_not_supported_fails() {
+    assert_compile_fails_stderr("optional_chain_fail.ts", "optional call");
+}
+
+#[test]
+fn compile_nullish_operands_mismatch_fails() {
+    assert_compile_fails_stderr("nullish_fail.ts", "nullish coalescing");
+}
+
+#[test]
+fn compile_object_literal_non_number_field_fails() {
+    assert_compile_fails_stderr("object_fail.ts", "object literal currently supports only");
 }
 
 #[test]
@@ -759,11 +813,7 @@ fn run_multi_entry_extra_roots_prints_main() {
     let main_ts = fixture("multi_entry_main.ts");
     let side_ts = fixture("multi_entry_side.ts");
     let out = Command::new(exe)
-        .args([
-            "run",
-            main_ts.to_str().unwrap(),
-            side_ts.to_str().unwrap(),
-        ])
+        .args(["run", main_ts.to_str().unwrap(), side_ts.to_str().unwrap()])
         .output()
         .expect("spawn ts2rs run");
     assert!(

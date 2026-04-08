@@ -338,15 +338,9 @@ fn emit_stmt(
     Ok(())
 }
 
-fn emit_expr_stmt(
-    e: &IRExpr,
-    f: &IRFunction,
-    stmt_level: usize,
-) -> Result<String, CompileError> {
+fn emit_expr_stmt(e: &IRExpr, f: &IRFunction, stmt_level: usize) -> Result<String, CompileError> {
     match e {
-        IRExpr::BuiltinLog { args, stderr, .. } => {
-            emit_builtin_log(args, f, stmt_level, *stderr)
-        }
+        IRExpr::BuiltinLog { args, stderr, .. } => emit_builtin_log(args, f, stmt_level, *stderr),
         _ => emit_expr(e, f, stmt_level),
     }
 }
@@ -376,11 +370,7 @@ fn emit_builtin_log(
     Ok(format!("{mac}(\"{fmt_str}\", {joined})"))
 }
 
-fn emit_expr(
-    e: &IRExpr,
-    f: &IRFunction,
-    stmt_level: usize,
-) -> Result<String, CompileError> {
+fn emit_expr(e: &IRExpr, f: &IRFunction, stmt_level: usize) -> Result<String, CompileError> {
     match e {
         IRExpr::Number(n, _) => Ok(format!("{n}")),
         IRExpr::Bool(b, _) => Ok(format!("{b}")),
@@ -436,16 +426,8 @@ fn emit_expr(
                             ));
                         }
                     };
-                    let ls = if lhs_n {
-                        format!("({l} != 0)")
-                    } else {
-                        l
-                    };
-                    let rs = if rhs_n {
-                        format!("({r} != 0)")
-                    } else {
-                        r
-                    };
+                    let ls = if lhs_n { format!("({l} != 0)") } else { l };
+                    let rs = if rhs_n { format!("({r} != 0)") } else { r };
                     match op {
                         LogicalAnd => format!("({ls} && {rs})"),
                         LogicalOr => format!("({ls} || {rs})"),
@@ -519,20 +501,14 @@ fn emit_expr(
             let o = emit_expr(obj, f, stmt_level)?;
             if prop == "length" {
                 match length_dispatch {
-                    Some(MemberLengthDispatch::JsStringUtf16) => Ok(format!(
-                        "(({o}.encode_utf16().count()) as i32)"
-                    )),
+                    Some(MemberLengthDispatch::JsStringUtf16) => {
+                        Ok(format!("(({o}.encode_utf16().count()) as i32)"))
+                    }
                     Some(MemberLengthDispatch::VecLen) => Ok(format!("({o}.len() as i32)")),
-                    None => Ok(format!(
-                        "(*{o}.get({:?}).expect(\"missing field\"))",
-                        prop
-                    )),
+                    None => Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop)),
                 }
             } else {
-                Ok(format!(
-                    "(*{o}.get({:?}).expect(\"missing field\"))",
-                    prop
-                ))
+                Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop))
             }
         }
         IRExpr::OptionalMember {
@@ -546,20 +522,14 @@ fn emit_expr(
                 let o = emit_expr(obj, f, stmt_level)?;
                 if prop == "length" {
                     match length_dispatch {
-                        Some(MemberLengthDispatch::JsStringUtf16) => Ok(format!(
-                            "(({o}.encode_utf16().count()) as i32)"
-                        )),
+                        Some(MemberLengthDispatch::JsStringUtf16) => {
+                            Ok(format!("(({o}.encode_utf16().count()) as i32)"))
+                        }
                         Some(MemberLengthDispatch::VecLen) => Ok(format!("({o}.len() as i32)")),
-                        None => Ok(format!(
-                            "(*{o}.get({:?}).expect(\"missing field\"))",
-                            prop
-                        )),
+                        None => Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop)),
                     }
                 } else {
-                    Ok(format!(
-                        "(*{o}.get({:?}).expect(\"missing field\"))",
-                        prop
-                    ))
+                    Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop))
                 }
             }
         },
@@ -612,7 +582,10 @@ fn emit_expr(
                     emit_expr(v, f, stmt_level)?
                 ));
             }
-            Ok(format!("std::collections::HashMap::from([{}])", pairs.join(", ")))
+            Ok(format!(
+                "std::collections::HashMap::from([{}])",
+                pairs.join(", ")
+            ))
         }
         IRExpr::Index { obj, index, .. } => {
             let o = emit_expr(obj, f, stmt_level)?;
@@ -629,12 +602,7 @@ fn emit_seq_expr(
     stmt_level: usize,
 ) -> Result<String, CompileError> {
     if exprs.is_empty() {
-        return Err(diag(
-            f.cm.as_ref(),
-            &f.source_path,
-            span,
-            "empty sequence",
-        ));
+        return Err(diag(f.cm.as_ref(), &f.source_path, span, "empty sequence"));
     }
     if exprs.len() == 1 {
         return emit_expr(&exprs[0], f, stmt_level);
@@ -656,11 +624,7 @@ fn emit_seq_expr(
     Ok(block)
 }
 
-fn emit_tpl(
-    parts: &[TplPart],
-    f: &IRFunction,
-    stmt_level: usize,
-) -> Result<String, CompileError> {
+fn emit_tpl(parts: &[TplPart], f: &IRFunction, stmt_level: usize) -> Result<String, CompileError> {
     if parts.is_empty() {
         return Ok("\"\".to_string()".to_string());
     }
@@ -692,8 +656,24 @@ fn emit_tpl(
     if args.is_empty() {
         return Ok(format!("format!(\"{fmt_esc}\")"));
     }
-    Ok(format!(
-        "format!(\"{fmt_esc}\", {})",
-        args.join(", ")
-    ))
+    Ok(format!("format!(\"{fmt_esc}\", {})", args.join(", ")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::build::build_module;
+    use crate::sem::check_module;
+    use ts2rs_parser::parse_typescript_file;
+
+    #[test]
+    fn emit_rust_contains_ts_main_and_println() {
+        let src = r#"function main(): number { return 42; }"#;
+        let p = parse_typescript_file("t.ts", src).unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        check_module(&mut m).unwrap();
+        let rs = emit_rust_with_options(&m, &CodegenOptions::default()).unwrap();
+        assert!(rs.contains("fn ts_main"), "{rs}");
+        assert!(rs.contains("println!"), "{rs}");
+    }
 }

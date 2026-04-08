@@ -1,4 +1,7 @@
+// Negative: optional call `?.()` is not supported (matrix: member / `?.` row boundary).
+function f(): number {
+  return 1;
+}
 function main(): number {
-  let s: string = "a";
-  return s?.length;
+  return f?.();
 }

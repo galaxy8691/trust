@@ -151,7 +151,11 @@ fn map_cargo_spawn_error(e: io::Error) -> DriverError {
     }
 }
 
-fn write_minimal_crate(root: &Path, rust_source: &str, opts: &RustBuildOptions) -> Result<(), DriverError> {
+fn write_minimal_crate(
+    root: &Path,
+    rust_source: &str,
+    opts: &RustBuildOptions,
+) -> Result<(), DriverError> {
     let cargo_toml = if opts.link_ts2rs_rt {
         let rt_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ts2rs_rt");
         let rt_canon = rt_path
@@ -229,7 +233,11 @@ mod tests {
             exe.display()
         );
         let out = Command::new(&exe).output().expect("run");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert_eq!(String::from_utf8_lossy(&out.stdout), "ok\n");
     }
 
@@ -261,7 +269,11 @@ mod tests {
 
         let (_tmp, exe) = compile_entrypoint_to_executable(&main).expect("compile");
         let out = Command::new(&exe).output().expect("run");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert_eq!(String::from_utf8_lossy(&out.stdout), "3\n");
     }
 }

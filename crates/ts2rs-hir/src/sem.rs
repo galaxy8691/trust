@@ -129,23 +129,27 @@ pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, Compil
         }
     }
 
-    let main_fn = module.fns.iter().find(|f| f.name == "main").ok_or_else(|| {
-        if let Some(first) = module.fns.first() {
-            return diag(
-                &first.cm,
-                &first.source_path,
-                first.span,
+    let main_fn = module
+        .fns
+        .iter()
+        .find(|f| f.name == "main")
+        .ok_or_else(|| {
+            if let Some(first) = module.fns.first() {
+                return diag(
+                    &first.cm,
+                    &first.source_path,
+                    first.span,
+                    "missing required entry point `function main()`",
+                );
+            }
+            // 退化：无顶层函数时由 build 阶段报错；此处仅占位。
+            diag(
+                &Lrc::new(SourceMap::default()),
+                module.entry_path.as_str(),
+                DUMMY_SP,
                 "missing required entry point `function main()`",
-            );
-        }
-        // 退化：无顶层函数时由 build 阶段报错；此处仅占位。
-        diag(
-            &Lrc::new(SourceMap::default()),
-            module.entry_path.as_str(),
-            DUMMY_SP,
-            "missing required entry point `function main()`",
-        )
-    })?;
+            )
+        })?;
     if !paths_equal_file(&main_fn.source_path, &module.entry_path) {
         return Err(diag(
             &main_fn.cm,
@@ -168,15 +172,14 @@ fn collect_fn_sigs_in_stmts(stmts: &[IRStmt]) -> HashMap<String, FnSig> {
     let mut m = HashMap::new();
     for s in stmts {
         if let IRStmt::FnDecl { func, .. } = s {
-            if m
-                .insert(
-                    func.name.clone(),
-                    FnSig {
-                        params: func.params.iter().map(|(_, t)| t.clone()).collect(),
-                        ret: func.ret.clone(),
-                    },
-                )
-                .is_some()
+            if m.insert(
+                func.name.clone(),
+                FnSig {
+                    params: func.params.iter().map(|(_, t)| t.clone()).collect(),
+                    ret: func.ret.clone(),
+                },
+            )
+            .is_some()
             {
                 // duplicate nested name — checked later with span if needed
             }
@@ -323,7 +326,11 @@ fn merge_init_after_if_else(
     for i in 0..stack.len() {
         let names: Vec<String> = stack[i].keys().cloned().collect();
         for name in names {
-            let p = pre.get(i).and_then(|m| m.get(&name)).copied().unwrap_or(true);
+            let p = pre
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .unwrap_or(true);
             let t = then_snap
                 .get(i)
                 .and_then(|m| m.get(&name))
@@ -349,7 +356,11 @@ fn merge_init_after_if_no_else(
     for i in 0..stack.len() {
         let names: Vec<String> = stack[i].keys().cloned().collect();
         for name in names {
-            let p = pre.get(i).and_then(|m| m.get(&name)).copied().unwrap_or(true);
+            let p = pre
+                .get(i)
+                .and_then(|m| m.get(&name))
+                .copied()
+                .unwrap_or(true);
             let t = then_snap
                 .get(i)
                 .and_then(|m| m.get(&name))
@@ -362,10 +373,17 @@ fn merge_init_after_if_no_else(
     }
 }
 
-fn apply_loop_conservative_init(stack: &mut [HashMap<String, Binding>], pre: &[HashMap<String, bool>]) {
+fn apply_loop_conservative_init(
+    stack: &mut [HashMap<String, Binding>],
+    pre: &[HashMap<String, bool>],
+) {
     for i in 0..stack.len() {
         for (name, b) in stack[i].iter_mut() {
-            let was_init = pre.get(i).and_then(|m| m.get(name)).copied().unwrap_or(false);
+            let was_init = pre
+                .get(i)
+                .and_then(|m| m.get(name))
+                .copied()
+                .unwrap_or(false);
             if !was_init {
                 b.initialized = false;
             }
@@ -505,16 +523,9 @@ fn check_stmts(
 ) -> Result<(), CompileError> {
     for s in stmts.iter_mut() {
         if !*reachable {
-            warnings.push(warn(
-                cm,
-                path,
-                stmt_span(s),
-                "unreachable code",
-            ));
+            warnings.push(warn(cm, path, stmt_span(s), "unreachable code"));
         }
-        check_stmt(
-            s, stack, globals, ret_ty, loop_depth, cm, path, warnings,
-        )?;
+        check_stmt(s, stack, globals, ret_ty, loop_depth, cm, path, warnings)?;
         if *reachable && stmt_block_diverges(s, ret_ty, loop_depth) {
             *reachable = false;
         }
@@ -610,7 +621,10 @@ fn check_stmt(
                     cm,
                     path,
                     *span,
-                    format!("assignment type mismatch: expected `{:?}`, found `{got:?}`", b.ty),
+                    format!(
+                        "assignment type mismatch: expected `{:?}`, found `{got:?}`",
+                        b.ty
+                    ),
                 ));
             }
             mark_initialized(stack, name);
@@ -646,7 +660,9 @@ fn check_stmt(
                             cm,
                             path,
                             *span,
-                            format!("return type mismatch: expected `{expected:?}`, found `{got:?}`"),
+                            format!(
+                                "return type mismatch: expected `{expected:?}`, found `{got:?}`"
+                            ),
                         ));
                     }
                 }
@@ -797,12 +813,7 @@ fn check_stmt(
         }
         IRStmt::Break { span } => {
             if loop_depth == 0 {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    "`break` is only valid inside a loop",
-                ));
+                return Err(diag(cm, path, *span, "`break` is only valid inside a loop"));
             }
             Ok(())
         }
@@ -1060,12 +1071,7 @@ fn infer_expr_mut(
         }
         IRExpr::Seq { exprs, span } => {
             if exprs.is_empty() {
-                return Err(diag(
-                    cm,
-                    path,
-                    *span,
-                    "empty sequence expression",
-                ));
+                return Err(diag(cm, path, *span, "empty sequence expression"));
             }
             let n = exprs.len();
             for e in exprs.iter_mut().take(n - 1) {
@@ -1160,12 +1166,7 @@ fn infer_expr_mut(
                     return Ok(TsType::Number);
                 }
             }
-            Err(diag(
-                cm,
-                path,
-                *span,
-                "unsupported optional member access",
-            ))
+            Err(diag(cm, path, *span, "unsupported optional member access"))
         }
         IRExpr::MathBuiltin { args, span, .. } => {
             for a in args.iter_mut() {
@@ -1264,3 +1265,31 @@ fn infer_expr_mut(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::build::build_module;
+    use ts2rs_parser::parse_typescript_file;
+
+    #[test]
+    fn check_module_accepts_simple_main() {
+        let src = r#"function main(): number { return 0; }"#;
+        let p = parse_typescript_file("t.ts", src).unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let w = check_module(&mut m).unwrap();
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn check_module_rejects_missing_return() {
+        let src = r#"function main(): number { let x: number = 1; }"#;
+        let p = parse_typescript_file("t.ts", src).unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let e = check_module(&mut m).unwrap_err();
+        let s = e.to_string();
+        assert!(
+            s.contains("not all control paths return"),
+            "unexpected diagnostic: {s}"
+        );
+    }
+}

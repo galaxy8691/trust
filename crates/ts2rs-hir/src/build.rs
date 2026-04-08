@@ -7,9 +7,9 @@ use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, Decl, EmptyStmt, ExportDecl, Expr,
     ExprOrSpread, FnDecl, ForStmt, KeyValueProp, Lit, MemberExpr, MemberProp, ModuleDecl,
     ModuleItem, OptChainBase, OptChainExpr, Param, Pat, Program, Prop, PropName, PropOrSpread,
-    SimpleAssignTarget, Stmt, SwitchStmt, TsEntityName, TsIntersectionType, TsInterfaceDecl,
+    SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsEntityName, TsInterfaceDecl, TsIntersectionType,
     TsKeywordTypeKind, TsLit, TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement,
-    TsUnionOrIntersectionType, TsUnionType, Tpl, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
+    TsUnionOrIntersectionType, TsUnionType, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
 };
 
 use crate::error::{diag, diag_spanned, CompileError};
@@ -160,8 +160,12 @@ fn collect_named_types(
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => {
                         match decl {
-                            Decl::TsInterface(i) => collect_one_interface(i.as_ref(), &mut map, cm, path)?,
-                            Decl::TsTypeAlias(a) => collect_one_type_alias(a.as_ref(), &mut map, cm, path)?,
+                            Decl::TsInterface(i) => {
+                                collect_one_interface(i.as_ref(), &mut map, cm, path)?
+                            }
+                            Decl::TsTypeAlias(a) => {
+                                collect_one_type_alias(a.as_ref(), &mut map, cm, path)?
+                            }
                             _ => {}
                         }
                     }
@@ -574,12 +578,7 @@ fn build_var_decl_from_vardecl(
         Some(init_expr) => Some(build_expr(init_expr, cm, path, iface)?),
         None => {
             if !mutable {
-                return Err(diag_spanned(
-                    cm,
-                    path,
-                    v,
-                    "`const` requires an initializer",
-                ));
+                return Err(diag_spanned(cm, path, v, "`const` requires an initializer"));
             }
             None
         }
@@ -602,7 +601,11 @@ fn trim_trailing_breaks_in_case(cons: Vec<Stmt>) -> Vec<Stmt> {
     v
 }
 
-fn expr_to_case_literal_ir(expr: &Expr, cm: &Lrc<SourceMap>, path: &str) -> Result<IRExpr, CompileError> {
+fn expr_to_case_literal_ir(
+    expr: &Expr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+) -> Result<IRExpr, CompileError> {
     let e = match expr {
         Expr::Paren(p) => &*p.expr,
         _ => expr,
@@ -720,12 +723,7 @@ fn build_switch_stmt(
         let lit_ir = expr_to_case_literal_ir(test, cm, path)?;
         let key = case_literal_key(&lit_ir);
         if !seen.insert(key) {
-            return Err(diag_spanned(
-                cm,
-                path,
-                test,
-                "duplicate `case` label",
-            ));
+            return Err(diag_spanned(cm, path, test, "duplicate `case` label"));
         }
 
         let trimmed = trim_trailing_breaks_in_case(case.cons.clone());
@@ -1418,7 +1416,12 @@ fn build_tpl(
         let s = q.raw.to_string();
         parts.push(TplPart::Static(s));
         if i < t.exprs.len() {
-            parts.push(TplPart::Interp(Box::new(build_expr(&t.exprs[i], cm, path, iface)?)));
+            parts.push(TplPart::Interp(Box::new(build_expr(
+                &t.exprs[i],
+                cm,
+                path,
+                iface,
+            )?)));
         }
     }
     Ok(IRExpr::Tpl {
@@ -1525,7 +1528,10 @@ fn build_array_expr(
         }
         elems.push(build_expr(&e.expr, cm, path, iface)?);
     }
-    Ok(IRExpr::ArrayLit { elems, span: a.span })
+    Ok(IRExpr::ArrayLit {
+        elems,
+        span: a.span,
+    })
 }
 
 fn build_object_expr(
@@ -1587,4 +1593,18 @@ fn build_object_expr(
         fields,
         span: o.span,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ts2rs_parser::parse_typescript_file;
+
+    #[test]
+    fn build_module_records_main() {
+        let src = r#"function main(): number { return 0; }"#;
+        let p = parse_typescript_file("t.ts", src).unwrap();
+        let m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        assert!(m.fns.iter().any(|f| f.name == "main"));
+    }
 }

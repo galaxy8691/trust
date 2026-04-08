@@ -7,9 +7,7 @@ use serde::Deserialize;
 use ts2rs_driver::{build_rust_to_executable_with_options, RustBuildOptions};
 use ts2rs_hir::{build_checked_module, emit_rust_with_options, CodegenOptions};
 use ts2rs_lower::{check_module_graph, lower_module_graph};
-use ts2rs_parser::{
-    parse_module_graph_with_extra_roots, validate_imports, ParsedModuleGraph,
-};
+use ts2rs_parser::{parse_module_graph_with_extra_roots, validate_imports, ParsedModuleGraph};
 
 /// Apply `--color never|always` before [`Cli::parse`] so subcommand `--help` respects it (via `NO_COLOR`).
 fn preapply_color_from_argv() {
@@ -328,7 +326,8 @@ fn cmd_check(
     let entry_path = graph.entry_path_str();
 
     if emit_ir {
-        let (module, warnings) = build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
+        let (module, warnings) =
+            build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
         if !quiet {
             print_warnings(&warnings);
         }

@@ -193,27 +193,27 @@
 
 ### 8.1 集成测试（[`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs) / `fixtures/`）
 
-- [ ] **每个矩阵行**一条最小 fixture（或合并大文件但注释分段）。
-- [ ] **回归**：已知 bug 固定为 `tests/regression/*.ts`（若引入目录）。
+- [x] **每个矩阵行**一条最小 fixture（或合并大文件但注释分段）。（验收：README「[矩阵与集成测试对照](README.md#矩阵与集成测试对照)」按主题对照矩阵行与 `fixtures/` + `cli_e2e`；补测 `array_fail`、`optional_chain_fail`、`nullish_fail`、`object_fail`。）
+- [x] **回归**：已知 bug 固定为 [`tests/regression/*.ts`](crates/ts2rs-cli/tests/regression/)（验收：[`tests/regression/README.md`](crates/ts2rs-cli/tests/regression/README.md)、[`switch_fallthrough_regression.ts`](crates/ts2rs-cli/tests/regression/switch_fallthrough_regression.ts)、`regression_switch_fallthrough_check_fails`。）
 
 ### 8.2 单元测试
 
-- [ ] **`ts2rs-hir`**：`build`/`sem`/`codegen` 分模块 `#[cfg(test)]`。
-- [ ] **parser**：swc 封装层快照或最小片段。
+- [x] **`ts2rs-hir`**：`build`/`sem`/`codegen` 分模块 `#[cfg(test)]`。（验收：`build_module_records_main`、`check_module_accepts_simple_main` / `check_module_rejects_missing_return`、`emit_rust_contains_ts_main_and_println`；`dev-dependencies`：`ts2rs-parser`。）
+- [x] **parser**：swc 封装层快照或最小片段。（验收：[`lib.rs`](crates/ts2rs-parser/src/lib.rs) `parse_rejects_unclosed_function_body`、`parses_module_with_import_and_export_main`。）
 
 ### 8.3 工具链
 
-- [ ] **CI 工作流**（GitHub Actions / 其他）：`cargo test`、`clippy`、格式化检查。
-- [ ] **模糊测试**（可选）：随机 AST 片段不 panic。
+- [x] **CI 工作流**（GitHub Actions / 其他）：`cargo test`、`clippy`、格式化检查。（验收：[`.github/workflows/ci.yml`](.github/workflows/ci.yml)：`rustfmt`+`clippy` 组件、`cargo fmt --all --check` → `cargo test --workspace` → `cargo clippy --workspace --all-targets`。）
+- [x] **模糊测试**（可选）：随机 AST 片段不 panic。（验收：[`parse_fuzz_inputs_do_not_panic`](crates/ts2rs-parser/src/lib.rs) 对 `parse_typescript_file` 施加确定性变异输入。）
 
 ---
 
 ## 9. 文档与开发者体验
 
-- [ ] **README**：与实现同步更新矩阵；「不支持的 TS 特性」简表（**兼作 trust 硬类型拒斥边界说明**）。
-- [ ] **架构图**：解析 → HIR → sem → codegen → driver（可 Mermaid）。
-- [ ] **贡献指南**：`CONTRIBUTING.md`（分支、测试命令、MSRV）。
-- [ ] **变更日志**：`CHANGELOG.md`（若对外发布）。
+- [x] **README**：与实现同步更新矩阵；「不支持的 TS 特性」简表（**兼作 trust 硬类型拒斥边界说明**）。**验收**：[`README.md`](README.md)（英文默认）与 [`README.zh-CN.md`](README.zh-CN.md) 中 **Unsupported TypeScript (trust rejection boundary)** / **不支持的 TypeScript 特性（trust 硬类型拒斥边界）** 小节及语言矩阵。
+- [x] **架构图**：解析 → HIR → sem → codegen → driver（可 Mermaid）。**验收**：两 README 中 **Architecture** / **架构** 下的 Mermaid `flowchart LR`（`ts2rs_parser` → HIR → sem → codegen → `ts2rs_lower` → `ts2rs_cli` / `ts2rs_driver`）。
+- [x] **贡献指南**：`CONTRIBUTING.md`（分支、测试命令、MSRV）。**验收**：[`CONTRIBUTING.md`](CONTRIBUTING.md) / [`CONTRIBUTING.zh-CN.md`](CONTRIBUTING.zh-CN.md)；根 [`Cargo.toml`](Cargo.toml) `[workspace.package] rust-version = "1.74"` 与各 crate `rust-version.workspace = true`。
+- [x] **变更日志**：`CHANGELOG.md`（若对外发布）。**验收**：[`CHANGELOG.md`](CHANGELOG.md) / [`CHANGELOG.zh-CN.md`](CHANGELOG.zh-CN.md)，Keep a Changelog 风格含 `[Unreleased]` 与 `[0.1.0]`。
 
 ---
 

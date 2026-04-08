@@ -1,5 +1,6 @@
-function main(): number {
-  let a: number = 0;
-  let b: number = 1;
+// Negative: `??` requires nullable-left or same-type operands (matrix: `??` row boundary).
+function main(): string {
+  let a: number = 1;
+  let b: string = "x";
   return a ?? b;
 }

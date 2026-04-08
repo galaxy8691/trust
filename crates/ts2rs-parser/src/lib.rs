@@ -106,4 +106,59 @@ mod tests {
         let p = parse_typescript_file("test.ts", src).unwrap();
         assert!(matches!(p.program, Program::Module(_) | Program::Script(_)));
     }
+
+    #[test]
+    fn parse_rejects_unclosed_function_body() {
+        let src = r#"function main(): number {"#;
+        let e = match parse_typescript_file("bad.ts", src) {
+            Err(e) => e,
+            Ok(_) => panic!("expected parse error for unclosed function"),
+        };
+        let s = e.to_string();
+        assert!(s.contains("bad.ts"), "{s}");
+    }
+
+    #[test]
+    fn parses_module_with_import_and_export_main() {
+        let src = r#"import { add } from "./dep.ts";
+export function main(): number { return add(1, 2); }
+"#;
+        let p = parse_typescript_file("entry.ts", src).unwrap();
+        assert!(
+            matches!(p.program, Program::Module(_)),
+            "expected module for import/export"
+        );
+        let dbg = format!("{:?}", p.program);
+        assert!(dbg.contains("Import"), "expected Import in AST: {dbg}");
+    }
+
+    /// Deterministic pseudo-random source strings; `parse_typescript_file` must not panic.
+    #[test]
+    fn parse_fuzz_inputs_do_not_panic() {
+        let base = r#"function main(): number { return 0; }
+import { x } from "./a.ts";
+export function f(): void {}
+"#;
+        for i in 0u32..800 {
+            let mut s = String::new();
+            for (j, ch) in base.chars().enumerate() {
+                let k = (i ^ (j as u32).wrapping_mul(31)) & 0xff;
+                if k < 8 && ch.is_whitespace() {
+                    s.push(if k & 1 == 0 { '\n' } else { '\t' });
+                } else {
+                    s.push(ch);
+                }
+                if j % 11 == (i as usize % 7) {
+                    s.push(char::from_u32(0x20 + (k % 60)).unwrap_or('x'));
+                }
+            }
+            let _ = parse_typescript_file("fuzz.ts", &s);
+
+            let garbled: String = (0..32)
+                .map(|b| char::from_u32(0x20 + ((i.wrapping_add(b)) & 0x5f)).unwrap_or('?'))
+                .collect();
+            let mixed = format!("{s}{garbled}{base}");
+            let _ = parse_typescript_file("fuzz.ts", &mixed);
+        }
+    }
 }

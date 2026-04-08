@@ -57,9 +57,7 @@ pub fn parse_module_graph_with_extra_roots(
     entry: &Path,
     extra: &[PathBuf],
 ) -> Result<ParsedModuleGraph, ParseError> {
-    let entry_canon = entry
-        .canonicalize()
-        .unwrap_or_else(|_| entry.to_path_buf());
+    let entry_canon = entry.canonicalize().unwrap_or_else(|_| entry.to_path_buf());
     let mut visited = HashSet::<PathBuf>::new();
     let mut stack = HashSet::<PathBuf>::new();
     let mut modules = Vec::new();
@@ -79,9 +77,7 @@ fn visit_module(
     stack: &mut HashSet<PathBuf>,
     modules: &mut Vec<ParsedModule>,
 ) -> Result<(), ParseError> {
-    let canon = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
+    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if visited.contains(&canon) {
         return Ok(());
     }
@@ -93,9 +89,8 @@ fn visit_module(
     }
     stack.insert(canon.clone());
 
-    let text = fs::read_to_string(path).map_err(|e| {
-        ParseError::Message(format!("cannot read `{}`: {e}", path.display()))
-    })?;
+    let text = fs::read_to_string(path)
+        .map_err(|e| ParseError::Message(format!("cannot read `{}`: {e}", path.display())))?;
     let source = parse_typescript_file(path, &text)?;
 
     if let Program::Module(ref m) = source.program {
@@ -159,10 +154,7 @@ pub fn exported_function_names(program: &Program) -> HashSet<String> {
 pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
     let mut exports_by_path: HashMap<PathBuf, HashSet<String>> = HashMap::new();
     for m in &graph.modules {
-        let canon = m
-            .path
-            .canonicalize()
-            .unwrap_or_else(|_| m.path.clone());
+        let canon = m.path.canonicalize().unwrap_or_else(|_| m.path.clone());
         let names = exported_function_names(&m.source.program);
         exports_by_path.insert(canon, names);
     }
@@ -176,9 +168,7 @@ pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
                 continue;
             };
             let dep_path = resolve_import_path(&m.path, imp)?;
-            let dep_canon = dep_path
-                .canonicalize()
-                .unwrap_or_else(|_| dep_path.clone());
+            let dep_canon = dep_path.canonicalize().unwrap_or_else(|_| dep_path.clone());
             let exports = exports_by_path.get(&dep_canon).ok_or_else(|| {
                 ParseError::Message(format!(
                     "internal error: missing exports for `{}`",
@@ -196,7 +186,9 @@ pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
                         }
                         let want = match &named.imported {
                             Some(ModuleExportName::Ident(id)) => id.sym.to_string(),
-                            Some(ModuleExportName::Str(s)) => s.value.to_string_lossy().into_owned(),
+                            Some(ModuleExportName::Str(s)) => {
+                                s.value.to_string_lossy().into_owned()
+                            }
                             None => named.local.sym.to_string(),
                         };
                         if !exports.contains(&want) {
@@ -254,14 +246,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let main = dir.path().join("main.ts");
         let side = dir.path().join("side.ts");
-        std::fs::write(
-            &main,
-            "export function main(): number { return 0; }\n",
-        )
-        .unwrap();
+        std::fs::write(&main, "export function main(): number { return 0; }\n").unwrap();
         std::fs::write(&side, "export function side(): number { return 1; }\n").unwrap();
         let g = parse_module_graph_with_extra_roots(&main, std::slice::from_ref(&side)).unwrap();
-        let paths: Vec<_> = g.modules.iter().map(|m| m.path.file_name().unwrap()).collect();
+        let paths: Vec<_> = g
+            .modules
+            .iter()
+            .map(|m| m.path.file_name().unwrap())
+            .collect();
         assert_eq!(paths.len(), 2);
         assert!(paths.iter().any(|n| *n == "main.ts"));
         assert!(paths.iter().any(|n| *n == "side.ts"));
