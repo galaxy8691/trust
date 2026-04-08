@@ -278,11 +278,11 @@
 
 ### 13.4 `for..in`
 
-- [ ] **设计**：迭代对象键的静态类型（`string` 键与 `ObjectNum` / 扩展对象模型）。
-- [ ] **HIR**：`ForIn` 或 lowering 策略。
-- [ ] **sem**：循环变量类型、与对象/字典表示一致。
-- [ ] **codegen**：迭代 `HashMap` 键或约定运行时辅助。
-- [ ] **测试**：fixture + 与 `for(;;)` 对照。
+- [x] **设计**：迭代对象键的静态类型（`string` 键与 `ObjectNum` / 扩展对象模型）。（已确定：`for..in` 循环变量统一为 `string`；右侧支持对象/class-instance 键与 `number[]` 下标字符串键。）
+- [x] **HIR**：`ForIn` 或 lowering 策略。（已新增 `IRStmt::ForIn`，并在 build 从 `Stmt::ForIn` 构建该节点。）
+- [x] **sem**：循环变量类型、与对象/字典表示一致。（已校验循环变量为 `string`，并限制右侧为对象/class-instance/数组。）
+- [x] **codegen**：迭代 `HashMap` 键或约定运行时辅助。（已发射 `HashMap::keys()` 遍历与数组 `0..len` 下标转字符串遍历。）
+- [x] **测试**：fixture + 与 `for(;;)` 对照。（已新增 `for_in_*` 正负例 fixture 与 `cli_e2e` 覆盖。）
 
 ### 13.5 完整 `switch` / `case`
 

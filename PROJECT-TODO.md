@@ -280,11 +280,11 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 
 ### 13.4 `for..in`
 
-- [ ] **Design**: static type for iterating keys (`string` keys vs `ObjectNum` / extended object model).
-- [ ] **HIR**: `ForIn` or lowering strategy.
-- [ ] **sem**: loop variable type vs object/dict representation.
-- [ ] **codegen**: iterate `HashMap` keys or runtime helper.
-- [ ] **Tests**: fixture + compare with `for(;;)`.
+- [x] **Design**: static type for iterating keys (`string` keys vs `ObjectNum` / extended object model). (Chosen rule: `for..in` loop variable is `string`; right side supports object/class-instance keys and `number[]` index keys.)
+- [x] **HIR**: `ForIn` or lowering strategy. (Added `IRStmt::ForIn` with sem-filled iteration kind and integrated build construction from `Stmt::ForIn`.)
+- [x] **sem**: loop variable type vs object/dict representation. (Sem enforces `string` loop variable and validates RHS as object/class-instance/array.)
+- [x] **codegen**: iterate `HashMap` keys or runtime helper. (Codegen emits object-key iteration via `HashMap::keys()` and array index iteration via `0..len` converted to string keys.)
+- [x] **Tests**: fixture + compare with `for(;;)`. (Added `for_in_object_keys_ok`, `for_in_object_keys_sum_ok`, `for_in_non_object_fail`, `for_in_key_type_mismatch_fail` and corresponding `cli_e2e` cases.)
 
 ### 13.5 Full `switch` / `case`
 

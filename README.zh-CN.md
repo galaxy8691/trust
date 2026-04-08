@@ -89,6 +89,7 @@ flowchart LR
 | 块 `{ }`、多条语句 | 支持 | 含空语句 `;`、块语句 |
 | `if` / `else`、`while`、`do-while` | 支持 | 条件为 `number`（非 0 为真）或 `boolean`；或**同一 primitive 族**的联合（如 `1 \| 2`、`true \| false`），不含 `number \| boolean` 等混合 |
 | C 风格 `for(;;)` | 支持 | `init`/`update` 为单声明或表达式；`update` 可为 `i = i + 1` |
+| `for..in` | 部分支持 | 支持对象/class-instance 键遍历与 `number[]` 下标字符串键；循环变量统一 `string`；`for-of` 仍不支持 |
 | `break` / `continue` | 支持 | 须在循环内；带 label 未支持 |
 | 嵌套 `function` | 部分支持 | 无闭包捕获子集；见 `nested_fn.ts` |
 | 逻辑与/或 | 部分支持 | `boolean` 与 `number`（`number` 按 `!= 0` 真值，与条件位置一致）；结果类型为 `boolean`；见 `logical_bool.ts`、`logical_truthy_ok.ts`；非 `boolean`/`number` 联合仍拒绝 |
@@ -124,7 +125,7 @@ flowchart LR
 | 负例（import/export/重复） | `import_missing_export_*`、`circular_*`、`dup_*`、`export_*_fail.ts`、`import_fail.ts` | `compile_import_missing_export_fails`、`compile_circular_import_fails` 等 |
 | `let`/`const`/块/赋值 | `const_ok.ts`、`assign_simple.ts`、`empty_stmt.ts`、`let_if.ts` | `run_const_ok_prints_42`、`run_assign_simple_prints_five` 等 |
 | 语义边界（重复/shadow/void 分支） | `let_dup_same_block_fail.ts`、`let_shadow_nested_ok.ts`、`param_let_same_name_fail.ts`、`void_log_in_branch.ts` | 对应 `compile_*` / `run_void_log_in_branch_prints_branch` |
-| 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`compile_early_return_unreachable_warns` 等 |
+| 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`for_in_*.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`run_for_in_object_keys_ok_prints_three`、`compile_for_in_non_object_fails` 等 |
 | 逻辑/三元/模板/逗号 | `logical_bool.ts`、`logical_truthy_ok.ts`、`ternary_ok.ts`、`template_ok.ts`、`comma_ok.ts` | `run_logical_bool_prints_one`、`run_ternary_ok_prints_one` 等 |
 | 成员 / `Math` / 数组长度 | `string_utf16_length.ts`、`member_length_ok.ts`、`method_call_ok.ts`、`object_length_field.ts`、`array_length.ts`、`math_builtin.ts` | `run_string_utf16_length_prints_two`、`run_math_builtin_prints_sum` 等 |
 | `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one` |

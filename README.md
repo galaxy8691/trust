@@ -84,6 +84,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | Blocks, multiple statements | Supported | Empty `;`, blocks |
 | `if` / `else`, `while`, `do-while` | Supported | Condition: `number` (truthy non-zero) or `boolean`, or same **primitive family** union (`1 \| 2`, `true \| false`), not `number \| boolean` mixed |
 | C-style `for(;;)` | Supported | |
+| `for..in` | Partial | Supports object/class-instance keys and `number[]` index keys; loop variable is `string`; `for-of` unsupported |
 | `break` / `continue` | Supported | Must be inside a loop; no labels |
 | Nested `function` | Partial | No closure capture subset; `nested_fn.ts` |
 | `&&` / `\|\|` | Partial | `boolean` and `number` truthiness; result `boolean`; `logical_bool.ts`, `logical_truthy_ok.ts` |
@@ -119,7 +120,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Negative import/export | `import_missing_export_*`, `circular_*`, `dup_*`, `export_*_fail.ts` | `compile_import_missing_export_fails`, … |
 | `let` / `const` / blocks | `const_ok.ts`, `assign_simple.ts`, `empty_stmt.ts`, `let_if.ts` | `run_const_ok_prints_42`, … |
 | Semantics (shadow, void branch) | `let_dup_same_block_fail.ts`, `void_log_in_branch.ts`, … | `compile_*`, `run_void_log_in_branch_prints_branch` |
-| Control flow / unreachable | `while_early.ts`, `for_loop.ts`, `early_return_unreachable.ts`, … | `run_while_early_prints_three`, … |
+| Control flow / unreachable | `while_early.ts`, `for_loop.ts`, `for_in_*.ts`, `early_return_unreachable.ts`, … | `run_while_early_prints_three`, `run_for_in_object_keys_ok_prints_three`, `compile_for_in_non_object_fails`, … |
 | Logic / ternary / template / comma | `logical_bool.ts`, `ternary_ok.ts`, … | … |
 | Members / Math / length | `string_utf16_length.ts`, `math_builtin.ts`, … | … |
 | `?.` / `??` | `optional_ok.ts`, `nullish_ok.ts` | … |

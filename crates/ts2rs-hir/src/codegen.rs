@@ -270,6 +270,47 @@ fn emit_stmt(
             out.push_str(&ind);
             out.push_str("}\n");
         }
+        IRStmt::ForIn {
+            key,
+            key_ty,
+            target,
+            kind,
+            body,
+            span,
+        } => {
+            let t = emit_expr(target, f, level)?;
+            let key_rust_ty = rust_ty(key_ty, f)?;
+            let tmp = format!("__forin_target_{}", span.lo.0);
+            out.push_str(&ind);
+            out.push_str(&format!("let {tmp} = {t};\n"));
+            match kind {
+                Some(ForInKind::ObjectKeys) => {
+                    out.push_str(&ind);
+                    out.push_str(&format!("for __k in {tmp}.keys() {{\n"));
+                    out.push_str(&indent(level + 1));
+                    out.push_str(&format!("let {key}: {key_rust_ty} = __k.clone();\n"));
+                }
+                Some(ForInKind::ArrayIndices) => {
+                    out.push_str(&ind);
+                    out.push_str(&format!("for __i in 0..{tmp}.len() {{\n"));
+                    out.push_str(&indent(level + 1));
+                    out.push_str(&format!("let {key}: {key_rust_ty} = __i.to_string();\n"));
+                }
+                None => {
+                    return Err(diag(
+                        f.cm.as_ref(),
+                        &f.source_path,
+                        *span,
+                        "for..in kind missing from sem",
+                    ));
+                }
+            }
+            for x in body {
+                emit_stmt(out, x, level + 1, f, opts)?;
+            }
+            out.push_str(&ind);
+            out.push_str("}\n");
+        }
         IRStmt::DoWhile {
             body,
             cond,

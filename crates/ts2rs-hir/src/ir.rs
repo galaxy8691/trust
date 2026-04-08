@@ -385,6 +385,15 @@ pub enum IRStmt {
         body: Vec<IRStmt>,
         span: Span,
     },
+    /// `for (key in target) { ... }`
+    ForIn {
+        key: String,
+        key_ty: TsType,
+        target: IRExpr,
+        kind: Option<ForInKind>,
+        body: Vec<IRStmt>,
+        span: Span,
+    },
     /// `do { body } while (cond);`
     DoWhile {
         body: Vec<IRStmt>,
@@ -403,6 +412,12 @@ pub enum IRStmt {
         func: Box<IRFunction>,
         span: Span,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForInKind {
+    ObjectKeys,
+    ArrayIndices,
 }
 
 #[derive(Debug, Clone)]

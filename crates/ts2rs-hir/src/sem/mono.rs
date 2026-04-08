@@ -148,6 +148,10 @@ fn rewrite_stmt(
             rewrite_expr(cond, templates, queue, cm, path, fn_span)?;
             rewrite_calls_and_collect(body, templates, queue, cm, path, fn_span)?;
         }
+        IRStmt::ForIn { target, body, .. } => {
+            rewrite_expr(target, templates, queue, cm, path, fn_span)?;
+            rewrite_calls_and_collect(body, templates, queue, cm, path, fn_span)?;
+        }
         IRStmt::DoWhile { body, cond, .. } => {
             rewrite_calls_and_collect(body, templates, queue, cm, path, fn_span)?;
             rewrite_expr(cond, templates, queue, cm, path, fn_span)?;
@@ -343,6 +347,16 @@ fn subst_stmts(stmts: &mut [IRStmt], subst: &BTreeMap<String, TsType>) {
             } => {
                 subst_expr(cond, subst);
                 *cond_ty = subst_type(cond_ty, subst);
+                subst_stmts(body, subst);
+            }
+            IRStmt::ForIn {
+                key_ty,
+                target,
+                body,
+                ..
+            } => {
+                *key_ty = subst_type(key_ty, subst);
+                subst_expr(target, subst);
                 subst_stmts(body, subst);
             }
             IRStmt::DoWhile {

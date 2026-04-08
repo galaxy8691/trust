@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, ClassDecl, ClassMember, Decl,
-    EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForStmt, KeyValueProp, Lit, MemberExpr,
-    MemberProp, MethodKind, ModuleDecl, ModuleItem, OptChainBase, OptChainExpr, Param,
+    EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, KeyValueProp, Lit,
+    MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, OptChainBase, OptChainExpr, Param,
     ParamOrTsParamProp, Pat, Program, Prop, PropName, PropOrSpread, SimpleAssignTarget, Stmt,
     SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
 };
@@ -458,6 +458,10 @@ fn rewrite_this_in_stmts(stmts: &mut [IRStmt], span: Span) {
             }
             IRStmt::While { cond, body, .. } => {
                 rewrite_this_in_expr(cond, span);
+                rewrite_this_in_stmts(body, span);
+            }
+            IRStmt::ForIn { target, body, .. } => {
+                rewrite_this_in_expr(target, span);
                 rewrite_this_in_stmts(body, span);
             }
             IRStmt::DoWhile { body, cond, .. } => {
@@ -1114,6 +1118,87 @@ fn build_switch_stmt(
         .expect("one if"))
 }
 
+fn build_for_in_stmt(
+    fi: &swc_ecma_ast::ForInStmt,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    next_id: &mut u32,
+    iface: &HashMap<String, TsType>,
+) -> Result<IRStmt, CompileError> {
+    let (key, key_ty) = match &fi.left {
+        ForHead::VarDecl(v) => {
+            if v.decls.len() != 1 {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    v,
+                    "for..in expects exactly one loop variable",
+                ));
+            }
+            let d = &v.decls[0];
+            if d.init.is_some() {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    d,
+                    "for..in loop variable initializer is not supported",
+                ));
+            }
+            let Pat::Ident(BindingIdent { id, type_ann, .. }) = &d.name else {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    d,
+                    "for..in requires identifier loop variable",
+                ));
+            };
+            let ty = if type_ann.is_some() {
+                ts_type_from_ann(&type_ann, cm, path, id.span, iface, None)?
+            } else {
+                TsType::String
+            };
+            (id.sym.to_string(), ty)
+        }
+        ForHead::Pat(p) => {
+            let Pat::Ident(BindingIdent { id, type_ann, .. }) = &**p else {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    p,
+                    "for..in requires identifier loop variable",
+                ));
+            };
+            let ty = if type_ann.is_some() {
+                ts_type_from_ann(&type_ann, cm, path, id.span, iface, None)?
+            } else {
+                TsType::String
+            };
+            (id.sym.to_string(), ty)
+        }
+        ForHead::UsingDecl(u) => {
+            return Err(diag_spanned(
+                cm,
+                path,
+                u,
+                "for..in `using` declaration is not supported",
+            ));
+        }
+    };
+    let target = build_expr(&fi.right, cm, path, iface)?;
+    let body = match &*fi.body {
+        Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface)?,
+        s => vec![build_stmt(s, cm, path, next_id, iface)?],
+    };
+    Ok(IRStmt::ForIn {
+        key,
+        key_ty,
+        target,
+        kind: None,
+        body,
+        span: fi.span,
+    })
+}
+
 fn build_stmt(
     stmt: &Stmt,
     cm: &Lrc<SourceMap>,
@@ -1265,11 +1350,12 @@ fn build_stmt(
             })
         }
         Stmt::Switch(sw) => build_switch_stmt(sw, cm, path, next_id, iface),
-        Stmt::ForIn(_) | Stmt::ForOf(_) => Err(diag_spanned(
+        Stmt::ForIn(fi) => build_for_in_stmt(fi, cm, path, next_id, iface),
+        Stmt::ForOf(_) => Err(diag_spanned(
             cm,
             path,
             stmt,
-            "`for-in` / `for-of` are not supported in this compiler version",
+            "`for-of` is not supported in this compiler version",
         )),
         Stmt::Labeled(_) => Err(diag_spanned(
             cm,

@@ -87,6 +87,7 @@ pub(super) fn stmt_span(s: &IRStmt) -> Span {
         | IRStmt::Block { span, .. }
         | IRStmt::If { span, .. }
         | IRStmt::While { span, .. }
+        | IRStmt::ForIn { span, .. }
         | IRStmt::DoWhile { span, .. }
         | IRStmt::Break { span }
         | IRStmt::Continue { span }

@@ -506,6 +506,29 @@ fn run_for_loop_prints_four() {
 }
 
 #[test]
+fn run_for_in_object_keys_ok_prints_three() {
+    assert_run_stdout("for_in_object_keys_ok.ts", "3\n");
+}
+
+#[test]
+fn run_for_in_object_keys_sum_ok_prints_six() {
+    assert_run_stdout("for_in_object_keys_sum_ok.ts", "6\n");
+}
+
+#[test]
+fn compile_for_in_non_object_fails() {
+    assert_compile_fails_stderr("for_in_non_object_fail.ts", "for..in right side must be");
+}
+
+#[test]
+fn compile_for_in_key_type_mismatch_fails() {
+    assert_compile_fails_stderr(
+        "for_in_key_type_mismatch_fail.ts",
+        "initializer type mismatch",
+    );
+}
+
+#[test]
 fn run_do_while_prints_three() {
     assert_run_stdout("do_while_count.ts", "3\n");
 }
