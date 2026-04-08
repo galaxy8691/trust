@@ -2278,6 +2278,8 @@ fn infer_expr_mut(
                         if (is_numberish(&nn_ty) && is_numberish(&rt))
                             || (is_stringish(&nn_ty) && is_stringish(&rt))
                             || (is_booleanish(&nn_ty) && is_booleanish(&rt))
+                            || (matches!(&nn_ty, TsType::Fn { .. })
+                                && matches!(&rt, TsType::Fn { .. }))
                         {
                             return unify_ternary_branches(nn_ty, rt.clone(), cm, path, *span);
                         }
@@ -2635,5 +2637,23 @@ mod tests {
             s.contains("not all control paths return"),
             "unexpected diagnostic: {s}"
         );
+    }
+
+    #[test]
+    fn check_module_accepts_nullish_fn_union_coalesce() {
+        let src = r#"
+type MaybeFn = null | (x: number) => number;
+function run(f: MaybeFn, d: (x: number) => number): number {
+  let g: (x: number) => number = f ?? d;
+  return g(4);
+}
+function main(): number {
+  return run(null, (x: number): number => x + 1);
+}
+"#;
+        let p = parse_typescript_file("t.ts", src).unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let w = check_module(&mut m).unwrap();
+        assert!(w.is_empty());
     }
 }

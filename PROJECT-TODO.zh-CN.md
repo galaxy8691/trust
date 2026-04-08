@@ -121,10 +121,10 @@
 
 ### 3.3 类型系统加深
 
-- [x] **与 §1.4 的衔接**：字面量类型、联合类型与 `??` / `?.` **静态**收窄应在实现时与 §1.4 子项对齐（避免与当前受限 `TsType` 语义冲突）。联合类型已入 HIR；**均在硬类型、可静态实现前提下**，`??` / `?.` 的**完整** discriminated / 空值收窄仍待后续。验收：[README「语义与类型路线（§3.3）」](README.zh-CN.md) 已写明衔接关系与 `nullish_ok` / `optional_ok` 受限子集。
+- [x] **与 §1.4 的衔接**：字面量类型、联合类型与 `??` / `?.` **静态**收窄应与 §1.4 子项一致（避免与受限 `TsType` 冲突）。联合类型已入 HIR。**已实现（sem）**：在 `Union` 上去除 `null`/`undefined` 后，若与 `??` 右侧为**同族**（`number`/`string`/`boolean` 或**结构一致**的 `Fn`），则 [`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) 中 `IRExpr::NullishCoalesce` 路径会调用 `unify_ternary_branches` 得到单一结果类型。**仍为后续**：依赖 **discriminant** 的 discriminated union 收窄（大范围，非本子项一次完成）。验收：README §3.3；`nullish_ok.ts` / `optional_ok.ts`；`??` 与函数类型联合的 sem 见 `nullish_fn_ok.ts`（`ts2rs check`）。
 - [x] **`null` / `undefined`**：[`TsType`](crates/ts2rs-hir/src/ir.rs) 已含 `Null` / `Undefined` 等变体；检查以 **当前 sem 静态规则**为准，**不设** tsc 默认「万物可空」式软语义。验收：README §3.3；**未**实现 `strictNullChecks` 式开关。若将来增加模式，应为**显式编译选项**（如 strict 空值），**非**隐式放宽或兼容 JS 动态性。
 - [x] **结构类型 vs 名义类型**：**trust 以名义表 + 静态形状检查为界**；与 Rust 后端映射策略（当前以基础类型为主）。验收：README §3.3 已说明具名表/语义检查与 Rust 生成侧边界；**未**实现 TS 结构子类型全集，**不**将其列为路线目标。
-- [x] **函数类型**：高阶函数（函数作值）须先有**静态函数类型**与 IR，再 codegen。验收：README §3.3 已说明仅 `function` 声明与调用、无函数作一等值；**未**扩展 IR/codegen 支持高阶函数。
+- [x] **函数类型与高阶函数**：与 [§13.2](PROJECT-TODO.zh-CN.md) 及 README 一致——已实现**受限**静态函数类型、箭头值、`f(...)`、传参/返回函数等；codegen 闭包仍为 `(number) => number` 硬子集。**勿**再写「无一等函数值 / 未做 HOF」；应区分「已支持的 HOF 子集」与「仍为后续的泛化 / codegen 扩展」。
 
 ### 3.4 控制流分析（进阶）
 
@@ -139,8 +139,8 @@
 ### 4.1 当前行为改进
 
 - [x] **`console.log` 多参数格式**：[`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) 多参数已改为 `"{}"` 空格分隔；验收：`ts2rs-lower` 单测 `console_log_multi_arg_uses_spaced_format`。
-- [x] **整数除法**：codegen 仍为 `i32` `/`（向零截断）；验收：README「算术、`/` 与溢出」与矩阵 `console.log` / 算术行。
-- [x] **溢出**：README 已说明 `i32` 范围、与 TS `number` 差异及 Rust 溢出语义；**未**加运行时检查 Cargo feature（留待后续）。
+- [x] **算术与 `/`**：TS `number` → 生成 Rust **`f64`**；**`/`** 为 IEEE-754 双精度除法（与旧版 `i32` 向零截断不同）；验收：README「算术、`/` 与溢出」与矩阵算术 / `Math.*` 行。
+- [x] **NaN / ∞ 与溢出**：可能出现；与 V8 `number` 边界情况未必逐位一致；**未**加运行时溢出检查 Cargo feature（留待后续）。
 
 ### 4.2 新特性映射
 
@@ -165,8 +165,8 @@
 ### 5.2 最小运行时（[`ts2rs_rt`](crates/ts2rs_rt)）
 
 - [x] **字符串操作**：`string.length` 为 **UTF-16 码元数**（`encode_utf16().count()`）；`number[].length` → `Vec::len`；对象数字字段名为 `length` 时走 `HashMap::get`（见 [`MemberLengthDispatch`](crates/ts2rs-hir/src/ir.rs)）。（验收：`ts2rs-lower` `codegen_52_string_length_utf16`、`codegen_52_object_length_field_uses_get`；`ts2rs-cli` 等；`cargo test --workspace`。）**`string` 下标 `s[i]`**：UTF-16 索引 → 单码元 `string`（[`IndexKind::StringUtf16`](crates/ts2rs-hir/src/ir.rs)；`stdlib_hir_ok.ts`）。
-- [x] **数学**：`Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` 整数子集（[`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs)；[`build.rs`](crates/ts2rs-hir/src/build.rs)；[`emit_expr`](crates/ts2rs-hir/src/codegen.rs)；`floor`/`ceil`/`trunc`/`round` 在纯 `i32` 下为恒等；`pow` 使用 `checked_pow`）。（验收：`ts2rs-lower` `codegen_52_math_builtins`；`ts2rs-cli` `run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`；`cargo test --workspace`。）
-- [x] **HIR 标准库（可不链 `ts2rs_rt`）**：`Number.parseInt` / `parseFloat`；`JSON.stringify` / `JSON.parse`（整数 JSON）；`String` 方法 `charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`；全局 `readLine()` 内联 `std::io`（`async` 函数体中拒绝）。（验收：`stdlib_hir_ok.ts`；`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`。）
+- [x] **数学**：`Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` 等在 codegen 上对 **`f64`** 运算（[`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs)；[`build.rs`](crates/ts2rs-hir/src/build.rs)；[`emit_expr`](crates/ts2rs-hir/src/codegen.rs)；与 README 矩阵「`Math.*` builtins」一致）。（验收：`ts2rs-lower` `codegen_52_math_builtins`；`ts2rs-cli` `run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`；`cargo test --workspace`。）
+- [x] **HIR 标准库（可不链 `ts2rs_rt`）**：`Number.parseInt` / `parseFloat`；**`JSON.stringify` / `JSON.parse`**：**字符串字面量**实参在构建期用 **`serde_json`** 折叠为 trust 闭合 IR；**动态**字符串与 `await response.json()` 等同，经 **`serde_json::from_str`** 解析为 `f64` 等 trust 子集（见 §14「HIR stdlib / JSON」）；`String` 方法 `charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`；全局 `readLine()` 内联 `std::io`（`async` 函数体中拒绝）。（验收：`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`；`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`。）
 - [x] **I/O**：[`ts2rs_rt::read_stdin_line`](crates/ts2rs_rt/src/lib.rs) 仍为可选占位；**同步** `readLine()` 已在生成 Rust 中实现且**无需**链接 `ts2rs_rt`；driver 临时 crate 默认仍不依赖 `ts2rs_rt`（除非 `--link-ts2rs-rt`）。
 
 ---
@@ -226,15 +226,18 @@
 
 ## 10. 性能与规模（后期）
 
+多文件 **语义检查并行** 已实现（`rayon`），详见下文 **§14「性能与安全」**；本节仅保留仍为 backlog 的项。
+
 - [ ] **增量编译**：多文件时只重编译变更模块。
-- [ ] **并行**：多文件语义检查并行化。
 
 ---
 
 ## 11. 安全与边界
 
-- [ ] **生成代码注入**：字符串字面量转义与 `println!` 安全。
-- [ ] **资源限制**：driver 调用 `cargo` 超时/内存（可选）。
+与下文 **§14「性能与安全」** 对齐；**勾选与实现说明以 §14 为准**，本节便于检索。
+
+- [x] **生成代码注入**：字符串字面量转义与 `println!` 安全。（已实现，见 §14。）
+- [x] **资源限制**：driver 调用 `cargo` 超时/内存与输出上限（可选）。（已实现，见 §14。）
 
 ---
 
@@ -321,9 +324,9 @@
 - [ ] **`export * from`** 及**更多 `export` 形态**（相对当前支持子集）。
 - [ ] 随 README「非 1.0」/ 不支持表调整时同步更新本列表。
 
-### 性能与安全（亦见 §10–§11）
+### 性能与安全（与 §10–§11 对齐；**并行 / 代码安全 / driver 资源**以本节勾选为准）
 
-- [ ] **增量编译**（多文件、仅重编变更模块）。
+- [ ] **增量编译**（多文件、仅重编变更模块；与 §10 唯一开放项相同）。
 - [x] **并行**多文件语义检查。（各函数的 [`check_function`](crates/ts2rs-hir/src/sem.rs) 经 **`rayon`** `par_iter_mut` 并行；[`SendSourceMap`](crates/ts2rs-hir/src/ir.rs) 使 [`IRFunction`](crates/ts2rs-hir/src/ir.rs) 在 `swc` `Lrc` 下仍可 `Send`；警告顺序与 `module.fns` 一致。）
 - [x] **生成代码安全**：字符串转义、`println!` 注入等审计。（类 `__class_name` 字符串字面量用 `Debug` 转义；[`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) 标明格式串为固定模板；模板字面量在 [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs) 中已对 `{`/`}` 转义。）
 - [x] **Driver 资源限制**：对子进程 `cargo` 的可选超时/内存上限。（[`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs)、[`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs)；[`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) 使用 [`wait_timeout::ChildExt`]。）

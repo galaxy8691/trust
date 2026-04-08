@@ -34,17 +34,17 @@ flowchart LR
 
 ## Unsupported TypeScript (trust rejection boundary)
 
-Common forms that are **explicitly rejected** (diagnostics are English; see [`build.rs`](crates/ts2rs-hir/src/build.rs) / [`sem.rs`](crates/ts2rs-hir/src/sem.rs)). This table complements the **generics** table below and the language matrix.
+Common forms that are **explicitly rejected** (diagnostics are English; see [`build.rs`](crates/ts2rs-hir/src/build.rs) / [`sem.rs`](crates/ts2rs-hir/src/sem.rs)). This table complements the **generics** table below and the language matrix. Features marked Supported / Partially supported there (restricted **`?.`**, monomorphized generics, top-level `class` subset, etc.) are **not** listed here as “unsupported.”
 
 | User-visible form | Notes |
 |-------------------|--------|
-| `export` other than `export function` / top-level `function` | e.g. `export { }`, `export default`, `export * from`, `export const` / `class` |
-| Advanced generics | Complex inference/constraints and full TS generic semantics are still out of scope (basic monomorphization subset is supported below) |
-| Optional call | `f?.()` — optional **member** `obj?.prop` is partially supported |
+| `export` other than `export function` / top-level `function` | e.g. `export { }`, `export default`, `export * from`, `export const`, `export class` (**top-level `class` without `export`** is in the matrix and [PROJECT-TODO.md §13.3](PROJECT-TODO.md)) |
+| Advanced generics | Complex inference/constraints and full TS generic semantics are still out of scope; **explicit type arguments at call sites** (monomorphization subset) — see matrix “Generics” and [§13.1](PROJECT-TODO.md) |
+| Optional chaining (rejection boundary) | Restricted **`f?.()`** / **`recv?.m()`** are supported (`optional_call_ok.ts`); other callees / shapes may still be rejected (`optional_chain_fail.ts`) |
 | `interface` `extends`, optional props, imported interface names across files | Single-file nominal table only |
 | Intersection `A & B` | Rejected |
 | `bigint`, template literal types in type positions | Rejected |
-| Full `tsc` / structural typing / higher-order function values | Not implemented |
+| Full `tsc` / full structural typing / HOF beyond §13.2 | Full checker and structural subtyping are not implemented; **restricted** function types and arrows — matrix and [§13.2](PROJECT-TODO.md) |
 
 ## Scope (1.0)
 
@@ -56,7 +56,7 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 ## Diagnostics and surface (§1.1)
 
 - **Single error**: [`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) report the **first** error only ([`CompileError`](crates/ts2rs-hir/src/error.rs)). On success, multiple [`CompileWarning`](crates/ts2rs-hir/src/error.rs) may be returned (same shape in [`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs)).
-- **`export` shapes**: anything other than `export function …` and top-level `function …` is rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs)); negative fixtures `export_*_fail.ts` and [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
+- **`export` shapes**: anything other than `export function …` and top-level `function …` is rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs)), including `export class` / `export const` / etc.; **top-level `class` without `export`** is in the matrix. Negative fixtures `export_*_fail.ts` and [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
 - **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/ts2rs-parser/src/lib.rs) includes `source_map` for locations. Reflecting TS comments in Rust is **not** implemented.
 - **Follow-up backlog** (multi-error reporting, TS comments in generated Rust, project-scale tooling): see [PROJECT-TODO.md §14 — Toolchain and UX](PROJECT-TODO.md).
 
@@ -126,7 +126,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Control flow / unreachable | `while_early.ts`, `for_loop.ts`, `for_in_*.ts`, `early_return_unreachable.ts`, … | `run_while_early_prints_three`, `run_for_in_object_keys_ok_prints_three`, `compile_for_in_non_object_fails`, … |
 | Logic / ternary / template / comma | `logical_bool.ts`, `ternary_ok.ts`, … | … |
 | Members / Math / length / HIR stdlib / chain | `string_utf16_length.ts`, `math_builtin.ts`, `stdlib_hir_ok.ts`, `json_uri_trust_ok.ts`, `chain_call_ok.ts`, … | `run_stdlib_hir_ok_prints_expected`, `run_json_uri_trust_ok_prints_expected`, `run_chain_call_ok_prints_six`, `compile_stdlib_hir_ok_writes_utf16_and_json_helpers`, `compile_json_uri_trust_ok_emits_serde_json_and_urlencoding` |
-| `?.` / `??` | `optional_ok.ts`, `nullish_ok.ts`, `optional_call_ok.ts` | … |
+| `?.` / `??` | `optional_ok.ts`, `nullish_ok.ts`, `nullish_fn_ok.ts` (`check`), `optional_call_ok.ts` | …, `check_nullish_fn_union_ok` |
 | Arrays / objects | `array_ok.ts`, `object_ok.ts`, `array_fail.ts` | `compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`, `switch_fail.ts` | … |
 | Console | `console_stderr.ts`, `void_log.ts` | … |
@@ -142,7 +142,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 
 ## Type roadmap (§1.4)
 
-Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJECT-TODO.md §1.4](PROJECT-TODO.md). Nullable narrowing vs §3.3.
+Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJECT-TODO.md §1.4](PROJECT-TODO.md). Nullable / `??` narrowing: sem implements same-family and compatible-`Fn` merge (see §3.3); full discriminated narrowing is still future work.
 
 ### Generics (monomorphization subset)
 
@@ -153,7 +153,7 @@ Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJ
 
 ## Semantics roadmap (§3.3)
 
-See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). `??` / `?.` **full** discriminated narrowing is future work; `null` / `undefined` have no `strictNullChecks` switch; nominal `interface`/`type` vs structural TS; higher-order functions are currently a restricted typed subset.
+See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). **Implemented in `sem`**: after stripping `null`/`undefined` from a `Union`, nullish coalescing merges with the right operand when types are the same primitive family or **mutually assignable `Fn` types** (`unify_ternary_branches`). **Still future**: discriminated narrowing driven by a discriminant; no `strictNullChecks` switch; nominal `interface`/`type` vs full structural TS. HOFs are a **restricted** typed subset (see README above), not “no first-class functions.” Heterogeneous unions may still fail Rust codegen when a binding cannot map to one Rust type; `nullish_fn_ok.ts` is validated with `ts2rs check`.
 
 ## Arithmetic, `/`, overflow (§4.1)
 

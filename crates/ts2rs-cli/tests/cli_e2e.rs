@@ -732,6 +732,21 @@ fn check_sample_ok() {
 }
 
 #[test]
+fn check_nullish_fn_union_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("nullish_fn_ok.ts");
+    let out = Command::new(exe)
+        .args(["check", ts.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs check nullish_fn_ok");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn check_switch_fail_stderr() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
     let ts = fixture("switch_fail.ts");

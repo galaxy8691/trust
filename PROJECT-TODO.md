@@ -123,10 +123,10 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 3.3 Deeper type system
 
-- [x] **Tie-in with §1.4**: literal and union types and **static** narrowing for `??` / `?.` must stay consistent with §1.4 (avoid conflict with limited `TsType`). Unions in HIR; **full** discriminated / null narrowing still future under hard typing. Done: [README — Semantics roadmap (§3.3)](README.md) links `nullish_ok` / `optional_ok` limited subsets.
+- [x] **Tie-in with §1.4**: literal and union types and **static** `??` / `?.` narrowing must stay consistent with §1.4 (avoid conflict with limited `TsType`). Unions are in HIR. **Implemented (sem)**: when `Union` minus `null`/`undefined` matches the right-hand side of `??` as the same “family” (`number` / `string` / `boolean`, or **structurally matching** `Fn`), [`infer_expr_mut`](crates/ts2rs-hir/src/sem.rs) on `IRExpr::NullishCoalesce` calls `unify_ternary_branches` for a single result type. **Still future**: discriminated-union narrowing that relies on a **discriminant** (large scope). Done: README §3.3; `nullish_ok` / `optional_ok`; sem + `Fn` unions covered by `nullish_fn_ok.ts` (`ts2rs check`).
 - [x] **`null` / `undefined`**: [`TsType`](crates/ts2rs-hir/src/ir.rs) has `Null`/`Undefined` variants; checks follow **current sem static rules**, not tsc’s default “everything nullable”. Done: README §3.3; **no** `strictNullChecks`-style switch. If added later, make it an **explicit** compiler mode, not implicit JS looseness.
 - [x] **Structural vs nominal**: **trust** uses nominal table + static shape checks; Rust mapping strategy (mostly primitives today). Done: README §3.3; **not** implementing full TS structural subtyping as a goal.
-- [x] **Function types**: HOFs need **static function types** in IR before codegen. Done: README §3.3 documents only `function` decl/call, no first-class function values; **no** HOF IR/codegen yet.
+- [x] **Function types and HOF**: Align with [§13.2](PROJECT-TODO.md) and README — a **restricted** subset is implemented (function types, arrow values, calls, passing/returning functions); closure codegen remains the hard `(number) => number` subset. **Do not** claim “no first-class functions / no HOF”; distinguish “supported HOF subset” vs “further generalization / codegen work”.
 
 ### 3.4 Control-flow analysis (advanced)
 
@@ -141,8 +141,8 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ### 4.1 Current behavior
 
 - [x] **`console.log` multi-arg format**: [`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) uses spaced `"{}"`; test `console_log_multi_arg_uses_spaced_format`.
-- [x] **Integer division**: still `i32` `/` (truncate toward zero); README “Arithmetic, `/`, overflow” and matrix.
-- [x] **Overflow**: README documents `i32` range vs TS `number` and Rust overflow semantics; **no** runtime-checked Cargo feature yet.
+- [x] **Arithmetic and `/`**: TS `number` → Rust **`f64`**; **`/`** is IEEE-754 double division (unlike the former `i32` truncating division); README “Arithmetic, `/`, overflow” and matrix.
+- [x] **NaN / ∞ and overflow**: possible; not identical to V8 `number` edge cases in every scenario; **no** runtime-checked Cargo feature yet.
 
 ### 4.2 Mapping new features
 
@@ -167,8 +167,8 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ### 5.2 Minimal runtime ([`ts2rs_rt`](crates/ts2rs_rt))
 
 - [x] **Strings**: `string.length` is **UTF-16 code units** (`encode_utf16().count()`); `number[].length` → `Vec::len`; object field `length` via `HashMap::get` ([`MemberLengthDispatch`](crates/ts2rs-hir/src/ir.rs)) (`codegen_52_string_length_utf16`, `codegen_52_object_length_field_uses_get`; CLI tests). **`string` subscript `s[i]`**: UTF-16 index → single-code-unit `string` ([`IndexKind::StringUtf16`](crates/ts2rs-hir/src/ir.rs); `stdlib_hir_ok.ts`).
-- [x] **Math**: `Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` integer subset ([`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs); [`build.rs`](crates/ts2rs-hir/src/build.rs); [`emit_expr`](crates/ts2rs-hir/src/codegen.rs); `floor`/`ceil`/`trunc`/`round` identity on pure `i32`; `pow` uses `checked_pow`).
-- [x] **HIR stdlib (no `ts2rs_rt` required)**: `Number.parseInt` / `parseFloat`; `JSON.stringify` / `JSON.parse` (integer JSON); `String` methods `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes`; global `readLine()` via inlined `std::io` (rejected in `async` bodies); [`stdlib_hir_ok.ts`](crates/ts2rs-cli/tests/fixtures/stdlib_hir_ok.ts).
+- [x] **Math**: `Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` etc. lower to **`f64`** operations in codegen ([`MathBuiltinKind`](crates/ts2rs-hir/src/ir.rs); [`build.rs`](crates/ts2rs-hir/src/build.rs); [`emit_expr`](crates/ts2rs-hir/src/codegen.rs); matches README matrix `Math.*` row).
+- [x] **HIR stdlib (no `ts2rs_rt` required)**: `Number.parseInt` / `parseFloat`; **`JSON.stringify` / `JSON.parse`**: **string literal** args folded at build time with **`serde_json`** into trust-closed IR; **dynamic** strings match `await response.json()` via **`serde_json::from_str`** into `f64` and the trust subset (see §14 “HIR stdlib / JSON / strings”); `String` methods `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes`; global `readLine()` via inlined `std::io` (rejected in `async` bodies); [`stdlib_hir_ok.ts`](crates/ts2rs-cli/tests/fixtures/stdlib_hir_ok.ts), [`json_uri_trust_ok.ts`](crates/ts2rs-cli/tests/fixtures/json_uri_trust_ok.ts).
 - [x] **I/O**: [`ts2rs_rt::read_stdin_line`](crates/ts2rs_rt/src/lib.rs) placeholder (`std::io`); **optional** — sync `readLine()` is emitted in generated Rust **without** linking `ts2rs_rt`; driver temp crate still does not depend on `ts2rs_rt` unless `--link-ts2rs-rt`.
 
 ---
@@ -228,15 +228,18 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ## 10. Performance and scale (later)
 
+Multi-file **parallel semantic checking** is implemented (`rayon`; details under **§14 — Performance and security**). This section keeps only what is still open.
+
 - [ ] **Incremental compile**: multi-file, recompile only changed modules.
-- [ ] **Parallelism**: parallelize multi-file semantic checks.
 
 ---
 
 ## 11. Security and boundaries
 
-- [ ] **Generated-code injection**: string literal escaping and `println!` safety.
-- [ ] **Resource limits**: optional timeout/memory for driver `cargo` calls.
+Aligned with **§14 — Performance and security**; **status and pointers are authoritative in §14** (this heading remains for navigation).
+
+- [x] **Generated-code injection**: string literal escaping and `println!` safety. (Done; see §14.)
+- [x] **Resource limits**: optional timeout / memory / output cap around driver `cargo`. (Done; see §14.)
 
 ---
 
@@ -323,9 +326,9 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 - [ ] **`export *` from** and **more `export` shapes** than the supported subset.
 - [ ] Keep this list aligned with README “Not 1.0” / unsupported table when scope changes.
 
-### Performance and security (see §10–§11)
+### Performance and security (aligned with §10–§11; **parallelism / codegen safety / driver resources** are tracked here)
 
-- [ ] **Incremental compile** (multi-file, only rebuild changed modules).
+- [ ] **Incremental compile** (multi-file, only rebuild changed modules; same open item as §10).
 - [x] **Parallelize** multi-file semantic checks. (Per-function [`check_function`](crates/ts2rs-hir/src/sem.rs) runs under **`rayon`** `par_iter_mut`; [`SendSourceMap`](crates/ts2rs-hir/src/ir.rs) makes [`IRFunction`](crates/ts2rs-hir/src/ir.rs) `Send` despite `swc` `Lrc`; warning order matches `module.fns`.)
 - [x] **Generated-code safety**: string escaping / `println!` injection audit. (Class `__class_name` literal uses `Debug` escaping; [`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) documents fixed format templates; template literals already brace-escape in [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs).)
 - [x] **Driver resource limits**: optional timeout / memory around `cargo` subprocess. ([`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs) + [`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs); [`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) uses [`wait_timeout::ChildExt`].)

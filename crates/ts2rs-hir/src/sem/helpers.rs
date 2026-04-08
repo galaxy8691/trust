@@ -98,6 +98,11 @@ pub(super) fn unify_ternary_branches(
     if a == b {
         return Ok(a);
     }
+    if matches!(&a, TsType::Fn { .. }) && matches!(&b, TsType::Fn { .. }) {
+        if type_assignable(&a, &b) && type_assignable(&b, &a) {
+            return Ok(a);
+        }
+    }
     if is_numberish(&a) && is_numberish(&b) {
         return Ok(TsType::Number);
     }

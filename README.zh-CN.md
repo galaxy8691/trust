@@ -34,17 +34,17 @@ flowchart LR
 
 ## 不支持的 TypeScript 特性（trust 硬类型拒斥边界）
 
-以下为常见**显式拒绝**形态（诊断为英文；详见 [`build.rs`](crates/ts2rs-hir/src/build.rs) / [`sem.rs`](crates/ts2rs-hir/src/sem.rs)）。与下文「泛型与类型参数」表及语言矩阵**互补**。
+以下为常见**显式拒绝**形态（诊断为英文；详见 [`build.rs`](crates/ts2rs-hir/src/build.rs) / [`sem.rs`](crates/ts2rs-hir/src/sem.rs)）。与下文「泛型与类型参数」表及语言矩阵**互补**；矩阵中已标为支持/部分支持的特性（如受限 **`?.`**、单态化泛型、顶层 `class` 子集）**不在此列**。
 
 | 用户可见形态 | 说明 |
 |--------------|------|
-| 非 `export function` / 非顶层 `function` 的 `export` | 如 `export { }`、`export default`、`export * from`、`export const` / `class` 等 |
-| 复杂泛型语义 | 高阶推导、复杂约束与完整 TS 泛型语义仍未实现（基础单态化子集见下文） |
-| 可选调用 | `f?.()`；可选**成员** `obj?.prop` 为部分支持 |
+| 非 `export function` / 非顶层 `function` 的 `export` | 如 `export { }`、`export default`、`export * from`、`export const`、`export class` 等（**顶层、无 `export` 的 `class`** 见矩阵与 [PROJECT-TODO.zh-CN.md §13.3](PROJECT-TODO.zh-CN.md)） |
+| 复杂泛型语义 | 高阶推导、复杂约束与完整 TS 泛型语义仍未实现；**调用处显式类型实参的单态化子集**见矩阵「泛型与类型参数」与 [§13.1](PROJECT-TODO.zh-CN.md) |
+| 可选链（拒斥边界） | 受限 **`f?.()`** / **`recv?.m()`** 已支持（`optional_call_ok.ts`）；任意 callee、非标识符 callee 等仍可能拒绝（见 `optional_chain_fail.ts`） |
 | `interface extends`、跨文件导入接口名、可选属性 | 仅单文件具名表 |
 | 交集 `A & B` | 拒绝 |
 | `bigint`、类型位置模板字面量类型 | 拒绝 |
-| 完整 `tsc` / 结构子类型全集 / 高阶函数值 | 未实现 |
+| 完整 `tsc` / TS 结构子类型全集 / 超出 §13.2 的 HOF | 完整类型检查与结构子类型全集未实现；**受限**函数类型与箭头值见矩阵与 [§13.2](PROJECT-TODO.zh-CN.md) |
 
 ## 1.0 范围（当前版本）
 
@@ -56,7 +56,7 @@ flowchart LR
 ## 诊断与前端健壮性（§1.1）
 
 - **单条错误**：[`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) 在失败时**只报告第一条**错误（[`CompileError`](crates/ts2rs-hir/src/error.rs)），同一次运行不会继续收集后续错误。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（返回 `(String, Vec<CompileWarning>)`；[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
-- **`export` 形态**：除 `export function …` 与顶层 `function …` 外，其余 `export`（如 `export { … }`、`export default`、`export * from`、`export const` / `class` 等）均**显式报错**（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；负例样例见 `export_*_fail.ts`（与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)）。
+- **`export` 形态**：除 `export function …` 与顶层 `function …` 外，其余 `export`（如 `export { … }`、`export default`、`export * from`、`export const`、`export class` 等）均**显式报错**（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；**顶层、无 `export` 的 `class`** 见矩阵。负例样例见 `export_*_fail.ts`（与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)）。
 - **注释**：swc 产出的 `Program` **不携带**注释节点；[`ParsedSource`](crates/ts2rs-parser/src/lib.rs) 已含 `source_map` 供行列号。若要将 TS 注释反映到生成的 Rust，需在 parser 侧保留注释或扫描 token，并在 IR/codegen 中单独设计；**当前未实现**。
 - **后续与 backlog**（多条编译错误、TS 原文注释进入生成物、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
 
@@ -131,7 +131,7 @@ flowchart LR
 | 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`for_in_*.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`run_for_in_object_keys_ok_prints_three`、`compile_for_in_non_object_fails` 等 |
 | 逻辑/三元/模板/逗号 | `logical_bool.ts`、`logical_truthy_ok.ts`、`ternary_ok.ts`、`template_ok.ts`、`comma_ok.ts` | `run_logical_bool_prints_one`、`run_ternary_ok_prints_one` 等 |
 | 成员 / `Math` / HIR 标准库 / 链式 | `string_utf16_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`、`chain_call_ok.ts` 等 | `run_stdlib_hir_ok_prints_expected`、`run_json_uri_trust_ok_prints_expected`、`run_chain_call_ok_prints_six`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`、`compile_json_uri_trust_ok_emits_serde_json_and_urlencoding` 等 |
-| `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts`、`optional_call_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one`、`run_optional_call_ok_prints_five` |
+| `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts`、`nullish_fn_ok.ts`（`check`）、`optional_call_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one`、`check_nullish_fn_union_ok`、`run_optional_call_ok_prints_five` |
 | 数组 / 对象字面量 | `array_ok.ts`、`object_ok.ts`；负例 `array_fail.ts` | `run_array_ok_prints_two`、`run_object_ok_prints_three`、`compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |
 | `console` | `console_stderr.ts`、`void_log.ts` | `compile_console_stderr_writes_eprintln`、`run_void_log_in_branch_prints_branch` |
@@ -147,7 +147,7 @@ flowchart LR
 
 ## 类型层路线（§1.4）
 
-**字面量类型**、**联合类型**、**受限 `interface`**、**受限 `type` 别名**与**泛型边界文档**子项已勾选（见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)）。与已实现子集（如注解中的 `number[]`、仅 `number` 字段的对象类型）的边界与拆分里程碑见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)。空值与收窄与下文「语义与类型路线（§3.3）」及 [PROJECT-TODO.zh-CN.md §3.3](PROJECT-TODO.zh-CN.md) 交叉：联合与 `??` / `?.` 的**完整**收窄仍待后续；当前 `??` 仍为受限子集（见 `nullish_ok.ts`），含 `null`/`undefined` 与非 primitive 的联合若无法映射到单一 Rust 类型会在 codegen 阶段拒绝。
+**字面量类型**、**联合类型**、**受限 `interface`**、**受限 `type` 别名**与**泛型边界文档**子项已勾选（见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)）。与已实现子集（如注解中的 `number[]`、仅 `number` 字段的对象类型）的边界与拆分里程碑见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)。空值与收窄与下文「语义与类型路线（§3.3）」及 [PROJECT-TODO.zh-CN.md §3.3](PROJECT-TODO.zh-CN.md) 交叉：**sem 已实现** `Union` 上去除空值后与 `??` 右侧在 primitive 同族或 **兼容 `Fn` 类型**时的结果类型合并；**完整** discriminated 收窄仍待后续。`nullish_ok.ts` 等覆盖基础子集；`null`/`undefined` 与**异质**成员（如 `null | Fn`）的联合若在具名绑定上无法映射到单一 Rust 类型，**compile** 仍可能在 codegen 拒绝——与「heterogeneous union」诊断一致；`nullish_fn_ok.ts` 以 `ts2rs check` 验证 sem。
 
 ### 泛型与类型参数（单态化子集）
 
@@ -162,7 +162,7 @@ flowchart LR
 
 ### 与 §1.4 的衔接
 
-字面量类型与联合类型在 HIR 中已与 [`TsType`](crates/ts2rs-hir/src/ir.rs) 对齐；`??` 与 `?.` 仅在**受限子集**内实现（见 `nullish_ok.ts`、`optional_ok.ts`）。**完整** discriminated 收窄与空值收窄仍属后续工作；扩展时需与 §1.4 联合类型规则一致，避免与受限 `TsType` 语义冲突。
+字面量类型与联合类型在 HIR 中已与 [`TsType`](crates/ts2rs-hir/src/ir.rs) 对齐；`??` 与 `?.` 在 **sem** 上已实现上述同族 / `Fn` 兼容合并（见 `nullish_ok.ts`、`optional_ok.ts`、`nullish_fn_ok.ts`）。**完整** discriminated 收窄仍属后续；扩展时需与 §1.4 联合类型规则一致，避免与受限 `TsType` 语义冲突。
 
 ### `null` / `undefined` 与 `strictNullChecks`
 
