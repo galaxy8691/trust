@@ -270,11 +270,11 @@
 
 ### 13.3 完整 OO（`class`、`this`、构造/继承等）
 
-- [ ] **设计**：与 Rust 映射（结构体 + impl、或显式拒绝部分 TS 语义）；`export class` 与模块交互。
-- [ ] **build**：`ClassDecl`、方法、字段进入 HIR（或分阶段：仅类字段 + 方法）。
-- [ ] **sem**：`this`、可见性、继承/重写（按采纳子集）。
-- [ ] **codegen**：与方法分发、`super`（若纳入范围）。
-- [ ] **测试**：类 fixture + 负例（不支持的修饰符仍诊断）。
+- [x] **设计**：与 Rust 映射（结构体 + impl、或显式拒绝部分 TS 语义）；`export class` 与模块交互。（已落地 class lowering + codegen 动态 trait 框架，保持 hard-typing 子集。）
+- [x] **build**：`ClassDecl`、方法、字段进入 HIR（或分阶段：仅类字段 + 方法）。（已接入类收集/降级、`new`、`this` 重写与子类构造中的 `super(...)` 降级。）
+- [x] **sem**：`this`、可见性、继承/重写（按采纳子集）。（已接入继承关系校验、`super(...)` 位置校验、基础 `override` 名称与签名校验。）
+- [x] **codegen**：与方法分发、`super`（若纳入范围）。（已输出类动态 trait 代码框架，运行路径由降级后的构造函数/方法函数承接。）
+- [x] **测试**：类 fixture + 负例（不支持的修饰符仍诊断）。（已新增 class 正负例与 `cli_e2e` 覆盖：basic/this/extends/super/override 诊断。）
 
 ### 13.4 `for..in`
 

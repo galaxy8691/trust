@@ -73,6 +73,7 @@ fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
 }
 
 pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, CompileError> {
+    validate_classes(module)?;
     mono::monomorphize_module_functions(module)?;
 
     let mut globals: HashMap<String, FnSig> = HashMap::new();
@@ -134,6 +135,109 @@ pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, Compil
         check_function(f, &globals, &cm, &p, &mut warnings)?;
     }
     Ok(warnings)
+}
+
+fn validate_classes(module: &IRModule) -> Result<(), CompileError> {
+    let mut cmap: HashMap<String, &IRClass> = HashMap::new();
+    for c in &module.classes {
+        if cmap.insert(c.name.clone(), c).is_some() {
+            return Err(diag(
+                c.cm.as_ref(),
+                &c.source_path,
+                c.span,
+                format!("duplicate class `{}`", c.name),
+            ));
+        }
+    }
+    for c in &module.classes {
+        if let Some(p) = &c.extends {
+            if p == &c.name {
+                return Err(diag(
+                    c.cm.as_ref(),
+                    &c.source_path,
+                    c.span,
+                    "class cannot extend itself",
+                ));
+            }
+            let parent = cmap.get(p).ok_or_else(|| {
+                diag(
+                    c.cm.as_ref(),
+                    &c.source_path,
+                    c.span,
+                    format!("unknown base class `{p}`"),
+                )
+            })?;
+            let mut p_methods = HashMap::<String, (&Vec<(String, TsType)>, &TsType)>::new();
+            for m in &parent.methods {
+                p_methods.insert(m.name.clone(), (&m.params, &m.ret));
+            }
+            for m in &c.methods {
+                if let Some((pp, pr)) = p_methods.get(&m.name) {
+                    if !m.is_override {
+                        return Err(diag(
+                            c.cm.as_ref(),
+                            &c.source_path,
+                            m.span,
+                            format!(
+                                "method `{}` overrides base method and must use `override`",
+                                m.name
+                            ),
+                        ));
+                    }
+                    if *pp != &m.params || *pr != &m.ret {
+                        return Err(diag(
+                            c.cm.as_ref(),
+                            &c.source_path,
+                            m.span,
+                            format!("override signature mismatch for method `{}`", m.name),
+                        ));
+                    }
+                } else if m.is_override {
+                    return Err(diag(
+                        c.cm.as_ref(),
+                        &c.source_path,
+                        m.span,
+                        format!("`override` method `{}` not found in base class", m.name),
+                    ));
+                }
+            }
+            if let Some(ctor) = &c.ctor {
+                let has_super_first = matches!(
+                    ctor.body.first(),
+                    Some(IRStmt::Expr {
+                        expr: IRExpr::Call { callee, .. },
+                        ..
+                    }) if callee == "__super_ctor"
+                );
+                if !has_super_first {
+                    return Err(diag(
+                        c.cm.as_ref(),
+                        &c.source_path,
+                        ctor.span,
+                        "subclass constructor must start with `super(...)`",
+                    ));
+                }
+            }
+        } else if let Some(ctor) = &c.ctor {
+            for s in &ctor.body {
+                if matches!(
+                    s,
+                    IRStmt::Expr {
+                        expr: IRExpr::Call { callee, .. },
+                        ..
+                    } if callee == "__super_ctor"
+                ) {
+                    return Err(diag(
+                        c.cm.as_ref(),
+                        &c.source_path,
+                        ctor.span,
+                        "`super(...)` is only valid in subclass constructor",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn collect_fn_sigs_in_stmts(stmts: &[IRStmt]) -> HashMap<String, FnSig> {
@@ -365,6 +469,7 @@ fn stmt_span(s: &IRStmt) -> Span {
         IRStmt::Empty { span }
         | IRStmt::Let { span, .. }
         | IRStmt::Assign { span, .. }
+        | IRStmt::MemberAssign { span, .. }
         | IRStmt::Expr { span, .. }
         | IRStmt::Return { span, .. }
         | IRStmt::Block { span, .. }
@@ -396,6 +501,7 @@ fn stmt_block_diverges(s: &IRStmt, ret_ty: &TsType, loop_depth: usize) -> bool {
         IRStmt::Empty { .. }
         | IRStmt::Let { .. }
         | IRStmt::Assign { .. }
+        | IRStmt::MemberAssign { .. }
         | IRStmt::Expr { .. }
         | IRStmt::FnDecl { .. } => false,
     }
@@ -597,6 +703,39 @@ fn check_stmt(
                 ));
             }
             mark_initialized(stack, name);
+            Ok(())
+        }
+        IRStmt::MemberAssign {
+            obj,
+            prop: _,
+            rhs,
+            span,
+        } => {
+            let b = lookup(stack, obj).ok_or_else(|| {
+                diag(
+                    cm,
+                    path,
+                    *span,
+                    format!("assignment to unknown identifier `{obj}`"),
+                )
+            })?;
+            if !b.mutable {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    format!("cannot assign through const binding `{obj}`"),
+                ));
+            }
+            let got = infer_expr_mut(rhs, stack, globals, cm, path)?;
+            if !is_numberish(&got) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "member assignment currently supports only `number` value",
+                ));
+            }
             Ok(())
         }
         IRStmt::Expr { ref mut expr, .. } => {
@@ -1306,6 +1445,18 @@ fn infer_expr_mut(
                 ret: Box::new(ret.clone()),
             })
         }
+        IRExpr::This(span) => Err(diag(
+            cm,
+            path,
+            *span,
+            "`this` is only valid inside class method lowering",
+        )),
+        IRExpr::Super(span) => Err(diag(
+            cm,
+            path,
+            *span,
+            "`super` is only valid inside subclass constructor lowering",
+        )),
         IRExpr::Index { obj, index, span } => {
             let ot = infer_expr_mut(obj, stack, globals, cm, path)?;
             let it = infer_expr_mut(index, stack, globals, cm, path)?;

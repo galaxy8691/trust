@@ -41,6 +41,8 @@ pub enum TsType {
         params: Vec<TsType>,
         ret: Box<TsType>,
     },
+    /// 类实例（OO 子集）
+    ClassInstance(String),
 }
 
 /// 稳定全序，用于联合类型规范化与 `B | A` 与 `A | B` 相等。
@@ -58,6 +60,7 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
         (StringLit(x), StringLit(y)) => x.cmp(y),
         (ObjectNum(x), ObjectNum(y)) => x.cmp(y),
         (TypeParam(x), TypeParam(y)) => x.cmp(y),
+        (ClassInstance(x), ClassInstance(y)) => x.cmp(y),
         (
             Fn {
                 params: ap,
@@ -116,7 +119,8 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::ObjectNum(_) => 10,
         TsType::TypeParam(_) => 11,
         TsType::Fn { .. } => 12,
-        TsType::Union(_) => 13,
+        TsType::ClassInstance(_) => 13,
+        TsType::Union(_) => 14,
     }
 }
 
@@ -313,6 +317,10 @@ pub enum IRExpr {
         body: Vec<IRStmt>,
         span: Span,
     },
+    /// `this`
+    This(Span),
+    /// `super`
+    Super(Span),
 }
 
 /// 模板字面量片段
@@ -341,6 +349,13 @@ pub enum IRStmt {
     /// `name = rhs`（rhs 已由 build 产出）
     Assign {
         name: String,
+        rhs: IRExpr,
+        span: Span,
+    },
+    /// `obj.prop = rhs`（OO/对象子集）
+    MemberAssign {
+        obj: String,
+        prop: String,
         rhs: IRExpr,
         span: Span,
     },
@@ -390,6 +405,43 @@ pub enum IRStmt {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct IRClassMethod {
+    pub name: String,
+    pub params: Vec<(String, TsType)>,
+    pub ret: TsType,
+    pub body: Vec<IRStmt>,
+    pub is_override: bool,
+    pub owner: String,
+    pub span: Span,
+}
+
+#[derive(Clone)]
+pub struct IRClass {
+    pub name: String,
+    pub extends: Option<String>,
+    pub fields: Vec<(String, TsType)>,
+    pub ctor: Option<IRClassMethod>,
+    pub methods: Vec<IRClassMethod>,
+    pub span: Span,
+    pub cm: Lrc<SourceMap>,
+    pub source_path: String,
+}
+
+impl fmt::Debug for IRClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IRClass")
+            .field("name", &self.name)
+            .field("extends", &self.extends)
+            .field("fields", &self.fields)
+            .field("ctor", &self.ctor)
+            .field("methods", &self.methods)
+            .field("span", &self.span)
+            .field("source_path", &self.source_path)
+            .finish()
+    }
+}
+
 #[derive(Clone)]
 pub struct IRFunction {
     /// 单次编译内唯一序号（含嵌套 `function`）。
@@ -434,6 +486,7 @@ pub struct IRGenericTypeDecl {
 #[derive(Debug, Clone)]
 pub struct IRModule {
     pub fns: Vec<IRFunction>,
+    pub classes: Vec<IRClass>,
     pub generic_types: HashMap<String, IRGenericTypeDecl>,
     /// 编译入口文件路径（用于要求 `main` 定义在入口模块）。
     pub entry_path: String,

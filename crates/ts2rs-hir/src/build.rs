@@ -4,11 +4,11 @@ use std::collections::{HashMap, HashSet};
 
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
-    AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, Decl, EmptyStmt, ExportDecl, Expr,
-    ExprOrSpread, FnDecl, ForStmt, KeyValueProp, Lit, MemberExpr, MemberProp, ModuleDecl,
-    ModuleItem, OptChainBase, OptChainExpr, Param, Pat, Program, Prop, PropName, PropOrSpread,
-    SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind,
-    VarDeclOrExpr,
+    AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, ClassDecl, ClassMember, Decl,
+    EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForStmt, KeyValueProp, Lit, MemberExpr,
+    MemberProp, MethodKind, ModuleDecl, ModuleItem, OptChainBase, OptChainExpr, Param,
+    ParamOrTsParamProp, Pat, Program, Prop, PropName, PropOrSpread, SimpleAssignTarget, Stmt,
+    SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
 };
 
 use crate::error::{diag, diag_spanned, CompileError};
@@ -23,8 +23,12 @@ pub fn build_module(
 ) -> Result<IRModule, CompileError> {
     let mut next_id = 0u32;
     let iface = collect_named_types(program, cm, path)?;
+    let classes = collect_class_decls(program, cm, path, &iface)?;
     let fns = collect_fn_decls(program, cm, path, false, &mut next_id, &iface)?;
-    if fns.is_empty() {
+    let mut lowered = lower_classes_to_functions(&classes, cm, path, &mut next_id, &iface)?;
+    let mut all_fns = fns;
+    all_fns.append(&mut lowered);
+    if all_fns.is_empty() {
         let anchor = match program {
             Program::Module(m) => m.span,
             Program::Script(s) => s.span,
@@ -37,7 +41,8 @@ pub fn build_module(
         ));
     }
     Ok(IRModule {
-        fns,
+        fns: all_fns,
+        classes,
         generic_types: HashMap::new(),
         entry_path: path.to_string(),
     })
@@ -50,9 +55,15 @@ pub fn build_program_multi(
 ) -> Result<IRModule, CompileError> {
     let mut next_id = 0u32;
     let mut all = Vec::new();
+    let mut classes_all = Vec::new();
     for (path, program, cm) in units {
         let iface = collect_named_types(program, cm, path.as_str())?;
+        let classes = collect_class_decls(program, cm, path.as_str(), &iface)?;
         let mut fns = collect_fn_decls(program, cm, path.as_str(), true, &mut next_id, &iface)?;
+        let mut lowered =
+            lower_classes_to_functions(&classes, cm, path.as_str(), &mut next_id, &iface)?;
+        classes_all.extend(classes);
+        fns.append(&mut lowered);
         all.append(&mut fns);
     }
     let mut seen = std::collections::HashSet::<String>::new();
@@ -68,9 +79,470 @@ pub fn build_program_multi(
     }
     Ok(IRModule {
         fns: all,
+        classes: classes_all,
         generic_types: HashMap::new(),
         entry_path: entry_path.to_string(),
     })
+}
+
+fn collect_class_decls(
+    program: &Program,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+) -> Result<Vec<IRClass>, CompileError> {
+    let mut out = Vec::new();
+    let mut push_class = |c: &ClassDecl| -> Result<(), CompileError> {
+        if c.declare {
+            return Err(diag_spanned(
+                cm,
+                path,
+                c,
+                "`declare class` is not supported",
+            ));
+        }
+        let class_name = c.ident.sym.to_string();
+        let extends = match &c.class.super_class {
+            Some(e) => match &**e {
+                Expr::Ident(i) => Some(i.sym.to_string()),
+                _ => {
+                    return Err(diag_spanned(
+                        cm,
+                        path,
+                        e,
+                        "`extends` currently supports only identifier base class",
+                    ));
+                }
+            },
+            None => None,
+        };
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut ctor = None;
+        for m in &c.class.body {
+            match m {
+                ClassMember::ClassProp(p) => {
+                    if p.is_static {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            p,
+                            "static class fields are not supported",
+                        ));
+                    }
+                    let PropName::Ident(id) = &p.key else {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            p,
+                            "only identifier class fields are supported",
+                        ));
+                    };
+                    let ty = ts_type_from_ann(&p.type_ann, cm, path, p.span, iface, None)?;
+                    fields.push((id.sym.to_string(), ty));
+                }
+                ClassMember::Constructor(cons) => {
+                    let mut params = Vec::new();
+                    for p in &cons.params {
+                        let ParamOrTsParamProp::Param(pp) = p else {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                p,
+                                "parameter properties are not supported",
+                            ));
+                        };
+                        params.push(param_binding(pp, cm, path, iface, None)?);
+                    }
+                    let body = match &cons.body {
+                        Some(b) => build_block_stmts(&b.stmts, cm, path, &mut 0u32, iface)?,
+                        None => Vec::new(),
+                    };
+                    ctor = Some(IRClassMethod {
+                        name: "constructor".to_string(),
+                        params,
+                        ret: TsType::Void,
+                        body,
+                        is_override: false,
+                        owner: class_name.clone(),
+                        span: cons.span,
+                    });
+                }
+                ClassMember::Method(m) => {
+                    if m.is_static {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            m,
+                            "static methods are not supported",
+                        ));
+                    }
+                    if !matches!(m.kind, MethodKind::Method) {
+                        return Err(diag_spanned(cm, path, m, "getter/setter are not supported"));
+                    }
+                    let PropName::Ident(id) = &m.key else {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            m,
+                            "only identifier method names are supported",
+                        ));
+                    };
+                    let mut params = Vec::new();
+                    for p in &m.function.params {
+                        params.push(param_binding(p, cm, path, iface, None)?);
+                    }
+                    let ret =
+                        ts_type_from_ann(&m.function.return_type, cm, path, m.span, iface, None)?;
+                    let body = match &m.function.body {
+                        Some(b) => build_block_stmts(&b.stmts, cm, path, &mut 0u32, iface)?,
+                        None => {
+                            return Err(diag_spanned(cm, path, m, "method body is required"));
+                        }
+                    };
+                    methods.push(IRClassMethod {
+                        name: id.sym.to_string(),
+                        params,
+                        ret,
+                        body,
+                        is_override: m.is_override,
+                        owner: class_name.clone(),
+                        span: m.span,
+                    });
+                }
+                _ => {
+                    return Err(diag_spanned(
+                        cm,
+                        path,
+                        m,
+                        "unsupported class member in current OO subset",
+                    ));
+                }
+            }
+        }
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
+        out.push(IRClass {
+            name: class_name,
+            extends,
+            fields,
+            ctor,
+            methods,
+            span: c.class.span,
+            cm: cm.clone(),
+            source_path: path.to_string(),
+        });
+        Ok(())
+    };
+    match program {
+        Program::Module(m) => {
+            for item in &m.body {
+                match item {
+                    ModuleItem::Stmt(Stmt::Decl(Decl::Class(c))) => push_class(c)?,
+                    ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
+                        decl: Decl::Class(c),
+                        ..
+                    })) => push_class(c)?,
+                    _ => {}
+                }
+            }
+        }
+        Program::Script(s) => {
+            for stmt in &s.body {
+                if let Stmt::Decl(Decl::Class(c)) = stmt {
+                    push_class(c)?;
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn lower_classes_to_functions(
+    classes: &[IRClass],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    next_id: &mut u32,
+    _iface: &HashMap<String, TsType>,
+) -> Result<Vec<IRFunction>, CompileError> {
+    fn merged_fields(classes: &[IRClass], c: &IRClass, out: &mut Vec<String>) {
+        if let Some(p) = &c.extends {
+            if let Some(pc) = classes.iter().find(|x| &x.name == p) {
+                merged_fields(classes, pc, out);
+            }
+        }
+        for (k, _) in &c.fields {
+            if !out.iter().any(|x| x == k) {
+                out.push(k.clone());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for cls in classes {
+        let mut field_keys = Vec::new();
+        merged_fields(classes, cls, &mut field_keys);
+        field_keys.sort();
+        let self_ty = TsType::ObjectNum(field_keys.clone());
+        let ctor_name = format!("{}_new", cls.name);
+        let ctor_fn = if let Some(c) = &cls.ctor {
+            let mut body = Vec::new();
+            let mut ctor_body = c.body.clone();
+            rewrite_this_in_stmts(&mut ctor_body, c.span);
+            let mut consumed_super = false;
+            if let Some(parent) = &cls.extends {
+                if let Some(IRStmt::Expr {
+                    expr:
+                        IRExpr::Call {
+                            callee,
+                            args,
+                            type_args: _,
+                            span,
+                        },
+                    ..
+                }) = ctor_body.first()
+                {
+                    if callee == "__super_ctor" {
+                        body.push(IRStmt::Let {
+                            name: "__self".to_string(),
+                            ty: self_ty.clone(),
+                            init: Some(IRExpr::Call {
+                                callee: format!("{parent}_new"),
+                                args: args.clone(),
+                                type_args: Vec::new(),
+                                span: *span,
+                            }),
+                            mutable: true,
+                            span: *span,
+                        });
+                        consumed_super = true;
+                    }
+                }
+                if !consumed_super {
+                    body.push(IRStmt::Let {
+                        name: "__self".to_string(),
+                        ty: self_ty.clone(),
+                        init: Some(IRExpr::Call {
+                            callee: format!("{parent}_new"),
+                            args: Vec::new(),
+                            type_args: Vec::new(),
+                            span: c.span,
+                        }),
+                        mutable: true,
+                        span: c.span,
+                    });
+                }
+            } else {
+                body.push(IRStmt::Let {
+                    name: "__self".to_string(),
+                    ty: self_ty.clone(),
+                    init: Some(IRExpr::ObjectLit {
+                        fields: field_keys
+                            .iter()
+                            .map(|k| (k.clone(), IRExpr::Number(0, c.span)))
+                            .collect(),
+                        span: c.span,
+                    }),
+                    mutable: true,
+                    span: c.span,
+                });
+            }
+            for (idx, s) in ctor_body.into_iter().enumerate() {
+                if consumed_super && idx == 0 {
+                    continue;
+                }
+                body.push(s);
+            }
+            body.push(IRStmt::Return {
+                arg: Some(IRExpr::Ident("__self".to_string(), c.span)),
+                span: c.span,
+            });
+            IRFunction {
+                ir_id: {
+                    let id = *next_id;
+                    *next_id = next_id.saturating_add(1);
+                    id
+                },
+                name: ctor_name.clone(),
+                type_params: Vec::new(),
+                params: c.params.clone(),
+                ret: self_ty.clone(),
+                body,
+                span: c.span,
+                cm: cm.clone(),
+                source_path: path.to_string(),
+                mono_origin: None,
+            }
+        } else {
+            IRFunction {
+                ir_id: {
+                    let id = *next_id;
+                    *next_id = next_id.saturating_add(1);
+                    id
+                },
+                name: ctor_name.clone(),
+                type_params: Vec::new(),
+                params: Vec::new(),
+                ret: self_ty.clone(),
+                body: vec![IRStmt::Return {
+                    arg: Some(IRExpr::ObjectLit {
+                        fields: field_keys
+                            .iter()
+                            .map(|k| (k.clone(), IRExpr::Number(0, cls.span)))
+                            .collect(),
+                        span: cls.span,
+                    }),
+                    span: cls.span,
+                }],
+                span: cls.span,
+                cm: cm.clone(),
+                source_path: path.to_string(),
+                mono_origin: None,
+            }
+        };
+        out.push(ctor_fn);
+        for m in &cls.methods {
+            let mut params = Vec::new();
+            params.push(("__self".to_string(), self_ty.clone()));
+            params.extend(m.params.clone());
+            let mut body = m.body.clone();
+            rewrite_this_in_stmts(&mut body, m.span);
+            out.push(IRFunction {
+                ir_id: {
+                    let id = *next_id;
+                    *next_id = next_id.saturating_add(1);
+                    id
+                },
+                name: m.name.clone(),
+                type_params: Vec::new(),
+                params,
+                ret: m.ret.clone(),
+                body,
+                span: m.span,
+                cm: cm.clone(),
+                source_path: path.to_string(),
+                mono_origin: None,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn rewrite_this_in_stmts(stmts: &mut [IRStmt], span: Span) {
+    for s in stmts {
+        match s {
+            IRStmt::Let { init, .. } => {
+                if let Some(e) = init {
+                    rewrite_this_in_expr(e, span);
+                }
+            }
+            IRStmt::Assign { rhs, .. } | IRStmt::Expr { expr: rhs, .. } => {
+                rewrite_this_in_expr(rhs, span)
+            }
+            IRStmt::MemberAssign { rhs, .. } => rewrite_this_in_expr(rhs, span),
+            IRStmt::Return { arg, .. } => {
+                if let Some(e) = arg {
+                    rewrite_this_in_expr(e, span);
+                }
+            }
+            IRStmt::Block { stmts, .. } => rewrite_this_in_stmts(stmts, span),
+            IRStmt::If {
+                cond,
+                then_b,
+                else_b,
+                ..
+            } => {
+                rewrite_this_in_expr(cond, span);
+                rewrite_this_in_stmts(then_b, span);
+                if let Some(e) = else_b {
+                    rewrite_this_in_stmts(e, span);
+                }
+            }
+            IRStmt::While { cond, body, .. } => {
+                rewrite_this_in_expr(cond, span);
+                rewrite_this_in_stmts(body, span);
+            }
+            IRStmt::DoWhile { body, cond, .. } => {
+                rewrite_this_in_stmts(body, span);
+                rewrite_this_in_expr(cond, span);
+            }
+            IRStmt::FnDecl { func, .. } => rewrite_this_in_stmts(&mut func.body, span),
+            IRStmt::Empty { .. } | IRStmt::Break { .. } | IRStmt::Continue { .. } => {}
+        }
+    }
+}
+
+fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
+    match e {
+        IRExpr::This(_) => *e = IRExpr::Ident("__self".to_string(), span),
+        IRExpr::Binary { left, right, .. } => {
+            rewrite_this_in_expr(left, span);
+            rewrite_this_in_expr(right, span);
+        }
+        IRExpr::Unary { arg, .. } => rewrite_this_in_expr(arg, span),
+        IRExpr::Call { args, .. } => {
+            for a in args {
+                rewrite_this_in_expr(a, span);
+            }
+        }
+        IRExpr::MethodCall { receiver, args, .. } => {
+            rewrite_this_in_expr(receiver, span);
+            for a in args {
+                rewrite_this_in_expr(a, span);
+            }
+        }
+        IRExpr::BuiltinLog { args, .. } | IRExpr::MathBuiltin { args, .. } => {
+            for a in args {
+                rewrite_this_in_expr(a, span);
+            }
+        }
+        IRExpr::Conditional {
+            test, cons, alt, ..
+        } => {
+            rewrite_this_in_expr(test, span);
+            rewrite_this_in_expr(cons, span);
+            rewrite_this_in_expr(alt, span);
+        }
+        IRExpr::Seq { exprs, .. } => {
+            for x in exprs {
+                rewrite_this_in_expr(x, span);
+            }
+        }
+        IRExpr::Tpl { parts, .. } => {
+            for p in parts {
+                if let TplPart::Interp(x) = p {
+                    rewrite_this_in_expr(x, span);
+                }
+            }
+        }
+        IRExpr::Member { obj, .. } | IRExpr::OptionalMember { obj, .. } => {
+            rewrite_this_in_expr(obj, span)
+        }
+        IRExpr::NullishCoalesce { left, right, .. } => {
+            rewrite_this_in_expr(left, span);
+            rewrite_this_in_expr(right, span);
+        }
+        IRExpr::ArrayLit { elems, .. } => {
+            for a in elems {
+                rewrite_this_in_expr(a, span);
+            }
+        }
+        IRExpr::ObjectLit { fields, .. } => {
+            for (_, v) in fields {
+                rewrite_this_in_expr(v, span);
+            }
+        }
+        IRExpr::Index { obj, index, .. } => {
+            rewrite_this_in_expr(obj, span);
+            rewrite_this_in_expr(index, span);
+        }
+        IRExpr::ArrowFn { body, .. } => rewrite_this_in_stmts(body, span),
+        IRExpr::Number(..)
+        | IRExpr::Bool(..)
+        | IRExpr::Str(..)
+        | IRExpr::Ident(..)
+        | IRExpr::Null(..)
+        | IRExpr::Undefined(..)
+        | IRExpr::Super(..) => {}
+    }
 }
 
 fn collect_named_types(
@@ -96,6 +568,7 @@ fn collect_fn_decls(
                 match item {
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(_))) => {}
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsTypeAlias(_))) => {}
+                    ModuleItem::Stmt(Stmt::Decl(Decl::Class(_))) => {}
                     ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) if !f.declare => {
                         out.push(build_fn(f, cm, path, next_id, iface)?);
                     }
@@ -124,6 +597,7 @@ fn collect_fn_decls(
                             Decl::Fn(f) if !f.declare => {
                                 out.push(build_fn(f, cm, path, next_id, iface)?);
                             }
+                            Decl::Class(_) => {}
                             Decl::Fn(f) if f.declare => {
                                 return Err(diag_spanned(
                                     cm,
@@ -204,7 +678,9 @@ fn collect_fn_decls(
         Program::Script(s) => {
             for stmt in &s.body {
                 match stmt {
-                    Stmt::Decl(Decl::TsInterface(_)) | Stmt::Decl(Decl::TsTypeAlias(_)) => {}
+                    Stmt::Decl(Decl::TsInterface(_))
+                    | Stmt::Decl(Decl::TsTypeAlias(_))
+                    | Stmt::Decl(Decl::Class(_)) => {}
                     Stmt::Decl(Decl::Fn(f)) if !f.declare => {
                         out.push(build_fn(f, cm, path, next_id, iface)?);
                     }
@@ -677,6 +1153,38 @@ fn build_stmt(
                             span: ax.span,
                         })
                     }
+                    AssignTarget::Simple(SimpleAssignTarget::Member(m)) => {
+                        let obj = match &*m.obj {
+                            Expr::Ident(i) => i.sym.to_string(),
+                            Expr::This(_) => "__self".to_string(),
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    m,
+                                    "member assignment object must be identifier or `this`",
+                                ));
+                            }
+                        };
+                        let prop = match &m.prop {
+                            MemberProp::Ident(id) => id.sym.to_string(),
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    m,
+                                    "computed member assignment is not supported",
+                                ));
+                            }
+                        };
+                        let rhs = build_expr(&ax.right, cm, path, iface)?;
+                        Ok(IRStmt::MemberAssign {
+                            obj,
+                            prop,
+                            rhs,
+                            span: ax.span,
+                        })
+                    }
                     _ => Err(diag_spanned(
                         cm,
                         path,
@@ -997,12 +1505,70 @@ fn build_expr(
         Expr::OptChain(o) => build_opt_chain_expr(o, cm, path, iface),
         Expr::Array(a) => build_array_expr(a, cm, path, iface),
         Expr::Object(o) => build_object_expr(o, cm, path, iface),
+        Expr::This(t) => Ok(IRExpr::This(t.span)),
+        Expr::New(n) => {
+            let callee = match &*n.callee {
+                Expr::Ident(i) => format!("{}_new", i.sym),
+                _ => {
+                    return Err(diag_spanned(
+                        cm,
+                        path,
+                        n,
+                        "`new` currently supports only identifier callee",
+                    ));
+                }
+            };
+            let mut args = Vec::new();
+            if let Some(a) = &n.args {
+                for x in a {
+                    if x.spread.is_some() {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            x,
+                            "spread arguments are not supported",
+                        ));
+                    }
+                    args.push(build_expr(&x.expr, cm, path, iface)?);
+                }
+            }
+            Ok(IRExpr::Call {
+                callee,
+                args,
+                type_args: Vec::new(),
+                span: n.span,
+            })
+        }
         Expr::Arrow(a) => {
             let mut tmp_id = 0u32;
             build_arrow_expr(a, cm, path, &mut tmp_id, iface)
         }
         Expr::Call(c) => {
             let type_args = call_type_args(c, cm, path, iface)?;
+            if let Callee::Super(_) = &c.callee {
+                let mut args = Vec::new();
+                for a in &c.args {
+                    match a {
+                        ExprOrSpread { spread: None, expr } => {
+                            args.push(build_expr(expr, cm, path, iface)?);
+                        }
+                        _ => {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "spread arguments are not supported",
+                            ));
+                        }
+                    }
+                }
+                return Ok(IRExpr::Call {
+                    callee: "__super_ctor".to_string(),
+                    args,
+                    type_args,
+                    span: c.span,
+                });
+            }
             if let Callee::Expr(ce) = &c.callee {
                 if let Expr::Member(m) = &**ce {
                     if let Expr::Ident(obj) = &*m.obj {

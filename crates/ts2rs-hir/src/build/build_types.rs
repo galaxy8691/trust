@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
-    BindingIdent, Decl, ExportDecl, Expr, Lit, ModuleDecl, ModuleItem, Pat, Program, Stmt,
-    TsEntityName, TsFnOrConstructorType, TsFnParam, TsInterfaceDecl, TsIntersectionType,
-    TsKeywordTypeKind, TsLit, TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement,
-    TsUnionOrIntersectionType, TsUnionType,
+    BindingIdent, ClassDecl, ClassMember, Decl, ExportDecl, Expr, Lit, ModuleDecl, ModuleItem, Pat,
+    Program, PropName, Stmt, TsEntityName, TsFnOrConstructorType, TsFnParam, TsInterfaceDecl,
+    TsIntersectionType, TsKeywordTypeKind, TsLit, TsType as AstTsType, TsTypeAliasDecl, TsTypeAnn,
+    TsTypeElement, TsUnionOrIntersectionType, TsUnionType,
 };
 
 use crate::error::{diag, CompileError};
@@ -239,6 +239,9 @@ pub(super) fn collect_named_types(
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsTypeAlias(a))) => {
                         collect_one_type_alias(a.as_ref(), &mut map, cm, path)?;
                     }
+                    ModuleItem::Stmt(Stmt::Decl(Decl::Class(c))) => {
+                        collect_one_class(c, &mut map, cm, path)?;
+                    }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => {
                         match decl {
                             Decl::TsInterface(i) => {
@@ -247,6 +250,7 @@ pub(super) fn collect_named_types(
                             Decl::TsTypeAlias(a) => {
                                 collect_one_type_alias(a.as_ref(), &mut map, cm, path)?
                             }
+                            Decl::Class(c) => collect_one_class(c, &mut map, cm, path)?,
                             _ => {}
                         }
                     }
@@ -263,12 +267,61 @@ pub(super) fn collect_named_types(
                     Stmt::Decl(Decl::TsTypeAlias(a)) => {
                         collect_one_type_alias(a.as_ref(), &mut map, cm, path)?;
                     }
+                    Stmt::Decl(Decl::Class(c)) => {
+                        collect_one_class(c, &mut map, cm, path)?;
+                    }
                     _ => {}
                 }
             }
         }
     }
     Ok(map)
+}
+
+fn collect_one_class(
+    c: &ClassDecl,
+    map: &mut HashMap<String, TsType>,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+) -> Result<(), CompileError> {
+    let name = c.ident.sym.to_string();
+    if map.contains_key(&name) {
+        return Err(diag(
+            cm,
+            path,
+            c.class.span,
+            format!("duplicate type name `{name}`"),
+        ));
+    }
+    let mut keys = Vec::new();
+    for m in &c.class.body {
+        if let ClassMember::ClassProp(p) = m {
+            let PropName::Ident(id) = &p.key else {
+                return Err(diag(
+                    cm,
+                    path,
+                    p.span,
+                    "only identifier class fields are supported",
+                ));
+            };
+            keys.push(id.sym.to_string());
+        }
+    }
+    if let Some(sup) = &c.class.super_class {
+        if let Expr::Ident(id) = &**sup {
+            if let Some(TsType::ObjectNum(parent_keys)) = map.get(id.sym.as_ref()) {
+                for k in parent_keys {
+                    if !keys.iter().any(|x| x == k) {
+                        keys.push(k.clone());
+                    }
+                }
+            }
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    map.insert(name, TsType::ObjectNum(keys));
+    Ok(())
 }
 
 fn collect_one_interface(

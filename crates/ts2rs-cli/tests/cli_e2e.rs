@@ -878,6 +878,47 @@ fn compile_method_call_ok_desugars_to_global_fn() {
 }
 
 #[test]
+fn run_class_basic_ok_prints_five() {
+    assert_run_stdout("class_basic_ok.ts", "5\n");
+}
+
+#[test]
+fn run_class_this_method_ok_prints_eight() {
+    assert_run_stdout("class_this_method_ok.ts", "8\n");
+}
+
+#[test]
+fn run_class_extends_ok_prints_seven() {
+    assert_run_stdout("class_extends_ok.ts", "7\n");
+}
+
+#[test]
+fn run_class_super_ctor_ok_prints_seven() {
+    assert_run_stdout("class_super_ctor_ok.ts", "7\n");
+}
+
+#[test]
+fn compile_class_super_invalid_fails() {
+    assert_compile_fails_stderr(
+        "class_super_invalid_fail.ts",
+        "must start with `super(...)`",
+    );
+}
+
+#[test]
+fn compile_class_override_mismatch_fails() {
+    assert_compile_fails_stderr(
+        "class_override_mismatch_fail.ts",
+        "override` method `score` not found in base class",
+    );
+}
+
+#[test]
+fn compile_class_this_scope_fails() {
+    assert_compile_fails_stderr("class_this_scope_fail.ts", "only valid inside class method");
+}
+
+#[test]
 fn run_with_link_ts2rs_rt_prints_main() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
     let main_ts = fixture("multi_entry_main.ts");

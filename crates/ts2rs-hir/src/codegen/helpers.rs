@@ -31,6 +31,7 @@ pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
         TsType::ObjectNum(_) => "std::collections::HashMap<String, i32>",
         TsType::TypeParam(_) => unreachable!("type params must be monomorphized before codegen"),
         TsType::Fn { .. } => "std::rc::Rc<dyn Fn(i32) -> i32>",
+        TsType::ClassInstance(_) => "std::collections::HashMap<String, i32>",
         TsType::Union(_) => unreachable!("rust_ty_scalar: use rust_ty for unions"),
     }
 }
@@ -80,6 +81,7 @@ pub(super) fn stmt_span(s: &IRStmt) -> Span {
         IRStmt::Empty { span }
         | IRStmt::Let { span, .. }
         | IRStmt::Assign { span, .. }
+        | IRStmt::MemberAssign { span, .. }
         | IRStmt::Expr { span, .. }
         | IRStmt::Return { span, .. }
         | IRStmt::Block { span, .. }

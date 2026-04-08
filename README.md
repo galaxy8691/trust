@@ -105,6 +105,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
 | Generics / type args | Partial | Monomorphization subset: explicit type args required at generic call sites; generic declarations are allowed; unsupported broad shapes still rejected |
 | Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` closure codegen path); variable-call `f(...)`, function args/returns covered by e2e fixtures |
+| Class / this / extends / super | Partial | Class subset is lowered to constructor/method functions, with sem checks for extends graph, `super(...)` placement, and baseline `override`; e2e: `class_*` fixtures |
 | Full TypeScript / `tsc` | Not implemented | Long-term |
 
 ### Matrix vs integration tests
@@ -127,6 +128,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Console | `console_stderr.ts`, `void_log.ts` | … |
 | Literal / union / intersection | `literal_type_*.ts`, `union_*.ts` | … |
 | Interface / type / generic subset | `interface_*.ts`, `type_alias_*.ts`, `generic_function_ok.ts` | `run_interface_generic_ok_prints_zero`, `run_type_alias_generic_ok_prints_zero`, `run_generic_function_ok_prints_three` |
+| Class subset | `class_basic_ok.ts`, `class_this_method_ok.ts`, `class_extends_ok.ts`, `class_super_ctor_ok.ts`, `class_*_fail.ts` | `run_class_basic_ok_prints_five`, `run_class_extends_ok_prints_seven`, `compile_class_super_invalid_fails`, `compile_class_override_mismatch_fails` |
 | Nested function | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
 | CLI `check` / `--emit-ir` | `sample.ts`, `switch_fail.ts` | `check_sample_ok`, `compile_emit_ir_stderr_contains_ir_module` |

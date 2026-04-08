@@ -71,6 +71,12 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
         }
         return type_assignable(er, gr);
     }
+    if let (TsType::ClassInstance(a), TsType::ClassInstance(b)) = (expected, got) {
+        return a == b;
+    }
+    if let (TsType::ObjectNum(exp), TsType::ObjectNum(got_keys)) = (expected, got) {
+        return got_keys.iter().all(|k| exp.iter().any(|e| e == k));
+    }
     matches!(
         (expected, got),
         (TsType::Number, TsType::NumberLit(_))

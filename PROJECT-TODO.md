@@ -272,11 +272,11 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 
 ### 13.3 Full OO (`class`, `this`, ctor/inheritance)
 
-- [ ] **Design**: Rust mapping (struct + impl, or explicit rejection of some TS); `export class` and modules.
-- [ ] **build**: `ClassDecl`, methods, fields in HIR (possibly staged).
-- [ ] **sem**: `this`, visibility, inheritance/override (per subset).
-- [ ] **codegen**: dispatch, `super` (if in scope).
-- [ ] **Tests**: class fixtures + negatives for unsupported modifiers.
+- [x] **Design**: Rust mapping (struct + impl, or explicit rejection of some TS); `export class` and modules. (Landed OO subset with class lowering + dyn-trait scaffold in codegen, while preserving hard-typing constraints.)
+- [x] **build**: `ClassDecl`, methods, fields in HIR (possibly staged). (Added class collection/lowering, `new` calls, `this` rewriting, and subclass constructor `super(...)` lowering path.)
+- [x] **sem**: `this`, visibility, inheritance/override (per subset). (Added class validation: extends graph checks, `super(...)` placement checks, and baseline `override` signature/name validation.)
+- [x] **codegen**: dispatch, `super` (if in scope). (Added class dyn-trait emission scaffold and kept runtime path through lowered constructor/method functions.)
+- [x] **Tests**: class fixtures + negatives for unsupported modifiers. (Added class success/failure fixtures + `cli_e2e` coverage for basic class, this-method, extends/super, and override diagnostics.)
 
 ### 13.4 `for..in`
 

@@ -122,6 +122,7 @@ fn rewrite_stmt(
             }
         }
         IRStmt::Assign { rhs, .. } => rewrite_expr(rhs, templates, queue, cm, path, fn_span)?,
+        IRStmt::MemberAssign { rhs, .. } => rewrite_expr(rhs, templates, queue, cm, path, fn_span)?,
         IRStmt::Expr { expr, .. } => rewrite_expr(expr, templates, queue, cm, path, fn_span)?,
         IRStmt::Return { arg, .. } => {
             if let Some(e) = arg {
@@ -283,7 +284,9 @@ fn rewrite_expr(
         | IRExpr::Str(..)
         | IRExpr::Ident(..)
         | IRExpr::Null(..)
-        | IRExpr::Undefined(..) => {}
+        | IRExpr::Undefined(..)
+        | IRExpr::This(..)
+        | IRExpr::Super(..) => {}
     }
     Ok(())
 }
@@ -310,6 +313,7 @@ fn subst_stmts(stmts: &mut [IRStmt], subst: &BTreeMap<String, TsType>) {
                 }
             }
             IRStmt::Assign { rhs, .. } => subst_expr(rhs, subst),
+            IRStmt::MemberAssign { rhs, .. } => subst_expr(rhs, subst),
             IRStmt::Expr { expr, .. } => subst_expr(expr, subst),
             IRStmt::Return { arg, .. } => {
                 if let Some(e) = arg {
@@ -462,7 +466,9 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
         | IRExpr::Str(..)
         | IRExpr::Ident(..)
         | IRExpr::Null(..)
-        | IRExpr::Undefined(..) => {}
+        | IRExpr::Undefined(..)
+        | IRExpr::This(..)
+        | IRExpr::Super(..) => {}
     }
 }
 
@@ -474,6 +480,7 @@ fn subst_type(t: &TsType, subst: &BTreeMap<String, TsType>) -> TsType {
             params: params.iter().map(|x| subst_type(x, subst)).collect(),
             ret: Box::new(subst_type(ret, subst)),
         },
+        TsType::ClassInstance(_) => t.clone(),
         _ => t.clone(),
     }
 }
@@ -503,6 +510,7 @@ fn type_key(t: &TsType) -> String {
         TsType::ObjectNum(fields) => format!("obj{}", fields.join("_")),
         TsType::Union(m) => format!("u{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
         TsType::TypeParam(n) => format!("tp{n}"),
+        TsType::ClassInstance(n) => format!("cls{n}"),
         TsType::Fn { params, ret } => format!(
             "fn{}_r{}",
             params.iter().map(type_key).collect::<Vec<_>>().join("_"),
