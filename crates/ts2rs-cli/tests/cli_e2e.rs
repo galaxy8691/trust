@@ -76,6 +76,33 @@ fn compile_exec_writes_binary_and_runs() {
 }
 
 #[test]
+fn compile_exec_without_o_defaults_to_entry_stem_in_cwd() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("sample.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bin = dir.path().join(if cfg!(windows) {
+        "sample.exe"
+    } else {
+        "sample"
+    });
+    let status = Command::new(&exe)
+        .current_dir(dir.path())
+        .args(["compile", "--exec", ts.to_str().unwrap()])
+        .status()
+        .expect("spawn ts2rs compile --exec without -o");
+    assert!(status.success(), "compile --exec without -o should succeed");
+    let out = Command::new(&bin)
+        .output()
+        .expect("spawn default-named binary");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "3\n");
+}
+
+#[test]
 fn compile_writes_rust() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
     let ts = fixture("sample.ts");

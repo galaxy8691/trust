@@ -32,7 +32,7 @@ fn run(cli: Cli) -> RunOutcome {
             match cmd_compile(
                 &c.graph.inputs,
                 c.graph.project.as_deref(),
-                &c.output,
+                c.output.as_ref(),
                 c.exec,
                 c.span_comments,
                 c.ts_source_comments,

@@ -12,6 +12,25 @@ use ts2rs_parser::validate_imports;
 use crate::graph_loader::{ensure_entry_nonempty, load_module_graph};
 use crate::incremental::{compile_graph_incremental, resolve_incremental_cache_root};
 
+fn default_exec_output_path(entry: &Path) -> Result<PathBuf, String> {
+    let stem = entry.file_stem().filter(|s| !s.is_empty()).ok_or_else(|| {
+        format!(
+            "cannot derive output name from entry path `{}`",
+            entry.display()
+        )
+    })?;
+    #[cfg(windows)]
+    {
+        let mut out = PathBuf::from(stem);
+        out.set_extension("exe");
+        Ok(out)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(PathBuf::from(stem))
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum RunOutcome {
     Ok,
@@ -23,7 +42,7 @@ pub(crate) enum RunOutcome {
 pub(crate) fn cmd_compile(
     inputs: &[PathBuf],
     project: Option<&Path>,
-    output: &PathBuf,
+    output: Option<&PathBuf>,
     exec: bool,
     span_comments: bool,
     ts_source_comments: bool,
@@ -36,6 +55,17 @@ pub(crate) fn cmd_compile(
     let graph = load_module_graph(project, inputs)?;
     ensure_entry_nonempty(&graph)?;
     validate_imports(&graph).map_err(|e| e.to_string())?;
+
+    let out_path: PathBuf = match (output, exec) {
+        (Some(p), _) => p.to_path_buf(),
+        (None, true) => default_exec_output_path(&graph.entry)?,
+        (None, false) => {
+            return Err(
+                "missing output path: use -o / --output (required unless using --exec)".to_string(),
+            );
+        }
+    };
+
     let entry_path = graph.entry_path_str();
     let codegen = CodegenOptions {
         span_comments,
@@ -75,12 +105,12 @@ pub(crate) fn cmd_compile(
             release,
             ..Default::default()
         };
-        build_rust_and_copy_with_options(&rust, output, &opts).map_err(|e| e.to_string())?;
+        build_rust_and_copy_with_options(&rust, &out_path, &opts).map_err(|e| e.to_string())?;
     } else {
-        if let Some(parent) = output.parent() {
+        if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        fs::write(output, rust).map_err(|e| e.to_string())?;
+        fs::write(&out_path, rust).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

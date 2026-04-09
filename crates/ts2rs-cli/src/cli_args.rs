@@ -57,7 +57,7 @@ pub(crate) struct GlobalOpts {
 
 #[derive(Subcommand)]
 pub(crate) enum Commands {
-    /// 解析、HIR、语义检查，生成 Rust 写入 `-o`
+    /// 解析、HIR、语义检查；非 `--exec` 须 `-o` 写 `.rs`，`--exec` 可省略 `-o`（默认同名可执行文件于当前目录）
     Compile(CompileCmd),
     /// 生成 Rust、临时 crate 中 cargo build 并运行入口 `main`
     Run(RunCmd),
@@ -79,9 +79,9 @@ pub(crate) struct GraphInput {
 pub(crate) struct CompileCmd {
     #[command(flatten)]
     pub(crate) graph: GraphInput,
-    /// 输出路径：默认为生成的 `.rs`；`--exec` 时为可执行文件路径
+    /// 输出路径：非 `--exec` 时必填（生成的 `.rs`）；`--exec` 时为可执行文件路径，省略则默认为**当前目录**下入口文件主文件名（与 `run` 的入口一致，含 `--project`）
     #[arg(short, long)]
-    pub(crate) output: PathBuf,
+    pub(crate) output: Option<PathBuf>,
     /// 在生成 Rust 后经临时 crate `cargo build`，将可执行文件写到 `-o`（不再写入 `.rs`）
     #[arg(long)]
     pub(crate) exec: bool,

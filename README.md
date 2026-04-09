@@ -118,7 +118,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 
 | Theme | Representative fixtures | Representative tests |
 |-------|-------------------------|-------------------------|
-| Single file / ops / strings | `sample.ts`, `ops.ts`, `boolean_if.ts`, `string_concat.ts` | `compile_writes_rust`, `compile_exec_writes_binary_and_runs`, `run_prints_main_result`, … |
+| Single file / ops / strings | `sample.ts`, `ops.ts`, `boolean_if.ts`, `string_concat.ts` | `compile_writes_rust`, `compile_exec_writes_binary_and_runs`, `compile_exec_without_o_defaults_to_entry_stem_in_cwd`, `run_prints_main_result`, … |
 | Import / multi-file | `import_add_main.ts` + `add_dep.ts`, `multi_entry_*`, `export_main.ts` | `run_import_add_main_prints_three`, … |
 | Incremental HIR cache (`--incremental`) | ad hoc `lib.ts` + `app.ts` in e2e tempdir | `compile_incremental_rebuilds_only_changed_module` |
 | Negative import/export | `import_missing_export_*`, `circular_*`, `dup_*`, `export_*_fail.ts` | `compile_import_missing_export_fails`, … |
@@ -175,6 +175,8 @@ cargo test
 ```bash
 cargo run -p ts2rs-cli -- compile path/to/app.ts -o out.rs
 cargo run -p ts2rs-cli -- compile path/to/app.ts -o ./my-app --exec
+# --exec 可省略 -o：在当前目录生成与入口同名的可执行文件（如 app）
+cargo run -p ts2rs-cli -- compile --exec path/to/app.ts
 cargo run -p ts2rs-cli -- compile path/to/entry.ts path/to/extra.ts -o out.rs
 cargo run -p ts2rs-cli -- run path/to/app.ts
 cargo run -p ts2rs-cli -- run --project path/to/tsconfig.json
@@ -186,7 +188,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 
 | Subcommand | Role |
 |------------|------|
-| **`compile`** | Parse → HIR → sem → Rust written to **`-o` / `--output`** (default); with **`--exec`**, temp crate + **`cargo build`** and copy the **executable** to **`-o`** (not `.rs`) |
+| **`compile`** | Parse → HIR → sem → Rust written to **`-o` / `--output`** (**required** unless **`--exec`**); with **`--exec`**, temp crate + **`cargo build`** and copy the **executable** to **`-o`**, or to **`<entry-stem>`** in the **current directory** if **`-o`** is omitted |
 | **`run`** | Same, then temp crate, **`cargo build`** (default **`--release`**) and run |
 | **`check`** | Parse + HIR + **semantics only**; no `.rs`, no `cargo` |
 
@@ -197,7 +199,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | **`-q` / `--quiet`** | Suppress warnings on success (errors still stderr) |
 | **`--color`** | `auto` / `always` / `never` for help styling; interacts with `NO_COLOR` |
 
-**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/ts2rs-hir/src/ir.rs) `Debug` to stderr), **`--exec`** (see table: **`-o`** is the executable path; uses `cargo` like `run`), **`--incremental` / `--incremental DIR`** (multi-file HIR fragment cache; default dir `.ts2rs-cache` when flag is present without value). With **`--exec`** only: **`--link-ts2rs-rt`**, **`--debug`**, **`-O` / `--release`** (same semantics and mutual exclusion as `run`).
+**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/ts2rs-hir/src/ir.rs) `Debug` to stderr), **`--exec`** (see table: **`-o`** is the executable path, or default **entry file stem** under **cwd** — on **Windows** the default name gets a **`.exe`** suffix; uses `cargo` like `run`), **`--incremental` / `--incremental DIR`** (multi-file HIR fragment cache; default dir `.ts2rs-cache` when flag is present without value). With **`--exec`** only: **`--link-ts2rs-rt`**, **`--debug`**, **`-O` / `--release`** (same semantics and mutual exclusion as `run`).
 
 **`run`**: `--link-ts2rs-rt`; **`--debug`** → debug `cargo build`; **`-O` / `--release`** (conflicts with `--debug`); **`--incremental`** same as `compile`.
 
