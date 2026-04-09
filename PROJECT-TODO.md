@@ -230,7 +230,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 Multi-file **parallel semantic checking** is implemented (`rayon`; details under **§14 — Performance and security**). This section keeps only what is still open.
 
-- [ ] **Incremental compile**: multi-file, recompile only changed modules.
+- [x] **Incremental compile**: multi-file, recompile only changed modules (opt-in `--incremental` on `compile` / `run`; HIR fragment cache under configurable dir, default `.ts2rs-cache`; importers of changed files rebuilt). Implementation: [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs), [`ir_cache`](crates/ts2rs-hir/src/ir_cache/mod.rs), [`forward_deps`](crates/ts2rs-parser/src/module_graph.rs). Tests: `compile_incremental_rebuilds_only_changed_module`, `module_fragment_round_trip_bincode`.
 
 ---
 
@@ -328,7 +328,7 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 ### Performance and security (aligned with §10–§11; **parallelism / codegen safety / driver resources** are tracked here)
 
-- [ ] **Incremental compile** (multi-file, only rebuild changed modules; same open item as §10).
+- [x] **Incremental compile** (multi-file, only rebuild changed modules; same item as §10 — done).
 - [x] **Parallelize** multi-file semantic checks. (Per-function [`check_function`](crates/ts2rs-hir/src/sem.rs) runs under **`rayon`** `par_iter_mut`; [`SendSourceMap`](crates/ts2rs-hir/src/ir.rs) makes [`IRFunction`](crates/ts2rs-hir/src/ir.rs) `Send` despite `swc` `Lrc`; warning order matches `module.fns`.)
 - [x] **Generated-code safety**: string escaping / `println!` injection audit. (Class `__class_name` literal uses `Debug` escaping; [`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) documents fixed format templates; template literals already brace-escape in [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs).)
 - [x] **Driver resource limits**: optional timeout / memory around `cargo` subprocess. ([`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs) + [`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs); [`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) uses [`wait_timeout::ChildExt`].)

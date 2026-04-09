@@ -4,13 +4,21 @@ mod build;
 mod codegen;
 mod error;
 mod ir;
+mod ir_cache;
 mod json_parse_fold;
 mod sem;
 
-pub use build::{build_module, build_program_multi};
+pub use build::{
+    build_module, build_module_ir_fragment, build_program_multi, merge_module_ir_fragments,
+    ModuleIrFragment,
+};
 pub use codegen::{emit_rust, emit_rust_with_options, CodegenOptions};
 pub use error::{CompileError, CompileWarning};
 pub use ir::*;
+pub use ir_cache::{
+    decode_fragment_from_bytes, encode_fragment_to_bytes, source_map_for_path, IrCacheError,
+    SCHEMA_VERSION,
+};
 
 pub use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
@@ -70,6 +78,18 @@ pub fn compile_graph_with_options(
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
     let (module, warnings) = build_checked_module(units, entry_path)?;
+    let rust = emit_rust_with_options(&module, codegen)?;
+    Ok((rust, warnings))
+}
+
+/// 已构建的模块片段按图顺序合并后：语义检查 + Rust 生成（与全量 [`compile_graph_with_options`] 等价）。
+pub fn compile_merged_fragments_with_options(
+    fragments: &[(String, ModuleIrFragment)],
+    entry_path: &str,
+    codegen: &CodegenOptions,
+) -> Result<(String, Vec<CompileWarning>), CompileError> {
+    let mut module = crate::build::merge_module_ir_fragments(fragments, entry_path)?;
+    let warnings = sem::check_module(&mut module)?;
     let rust = emit_rust_with_options(&module, codegen)?;
     Ok((rust, warnings))
 }

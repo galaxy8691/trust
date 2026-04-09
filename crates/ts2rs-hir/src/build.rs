@@ -106,41 +106,62 @@ pub fn build_module(
     })
 }
 
-/// 多文件模块图：合并各模块中的顶层函数，要求全局函数名唯一；`entry_path` 用于语义上定位 `main`。
-pub fn build_program_multi(
-    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
+/// 单文件在多文件合并前产出的 HIR 片段（可缓存、再与 [`merge_module_ir_fragments`] 合并）。
+#[derive(Debug)]
+pub struct ModuleIrFragment {
+    pub fns: Vec<IRFunction>,
+    pub classes: Vec<IRClass>,
+    pub ts_comments: Option<TsLeadingComments>,
+}
+
+/// 从单个已解析模块构建 IR 片段；`multi_file` 为 true 时与 [`build_program_multi`] 中单文件语义一致。
+pub fn build_module_ir_fragment(
+    path: &str,
+    program: &Program,
+    cm: &Lrc<SourceMap>,
+    file_comments: &SingleThreadedComments,
+    multi_file: bool,
+    next_id: &mut u32,
+) -> Result<ModuleIrFragment, CompileError> {
+    let mut errs = Vec::new();
+    let iface = build_types::collect_named_types_with_errors(program, cm, path, &mut errs);
+    let classes = collect_class_decls(program, cm, path, &iface, &mut errs);
+    let mut fns = collect_fn_decls(program, cm, path, multi_file, next_id, &iface, &mut errs);
+    let mut lowered = lower_classes_to_functions(&classes, cm, path, next_id, &iface)?;
+    fns.append(&mut lowered);
+    if !errs.is_empty() {
+        return Err(CompileError::merge_sorted(errs));
+    }
+    let frozen = freeze_leading_comments(file_comments);
+    let ts_comments = if frozen.is_empty() {
+        None
+    } else {
+        Some(frozen)
+    };
+    Ok(ModuleIrFragment {
+        fns,
+        classes,
+        ts_comments,
+    })
+}
+
+/// 按 **图顺序** 合并片段（与 [`build_program_multi`] 遍历 `units` 顺序一致）；合并后重编 `ir_id`。
+pub fn merge_module_ir_fragments(
+    fragments: &[(String, ModuleIrFragment)],
     entry_path: &str,
 ) -> Result<IRModule, CompileError> {
-    let mut next_id = 0u32;
     let mut all = Vec::new();
     let mut classes_all = Vec::new();
     let mut all_errs = Vec::new();
     let mut ts_comments_by_path = HashMap::new();
-    for (path, program, cm, file_comments) in units {
-        let mut errs = Vec::new();
-        let iface =
-            build_types::collect_named_types_with_errors(program, cm, path.as_str(), &mut errs);
-        let classes = collect_class_decls(program, cm, path.as_str(), &iface, &mut errs);
-        let mut fns = collect_fn_decls(
-            program,
-            cm,
-            path.as_str(),
-            true,
-            &mut next_id,
-            &iface,
-            &mut errs,
-        );
-        let mut lowered =
-            lower_classes_to_functions(&classes, cm, path.as_str(), &mut next_id, &iface)?;
-        classes_all.extend(classes);
-        fns.append(&mut lowered);
-        all.append(&mut fns);
-        all_errs.extend(errs);
-        let frozen = freeze_leading_comments(file_comments);
-        if !frozen.is_empty() {
-            ts_comments_by_path.insert(path.clone(), frozen);
+    for (path, frag) in fragments {
+        classes_all.extend(frag.classes.iter().cloned());
+        all.extend(frag.fns.iter().cloned());
+        if let Some(c) = &frag.ts_comments {
+            ts_comments_by_path.insert(path.clone(), c.clone());
         }
     }
+    reassign_ir_ids(&mut all);
     let mut seen = std::collections::HashSet::<String>::new();
     for f in &all {
         if !seen.insert(f.name.clone()) {
@@ -163,6 +184,33 @@ pub fn build_program_multi(
         entry_path: entry_path.to_string(),
         ts_comments_by_path,
     })
+}
+
+fn reassign_ir_ids(fns: &mut [IRFunction]) {
+    for (i, f) in fns.iter_mut().enumerate() {
+        f.ir_id = i as u32;
+    }
+}
+
+/// 多文件模块图：合并各模块中的顶层函数，要求全局函数名唯一；`entry_path` 用于语义上定位 `main`。
+pub fn build_program_multi(
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
+    entry_path: &str,
+) -> Result<IRModule, CompileError> {
+    let mut next_id = 0u32;
+    let mut fragments: Vec<(String, ModuleIrFragment)> = Vec::with_capacity(units.len());
+    for (path, program, cm, file_comments) in units {
+        let frag = build_module_ir_fragment(
+            path.as_str(),
+            program,
+            cm,
+            file_comments,
+            true,
+            &mut next_id,
+        )?;
+        fragments.push((path.clone(), frag));
+    }
+    merge_module_ir_fragments(&fragments, entry_path)
 }
 
 fn collect_class_decls(

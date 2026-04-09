@@ -1,6 +1,6 @@
 //! 多文件模块图：递归解析相对路径 `import`，不合并 AST。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -48,6 +48,95 @@ impl ParsedModuleGraph {
     pub fn entry_path_str(&self) -> String {
         self.entry.to_string_lossy().into_owned()
     }
+
+    /// Canonical path for a module in this graph（与 [`Self::forward_deps`] 的 key 一致）。
+    pub fn canonical_module_path(pm: &ParsedModule) -> PathBuf {
+        pm.path.canonicalize().unwrap_or_else(|_| pm.path.clone())
+    }
+
+    /// 每个模块直接依赖的其它模块（canonical path）；与 [`visit_module`] 的 import / re-export 规则一致。
+    pub fn forward_deps(&self) -> Result<HashMap<PathBuf, Vec<PathBuf>>, ParseError> {
+        let mut m = HashMap::new();
+        for pm in &self.modules {
+            let canon = Self::canonical_module_path(pm);
+            let deps = program_direct_deps(&pm.path, &pm.source.program)?;
+            m.insert(canon, deps);
+        }
+        Ok(m)
+    }
+
+    /// `dirty` 为内容已变的模块（canonical path）。返回需重建 HIR 的模块集：
+    /// `dirty` ∪ 所有（直接 or 传递）**导入**了 `dirty` 中任一节点的模块。
+    pub fn rebuild_transitive_importers(
+        &self,
+        dirty: &HashSet<PathBuf>,
+    ) -> Result<HashSet<PathBuf>, ParseError> {
+        let forward = self.forward_deps()?;
+        Ok(rebuild_transitive_importers_from_forward(&forward, dirty))
+    }
+}
+
+/// 由正向依赖图计算增量重建集合（供测试与调用方复用）。
+pub fn rebuild_transitive_importers_from_forward(
+    forward: &HashMap<PathBuf, Vec<PathBuf>>,
+    dirty: &HashSet<PathBuf>,
+) -> HashSet<PathBuf> {
+    let mut reverse: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    for (from, deps) in forward {
+        for d in deps {
+            reverse.entry(d.clone()).or_default().push(from.clone());
+        }
+    }
+    let mut out: HashSet<PathBuf> = dirty.clone();
+    let mut q: VecDeque<PathBuf> = dirty.iter().cloned().collect();
+    while let Some(dep) = q.pop_front() {
+        if let Some(importers) = reverse.get(&dep) {
+            for imp in importers {
+                if out.insert(imp.clone()) {
+                    q.push_back(imp.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn program_direct_deps(module_path: &Path, program: &Program) -> Result<Vec<PathBuf>, ParseError> {
+    let mut seen = HashSet::<PathBuf>::new();
+    let mut out = Vec::new();
+    let Program::Module(ref m) = program else {
+        return Ok(out);
+    };
+    for item in &m.body {
+        match item {
+            ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) => {
+                let dep = resolve_supported_import_path(module_path, imp)?;
+                let c = dep.canonicalize().unwrap_or(dep);
+                if seen.insert(c.clone()) {
+                    out.push(c);
+                }
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) if !ea.type_only => {
+                let dep = resolve_relative_ts_path(module_path, &ea.src)?;
+                let c = dep.canonicalize().unwrap_or(dep);
+                if seen.insert(c.clone()) {
+                    out.push(c);
+                }
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(ne))
+                if ne.src.is_some() && !ne.type_only =>
+            {
+                let dep =
+                    resolve_relative_ts_path(module_path, ne.src.as_deref().expect("checked"))?;
+                let c = dep.canonicalize().unwrap_or(dep);
+                if seen.insert(c.clone()) {
+                    out.push(c);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 /// 从入口 `.ts` 文件解析所有可达模块（相对路径 import）。
@@ -483,5 +572,60 @@ mod tests {
             s.contains("duplicate exported function"),
             "expected duplicate export diagnostic, got: {s}"
         );
+    }
+
+    #[test]
+    fn rebuild_transitive_importers_chain() {
+        let mut forward = HashMap::new();
+        forward.insert(p("C"), vec![]);
+        forward.insert(p("B"), vec![p("C")]);
+        forward.insert(p("A"), vec![p("B")]);
+        let dirty = HashSet::from([p("C")]);
+        let r = rebuild_transitive_importers_from_forward(&forward, &dirty);
+        assert_eq!(r, HashSet::from([p("A"), p("B"), p("C")]));
+    }
+
+    #[test]
+    fn rebuild_transitive_importers_middle_dirty() {
+        let mut forward = HashMap::new();
+        forward.insert(p("C"), vec![]);
+        forward.insert(p("B"), vec![p("C")]);
+        forward.insert(p("A"), vec![p("B")]);
+        let dirty = HashSet::from([p("B")]);
+        let r = rebuild_transitive_importers_from_forward(&forward, &dirty);
+        assert_eq!(r, HashSet::from([p("A"), p("B")]));
+    }
+
+    #[test]
+    fn forward_deps_and_rebuild_match_visit_order() {
+        let dir = tempdir().unwrap();
+        let c = dir.path().join("c.ts");
+        let b = dir.path().join("b.ts");
+        let a = dir.path().join("a.ts");
+        fs::write(&c, "export function c(): number { return 0; }\n").unwrap();
+        fs::write(
+            &b,
+            "import { c } from \"./c.ts\";\nexport function b(): number { return c(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            &a,
+            "import { b } from \"./b.ts\";\nexport function main(): number { return b(); }\n",
+        )
+        .unwrap();
+        let g = parse_module_graph(&a).unwrap();
+        let _ = g.forward_deps().unwrap();
+        let c_canon = c.canonicalize().unwrap();
+        let rebuild = g
+            .rebuild_transitive_importers(&HashSet::from([c_canon]))
+            .unwrap();
+        assert!(rebuild.len() >= 3);
+        for pm in &g.modules {
+            assert!(rebuild.contains(&ParsedModuleGraph::canonical_module_path(pm)));
+        }
+    }
+
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s)
     }
 }

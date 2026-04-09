@@ -94,6 +94,14 @@ pub(crate) struct CompileCmd {
     /// 将 [`ts2rs_hir::IRModule`] 的 `Debug` 打到 stderr（调试用，输出可能很大）
     #[arg(long)]
     pub(crate) emit_ir: bool,
+    /// 多文件时缓存各模块 HIR 片段；仅重编变更文件及其 importers。目录默认 `.ts2rs-cache`（相对当前工作目录）
+    #[arg(
+        long,
+        value_name = "DIR",
+        num_args = 0..=1,
+        default_missing_value = ".ts2rs-cache"
+    )]
+    pub(crate) incremental: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -114,6 +122,14 @@ pub(crate) struct RunCmd {
         conflicts_with = "debug"
     )]
     pub(crate) release_flag: bool,
+    /// 同 `compile --incremental`（HIR 片段缓存）
+    #[arg(
+        long,
+        value_name = "DIR",
+        num_args = 0..=1,
+        default_missing_value = ".ts2rs-cache"
+    )]
+    pub(crate) incremental: Option<PathBuf>,
 }
 
 #[derive(Args)]

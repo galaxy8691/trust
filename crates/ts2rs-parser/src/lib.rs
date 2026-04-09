@@ -158,7 +158,8 @@ pub fn parse_typescript_file(
 
 pub use module_graph::{
     effective_exported_function_names_by_path, exported_function_names, parse_module_graph,
-    parse_module_graph_with_extra_roots, validate_imports, ParsedModule, ParsedModuleGraph,
+    parse_module_graph_with_extra_roots, rebuild_transitive_importers_from_forward,
+    validate_imports, ParsedModule, ParsedModuleGraph,
 };
 #[allow(deprecated)]
 pub use resolve_imports::parse_typescript_resolving_imports;

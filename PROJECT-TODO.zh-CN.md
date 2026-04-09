@@ -228,7 +228,7 @@
 
 多文件 **语义检查并行** 已实现（`rayon`），详见下文 **§14「性能与安全」**；本节仅保留仍为 backlog 的项。
 
-- [ ] **增量编译**：多文件时只重编译变更模块。
+- [x] **增量编译**：多文件时只重编译变更模块（`compile` / `run` 可选 `--incremental`，HIR 片段缓存目录默认可为 `.ts2rs-cache`；变更模块的 **importers** 一并重编）。实现：[`incremental.rs`](crates/ts2rs-cli/src/incremental.rs)、[`ir_cache`](crates/ts2rs-hir/src/ir_cache/mod.rs)、[`forward_deps`](crates/ts2rs-parser/src/module_graph.rs)。验收：`compile_incremental_rebuilds_only_changed_module`、`module_fragment_round_trip_bincode`。
 
 ---
 
@@ -326,7 +326,7 @@
 
 ### 性能与安全（与 §10–§11 对齐；**并行 / 代码安全 / driver 资源**以本节勾选为准）
 
-- [ ] **增量编译**（多文件、仅重编变更模块；与 §10 唯一开放项相同）。
+- [x] **增量编译**（多文件、仅重编变更模块；与 §10 同条，已勾选）。
 - [x] **并行**多文件语义检查。（各函数的 [`check_function`](crates/ts2rs-hir/src/sem.rs) 经 **`rayon`** `par_iter_mut` 并行；[`SendSourceMap`](crates/ts2rs-hir/src/ir.rs) 使 [`IRFunction`](crates/ts2rs-hir/src/ir.rs) 在 `swc` `Lrc` 下仍可 `Send`；警告顺序与 `module.fns` 一致。）
 - [x] **生成代码安全**：字符串转义、`println!` 注入等审计。（类 `__class_name` 字符串字面量用 `Debug` 转义；[`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs) 标明格式串为固定模板；模板字面量在 [`emit_tpl`](crates/ts2rs-hir/src/codegen.rs) 中已对 `{`/`}` 转义。）
 - [x] **Driver 资源限制**：对子进程 `cargo` 的可选超时/内存上限。（[`RustBuildOptions::cargo_timeout`](crates/ts2rs-driver/src/lib.rs)、[`max_cargo_output_bytes`](crates/ts2rs-driver/src/lib.rs)；[`cargo_build`](crates/ts2rs-driver/src/cargo_runner.rs) 使用 [`wait_timeout::ChildExt`]。）

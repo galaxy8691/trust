@@ -1311,3 +1311,84 @@ fn run_with_link_ts2rs_rt_prints_main() {
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout), "42\n");
 }
+
+fn parse_fragment_rebuilds(stderr: &str) -> u32 {
+    for line in stderr.lines() {
+        if let Some(rest) = line.strip_prefix("ts2rs_fragment_rebuilds=") {
+            return rest.trim().parse().expect("parse fragment rebuild count");
+        }
+    }
+    panic!("missing ts2rs_fragment_rebuilds in stderr:\n{stderr}");
+}
+
+#[test]
+fn compile_incremental_rebuilds_only_changed_module() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dep = dir.path().join("lib.ts");
+    let app = dir.path().join("app.ts");
+    std::fs::write(
+        &dep,
+        "export function add(a: number, b: number): number { return a + b; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &app,
+        "import { add } from \"./lib.ts\";\nexport function main(): number { return add(1, 2); }\n",
+    )
+    .unwrap();
+    let cache = dir.path().join("incr-cache");
+    let out_rs = dir.path().join("out.rs");
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let o1 = Command::new(&exe)
+        .env("TS2RS_TEST_FRAGMENT_STATS", "1")
+        .args([
+            "compile",
+            app.to_str().unwrap(),
+            "-o",
+            out_rs.to_str().unwrap(),
+            "--incremental",
+            cache.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn ts2rs compile incremental");
+    assert!(
+        o1.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&o1.stderr)
+    );
+    let s1 = String::from_utf8_lossy(&o1.stderr);
+    assert_eq!(
+        parse_fragment_rebuilds(&s1),
+        2,
+        "first compile should build both modules: {s1}"
+    );
+
+    std::fs::write(
+        &app,
+        "import { add } from \"./lib.ts\";\nexport function main(): number { return add(2, 3); }\n",
+    )
+    .unwrap();
+    let o2 = Command::new(&exe)
+        .env("TS2RS_TEST_FRAGMENT_STATS", "1")
+        .args([
+            "compile",
+            app.to_str().unwrap(),
+            "-o",
+            out_rs.to_str().unwrap(),
+            "--incremental",
+            cache.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn ts2rs compile incremental 2");
+    assert!(
+        o2.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&o2.stderr)
+    );
+    let s2 = String::from_utf8_lossy(&o2.stderr);
+    assert_eq!(
+        parse_fragment_rebuilds(&s2),
+        1,
+        "second compile should rebuild only app (and not lib): {s2}"
+    );
+}

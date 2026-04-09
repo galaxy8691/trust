@@ -1,6 +1,7 @@
 mod cli_args;
 mod commands;
 mod graph_loader;
+mod incremental;
 mod tsconfig_resolve;
 
 use clap::Parser;
@@ -33,6 +34,7 @@ fn run(cli: Cli) -> RunOutcome {
             c.span_comments,
             c.ts_source_comments,
             c.emit_ir,
+            c.incremental.as_ref(),
             quiet,
         ) {
             Ok(()) => RunOutcome::Ok,
@@ -45,6 +47,7 @@ fn run(cli: Cli) -> RunOutcome {
                 r.graph.project.as_deref(),
                 r.link_ts2rs_rt,
                 release,
+                r.incremental.as_ref(),
                 quiet,
             )
         }

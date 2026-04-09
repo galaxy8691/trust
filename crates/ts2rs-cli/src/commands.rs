@@ -8,6 +8,7 @@ use ts2rs_lower::{check_module_graph, lower_module_graph};
 use ts2rs_parser::validate_imports;
 
 use crate::graph_loader::{ensure_entry_nonempty, load_module_graph};
+use crate::incremental::{compile_graph_incremental, resolve_incremental_cache_root};
 
 #[derive(Debug)]
 pub(crate) enum RunOutcome {
@@ -16,6 +17,7 @@ pub(crate) enum RunOutcome {
     ChildFailed(i32),
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn cmd_compile(
     inputs: &[PathBuf],
     project: Option<&Path>,
@@ -23,27 +25,44 @@ pub(crate) fn cmd_compile(
     span_comments: bool,
     ts_source_comments: bool,
     emit_ir: bool,
+    incremental: Option<&PathBuf>,
     quiet: bool,
 ) -> Result<(), String> {
     let graph = load_module_graph(project, inputs)?;
     ensure_entry_nonempty(&graph)?;
     validate_imports(&graph).map_err(|e| e.to_string())?;
-    let units = graph.compile_units();
     let entry_path = graph.entry_path_str();
     let codegen = CodegenOptions {
         span_comments,
         emit_ts_source_comments: ts_source_comments,
     };
 
-    let (module, warnings) =
-        build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
+    let (rust, warnings, module_for_emit_ir) = if let Some(dir) = incremental {
+        let cache_root = resolve_incremental_cache_root(dir);
+        let (rust, warnings) = compile_graph_incremental(&graph, &cache_root, &codegen)?;
+        (rust, warnings, None::<ts2rs_hir::IRModule>)
+    } else {
+        let units = graph.compile_units();
+        let (module, warnings) =
+            build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
+        let rust = emit_rust_with_options(&module, &codegen).map_err(|e| e.to_string())?;
+        (rust, warnings, Some(module))
+    };
+
     if !quiet {
         print_warnings(&warnings);
     }
     if emit_ir {
-        eprintln!("{:#?}", module);
+        match module_for_emit_ir {
+            Some(m) => eprintln!("{:#?}", m),
+            None => {
+                let units = graph.compile_units();
+                let (m, _) =
+                    build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
+                eprintln!("{:#?}", m);
+            }
+        }
     }
-    let rust = emit_rust_with_options(&module, &codegen).map_err(|e| e.to_string())?;
 
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -57,6 +76,7 @@ pub(crate) fn cmd_run(
     project: Option<&Path>,
     link_ts2rs_rt: bool,
     release: bool,
+    incremental: Option<&PathBuf>,
     quiet: bool,
 ) -> RunOutcome {
     let graph = match load_module_graph(project, inputs) {
@@ -69,10 +89,22 @@ pub(crate) fn cmd_run(
     if let Err(e) = validate_imports(&graph) {
         return RunOutcome::Ts2rsErr(e.to_string());
     }
-    let units = graph.compile_units();
-    let (rust, warnings) = match lower_module_graph(&units, &graph.entry_path_str()) {
-        Ok(x) => x,
-        Err(e) => return RunOutcome::Ts2rsErr(e.to_string()),
+    let codegen = CodegenOptions::default();
+    let (rust, warnings) = match incremental {
+        Some(dir) => {
+            let cache_root = resolve_incremental_cache_root(dir);
+            match compile_graph_incremental(&graph, &cache_root, &codegen) {
+                Ok(x) => x,
+                Err(e) => return RunOutcome::Ts2rsErr(e),
+            }
+        }
+        None => {
+            let units = graph.compile_units();
+            match lower_module_graph(&units, &graph.entry_path_str()) {
+                Ok(x) => x,
+                Err(e) => return RunOutcome::Ts2rsErr(e.to_string()),
+            }
+        }
     };
     if !quiet {
         print_warnings(&warnings);

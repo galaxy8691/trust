@@ -51,7 +51,7 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 - **Matrix coverage**: rows marked Supported / Partially supported have representative **fixtures** ([`fixtures/`](crates/ts2rs-cli/tests/fixtures/)) and **[`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)** tests; see **[Matrix vs integration tests](#matrix-vs-integration-tests)**. Larger examples: [`test-ts/main.ts`](test-ts/main.ts), [`test-ts/math.ts`](test-ts/math.ts). **Regression** cases: [`tests/regression/`](crates/ts2rs-cli/tests/regression/).
 - **Diagnostics**: compile **errors** are **English**, `path:line:col: message` ([`CompileError`](crates/ts2rs-hir/src/error.rs)). **Warnings** (e.g. unreachable code) use the same shape via [`CompileWarning`](crates/ts2rs-hir/src/error.rs); on success the CLI prints warnings to **stderr** and does **not** change exit code.
 - **CI**: pushes and PRs run `cargo fmt --all --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
-- **Not 1.0**: full `tsc` tsconfig parity, `export default`, `export * as`, etc. **npm / `node_modules` / package-manager resolution is not planned.** **Relative** `import { x } from "./dep.ts"` and relative **`export *` / `export { … } from`** (barrel files) are supported; the CLI supports **multiple roots** (positional `.ts`) or **`--project`** JSON with simplified **`extends`**, **`files`**, **`include` / `exclude` glob** ([`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs), [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs), [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs), HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)); entry must define `main`, global function names unique.
+- **Not 1.0**: full `tsc` tsconfig parity, `export default`, `export * as`, etc. **npm / `node_modules` / package-manager resolution is not planned.** **Relative** `import { x } from "./dep.ts"` and relative **`export *` / `export { … } from`** (barrel files) are supported; the CLI supports **multiple roots** (positional `.ts`) or **`--project`** JSON with simplified **`extends`**, **`files`**, **`include` / `exclude` glob** ([`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs), [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs), [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs), HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)); entry must define `main`, global function names unique. **Optional incremental** (`compile` / `run --incremental [DIR]`): caches per-module HIR to disk (default dir `.ts2rs-cache`); still parses all `.ts` each run; see [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs).
 
 ## Diagnostics and surface (§1.1)
 
@@ -120,6 +120,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 |-------|-------------------------|-------------------------|
 | Single file / ops / strings | `sample.ts`, `ops.ts`, `boolean_if.ts`, `string_concat.ts` | `compile_writes_rust`, `run_prints_main_result`, … |
 | Import / multi-file | `import_add_main.ts` + `add_dep.ts`, `multi_entry_*`, `export_main.ts` | `run_import_add_main_prints_three`, … |
+| Incremental HIR cache (`--incremental`) | ad hoc `lib.ts` + `app.ts` in e2e tempdir | `compile_incremental_rebuilds_only_changed_module` |
 | Negative import/export | `import_missing_export_*`, `circular_*`, `dup_*`, `export_*_fail.ts` | `compile_import_missing_export_fails`, … |
 | `let` / `const` / blocks | `const_ok.ts`, `assign_simple.ts`, `empty_stmt.ts`, `let_if.ts` | `run_const_ok_prints_42`, … |
 | Semantics (shadow, void branch) | `let_dup_same_block_fail.ts`, `void_log_in_branch.ts`, … | `compile_*`, `run_void_log_in_branch_prints_branch` |
@@ -176,6 +177,7 @@ cargo run -p ts2rs-cli -- compile path/to/app.ts -o out.rs
 cargo run -p ts2rs-cli -- compile path/to/entry.ts path/to/extra.ts -o out.rs
 cargo run -p ts2rs-cli -- run path/to/app.ts
 cargo run -p ts2rs-cli -- run --project path/to/tsconfig.json
+cargo run -p ts2rs-cli -- compile path/to/entry.ts -o out.rs --incremental .ts2rs-cache
 cargo run -p ts2rs-cli -- check path/to/app.ts
 ```
 
@@ -194,9 +196,9 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | **`-q` / `--quiet`** | Suppress warnings on success (errors still stderr) |
 | **`--color`** | `auto` / `always` / `never` for help styling; interacts with `NO_COLOR` |
 
-**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/ts2rs-hir/src/ir.rs) `Debug` to stderr), `--link-ts2rs-rt` (no-op for compile).
+**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/ts2rs-hir/src/ir.rs) `Debug` to stderr), `--link-ts2rs-rt` (no-op for compile), **`--incremental` / `--incremental DIR`** (multi-file HIR fragment cache; default dir `.ts2rs-cache` when flag is present without value).
 
-**`run`**: `--link-ts2rs-rt`; **`--debug`** → debug `cargo build`; **`-O` / `--release`** (conflicts with `--debug`).
+**`run`**: `--link-ts2rs-rt`; **`--debug`** → debug `cargo build`; **`-O` / `--release`** (conflicts with `--debug`); **`--incremental`** same as `compile`.
 
 **Exit codes**: **0** success; **1** ts2rs/driver errors; **`run`** propagates child process exit code when the binary fails; warnings do not change exit code.
 
@@ -209,11 +211,11 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | Crate | Role |
 |-------|------|
 | `ts2rs-parser` | swc wrapper; `ParsedSource` (`program`, `source_map`, `comments`); [`module_graph`](crates/ts2rs-parser/src/module_graph.rs); shared import parsing in [`import_utils`](crates/ts2rs-parser/src/import_utils.rs) |
-| `ts2rs-hir` | IR, build, sem, `emit_rust`; [`compile_graph`](crates/ts2rs-hir/src/lib.rs); split helpers: [`build/build_types.rs`](crates/ts2rs-hir/src/build/build_types.rs), [`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs), [`codegen/helpers.rs`](crates/ts2rs-hir/src/codegen/helpers.rs) |
+| `ts2rs-hir` | IR, build, sem, `emit_rust`; [`compile_graph`](crates/ts2rs-hir/src/lib.rs); [`ir_cache`](crates/ts2rs-hir/src/ir_cache/mod.rs) (incremental disk snapshots); split helpers: [`build/build_types.rs`](crates/ts2rs-hir/src/build/build_types.rs), [`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs), [`codegen/helpers.rs`](crates/ts2rs-hir/src/codegen/helpers.rs) |
 | `ts2rs-lower` | [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) |
 | `ts2rs-driver` | Temp crate + `cargo` ([`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)); pipeline split: [`pipeline.rs`](crates/ts2rs-driver/src/pipeline.rs), [`cargo_runner.rs`](crates/ts2rs-driver/src/cargo_runner.rs), [`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs) |
 | `ts2rs_rt` | Optional runtime |
-| `ts2rs-cli` | `ts2rs` binary; [`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs), [`commands.rs`](crates/ts2rs-cli/src/commands.rs), [`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs), [`tsconfig_resolve.rs`](crates/ts2rs-cli/src/tsconfig_resolve.rs) |
+| `ts2rs-cli` | `ts2rs` binary; [`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs), [`commands.rs`](crates/ts2rs-cli/src/commands.rs), [`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs), [`tsconfig_resolve.rs`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs) |
 
 ## License
 

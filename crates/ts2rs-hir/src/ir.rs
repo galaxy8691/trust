@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_common::Span;
@@ -34,7 +35,7 @@ impl AsRef<SourceMap> for SendSourceMap {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TsType {
     Number,
     Boolean,
@@ -203,7 +204,7 @@ pub fn normalize_union(members: Vec<TsType>) -> TsType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IRBinOp {
     Add,
     Sub,
@@ -221,14 +222,14 @@ pub enum IRBinOp {
     LogicalOr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IRUnaryOp {
     Not,
     Neg,
 }
 
 /// `obj.length` 的代码生成策略（由语义阶段在 `prop == "length"` 时写入）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MemberLengthDispatch {
     /// JS `String.prototype.length`（UTF-16 码元数）
     JsStringUtf16,
@@ -239,14 +240,14 @@ pub enum MemberLengthDispatch {
 }
 
 /// `StreamReadResult` 的 `.done` / `.value`（由 sem 填入）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StreamReadResultMember {
     Done,
     Value,
 }
 
 /// `Math.abs` / `Math.min` 等受限内建（整数 `number` 子集）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MathBuiltinKind {
     Abs,
     Min,
@@ -264,14 +265,14 @@ pub enum MathBuiltinKind {
 }
 
 /// `Number.parseInt` / `Number.parseFloat`（`parseFloat` 在 Rust 中向零截断为 `i32`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumberBuiltinKind {
     ParseInt,
     ParseFloat,
 }
 
 /// `JSON.stringify` / `JSON.parse` 子集。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JsonBuiltinKind {
     /// 参数：`number` | `boolean` | `string`
     Stringify,
@@ -280,14 +281,14 @@ pub enum JsonBuiltinKind {
 }
 
 /// 全局 `encodeURIComponent` / `decodeURIComponent`（trust：`string` → `string`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UriBuiltinKind {
     EncodeComponent,
     DecodeComponent,
 }
 
 /// `String.prototype` 内建子集（UTF-16 码元语义与 `length` / `charCodeAt` 一致）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StringMethodKind {
     CharAt,
     CharCodeAt,
@@ -298,7 +299,7 @@ pub enum StringMethodKind {
 }
 
 /// `Response.prototype.text` / `json`（由 sem 校验 receiver 为 [`TsType::HttpResponse`]）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HttpResponseMethodKind {
     Text,
     /// 与动态 `JSON.parse` 一致：读 body 后 `serde_json::from_str::<f64>(trim())`
@@ -306,7 +307,7 @@ pub enum HttpResponseMethodKind {
 }
 
 /// `response.status` / `response.ok` / `response.body`（由 sem 填入）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HttpResponseMember {
     Status,
     Ok,
@@ -322,7 +323,7 @@ pub struct FetchInit {
 }
 
 /// `arr[i]` / `s[i]` 的下标语义（由 sem 填入）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IndexKind {
     /// `number[]` → `Vec<i32>`
     ArrayNumber,
@@ -332,7 +333,7 @@ pub enum IndexKind {
     StringUtf16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinaryKind {
     Int,
     StrConcat,
@@ -646,7 +647,7 @@ pub enum IRStmt {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ForInKind {
     ObjectKeys,
     ArrayIndices,
