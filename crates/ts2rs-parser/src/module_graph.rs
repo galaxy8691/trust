@@ -8,12 +8,14 @@ use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_ecma_ast::{
-    Decl, DefaultDecl, ExportDecl, ExportSpecifier, Expr, ModuleDecl, ModuleExportName, ModuleItem,
-    Program,
+    Decl, DefaultDecl, ExportDecl, ExportSpecifier, Expr, ImportSpecifier, ModuleDecl,
+    ModuleExportName, ModuleItem, Program,
 };
+use ts2rs_trust_manifest::TrustManifest;
 
 use crate::import_utils::{
-    named_import_target, resolve_relative_ts_path, resolve_supported_import_path,
+    named_import_target, resolve_module_specifier, resolve_relative_ts_path,
+    resolve_supported_import_path_with_trust, ModuleSpecifierResolution,
 };
 use crate::{parse_typescript_file, ParseError, ParsedSource};
 
@@ -27,6 +29,8 @@ pub struct ParsedModule {
 pub struct ParsedModuleGraph {
     pub modules: Vec<ParsedModule>,
     pub entry: PathBuf,
+    /// 解析时加载的 `Trust.toml`（若有）；用于 `forward_deps` / [`validate_imports`]。
+    pub trust: Option<TrustManifest>,
 }
 
 impl ParsedModuleGraph {
@@ -58,9 +62,10 @@ impl ParsedModuleGraph {
     /// 每个模块直接依赖的其它模块（canonical path）；与 [`visit_module`] 的 import / re-export 规则一致。
     pub fn forward_deps(&self) -> Result<HashMap<PathBuf, Vec<PathBuf>>, ParseError> {
         let mut m = HashMap::new();
+        let t = self.trust.as_ref();
         for pm in &self.modules {
             let canon = Self::canonical_module_path(pm);
-            let deps = program_direct_deps(&pm.path, &pm.source.program)?;
+            let deps = program_direct_deps(&pm.path, &pm.source.program, t)?;
             m.insert(canon, deps);
         }
         Ok(m)
@@ -102,7 +107,11 @@ pub fn rebuild_transitive_importers_from_forward(
     out
 }
 
-fn program_direct_deps(module_path: &Path, program: &Program) -> Result<Vec<PathBuf>, ParseError> {
+fn program_direct_deps(
+    module_path: &Path,
+    program: &Program,
+    trust: Option<&TrustManifest>,
+) -> Result<Vec<PathBuf>, ParseError> {
     let mut seen = HashSet::<PathBuf>::new();
     let mut out = Vec::new();
     let Program::Module(ref m) = program else {
@@ -111,10 +120,14 @@ fn program_direct_deps(module_path: &Path, program: &Program) -> Result<Vec<Path
     for item in &m.body {
         match item {
             ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) => {
-                let dep = resolve_supported_import_path(module_path, imp)?;
-                let c = dep.canonicalize().unwrap_or(dep);
-                if seen.insert(c.clone()) {
-                    out.push(c);
+                match resolve_supported_import_path_with_trust(module_path, imp, trust)? {
+                    ModuleSpecifierResolution::Relative(dep) => {
+                        let c = dep.canonicalize().unwrap_or(dep);
+                        if seen.insert(c.clone()) {
+                            out.push(c);
+                        }
+                    }
+                    ModuleSpecifierResolution::RustCrate(_) => {}
                 }
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) if !ea.type_only => {
@@ -142,7 +155,7 @@ fn program_direct_deps(module_path: &Path, program: &Program) -> Result<Vec<Path
 
 /// 从入口 `.ts` 文件解析所有可达模块（相对路径 import）。
 pub fn parse_module_graph(entry: &Path) -> Result<ParsedModuleGraph, ParseError> {
-    parse_module_graph_with_extra_roots(entry, &[])
+    parse_module_graph_with_trust(entry, &[], None)
 }
 
 /// 从入口 DFS 解析依赖；再对每个 `extra` 根路径若尚未被访问则继续 DFS。
@@ -151,22 +164,33 @@ pub fn parse_module_graph_with_extra_roots(
     entry: &Path,
     extra: &[PathBuf],
 ) -> Result<ParsedModuleGraph, ParseError> {
+    parse_module_graph_with_trust(entry, extra, None)
+}
+
+/// 与 [`parse_module_graph_with_extra_roots`] 相同，但允许 `Trust.toml` 中的 Rust crate 作为 `import` 说明符。
+pub fn parse_module_graph_with_trust(
+    entry: &Path,
+    extra: &[PathBuf],
+    trust: Option<&TrustManifest>,
+) -> Result<ParsedModuleGraph, ParseError> {
     let entry_canon = entry.canonicalize().unwrap_or_else(|_| entry.to_path_buf());
     let mut visited = HashSet::<PathBuf>::new();
     let mut stack = HashSet::<PathBuf>::new();
     let mut modules = Vec::new();
-    visit_module(entry, &mut visited, &mut stack, &mut modules)?;
+    visit_module(entry, trust, &mut visited, &mut stack, &mut modules)?;
     for p in extra {
-        visit_module(p, &mut visited, &mut stack, &mut modules)?;
+        visit_module(p, trust, &mut visited, &mut stack, &mut modules)?;
     }
     Ok(ParsedModuleGraph {
         modules,
         entry: entry_canon,
+        trust: trust.cloned(),
     })
 }
 
 fn visit_module(
     path: &Path,
+    trust: Option<&TrustManifest>,
     visited: &mut HashSet<PathBuf>,
     stack: &mut HashSet<PathBuf>,
     modules: &mut Vec<ParsedModule>,
@@ -191,18 +215,22 @@ fn visit_module(
         for item in &m.body {
             match item {
                 ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) => {
-                    let dep = resolve_supported_import_path(path, imp)?;
-                    visit_module(&dep, visited, stack, modules)?;
+                    match resolve_supported_import_path_with_trust(path, imp, trust)? {
+                        ModuleSpecifierResolution::Relative(dep) => {
+                            visit_module(&dep, trust, visited, stack, modules)?;
+                        }
+                        ModuleSpecifierResolution::RustCrate(_) => {}
+                    }
                 }
                 ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) if !ea.type_only => {
                     let dep = resolve_relative_ts_path(path, &ea.src)?;
-                    visit_module(&dep, visited, stack, modules)?;
+                    visit_module(&dep, trust, visited, stack, modules)?;
                 }
                 ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(ne))
                     if ne.src.is_some() && !ne.type_only =>
                 {
                     let dep = resolve_relative_ts_path(path, ne.src.as_deref().expect("checked"))?;
-                    visit_module(&dep, visited, stack, modules)?;
+                    visit_module(&dep, trust, visited, stack, modules)?;
                 }
                 _ => {}
             }
@@ -437,9 +465,10 @@ pub fn effective_exported_function_names_by_path(
     Ok(out)
 }
 
-/// 校验每个 `import { x }` 在目标模块的有效导出中有对应函数名。
+/// 校验每个 `import { x }` 在目标模块的有效导出中有对应函数名；Rust crate import 则对照 `Trust.toml` 的 `[[rust_binding]]`。
 pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
     let exports_by_path = effective_exported_function_names_by_path(graph)?;
+    let trust = graph.trust.as_ref();
 
     for m in &graph.modules {
         let Program::Module(mod_body) = &m.source.program else {
@@ -449,22 +478,52 @@ pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
             let ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) = item else {
                 continue;
             };
-            let dep_path = resolve_supported_import_path(&m.path, imp)?;
-            let dep_canon = dep_path.canonicalize().unwrap_or_else(|_| dep_path.clone());
-            let exports = exports_by_path.get(&dep_canon).ok_or_else(|| {
-                ParseError::Message(format!(
-                    "internal error: missing exports for `{}`",
-                    dep_path.display()
-                ))
-            })?;
+            let res = resolve_module_specifier(&m.path, imp, trust)?;
+            match res {
+                ModuleSpecifierResolution::RustCrate(crate_name) => {
+                    let Some(t) = trust else {
+                        return Err(ParseError::Message(
+                            "internal error: Rust crate import without Trust.toml".to_string(),
+                        ));
+                    };
+                    for spec in &imp.specifiers {
+                        if matches!(spec, ImportSpecifier::Default(_)) {
+                            return Err(ParseError::Message(
+                                "default import from a Rust crate is not supported (use named imports from Trust.toml rust_binding)"
+                                    .to_string(),
+                            ));
+                        }
+                        if matches!(spec, ImportSpecifier::Namespace(_)) {
+                            return Err(ParseError::Message(
+                                "namespace import from a Rust crate is not supported".to_string(),
+                            ));
+                        }
+                        let want = named_import_target(spec)?;
+                        if t.binding_for(&crate_name, &want).is_none() {
+                            return Err(ParseError::Message(format!(
+                                "no rust_binding for `{want}` from crate `{crate_name}` in Trust.toml (add `[[rust_binding]]` with type_name = \"{want}\")"
+                            )));
+                        }
+                    }
+                }
+                ModuleSpecifierResolution::Relative(dep_path) => {
+                    let dep_canon = dep_path.canonicalize().unwrap_or_else(|_| dep_path.clone());
+                    let exports = exports_by_path.get(&dep_canon).ok_or_else(|| {
+                        ParseError::Message(format!(
+                            "internal error: missing exports for `{}`",
+                            dep_path.display()
+                        ))
+                    })?;
 
-            for spec in &imp.specifiers {
-                let want = named_import_target(spec)?;
-                if !exports.contains(&want) {
-                    return Err(ParseError::Message(format!(
-                        "no exported function `{want}` in `{}`",
-                        dep_path.display()
-                    )));
+                    for spec in &imp.specifiers {
+                        let want = named_import_target(spec)?;
+                        if !exports.contains(&want) {
+                            return Err(ParseError::Message(format!(
+                                "no exported function `{want}` in `{}`",
+                                dep_path.display()
+                            )));
+                        }
+                    }
                 }
             }
         }

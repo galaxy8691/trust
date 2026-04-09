@@ -53,6 +53,8 @@ pub enum DiskIRExpr {
         args: Vec<DiskIRExpr>,
         type_args: Vec<TsType>,
         span: DSpan,
+        inherent_rust: Option<String>,
+        inherent_rust_str_ref: Option<Vec<bool>>,
     },
     OptionalCall {
         callee: String,
@@ -65,6 +67,15 @@ pub enum DiskIRExpr {
         method: String,
         args: Vec<DiskIRExpr>,
         type_args: Vec<TsType>,
+        span: DSpan,
+        inherent_rust: Option<String>,
+        inherent_rust_str_ref: Option<Vec<bool>>,
+    },
+    RustNew {
+        result_ty: TsType,
+        rust_fn_path: String,
+        unwrap_result: bool,
+        args: Vec<DiskIRExpr>,
         span: DSpan,
     },
     BuiltinLog {

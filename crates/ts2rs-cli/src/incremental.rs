@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -48,7 +49,14 @@ fn graph_bucket_key(graph: &ParsedModuleGraph) -> String {
         .collect();
     paths.sort();
     let entry = graph.entry.to_string_lossy();
-    let key = format!("entry:{entry}\n{}", paths.join("\n"));
+    let trust_tag = match &graph.trust {
+        None => "notrust".to_string(),
+        Some(m) => {
+            let h = file_content_hash(m.path()).unwrap_or_else(|_| "0".to_string());
+            format!("trust:{}:{h}", m.path().display())
+        }
+    };
+    let key = format!("entry:{entry}\n{trust_tag}\n{}", paths.join("\n"));
     hash_bytes(key.as_bytes())
 }
 
@@ -141,6 +149,7 @@ pub fn compile_graph_incremental(
                     &pm.source.comments,
                     true,
                     &mut next_id,
+                    graph.trust.as_ref(),
                 )
                 .map_err(|e| e.to_string())?;
                 let bytes = encode_fragment_to_bytes(&f).map_err(|e| e.to_string())?;
@@ -155,8 +164,13 @@ pub fn compile_graph_incremental(
         fragments.push((path_str, frag));
     }
 
-    let out = compile_merged_fragments_with_options(&fragments, &graph.entry_path_str(), codegen)
-        .map_err(|e| e.to_string())?;
+    let out = compile_merged_fragments_with_options(
+        &fragments,
+        &graph.entry_path_str(),
+        graph.trust.clone().map(Arc::new),
+        codegen,
+    )
+    .map_err(|e| e.to_string())?;
 
     let manifest = Manifest {
         v: MANIFEST_VERSION,

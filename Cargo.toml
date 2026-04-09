@@ -5,6 +5,7 @@ members = [
     "crates/ts2rs-hir",
     "crates/ts2rs-lower",
     "crates/ts2rs-driver",
+    "crates/ts2rs-trust-manifest",
     "crates/ts2rs_rt",
 ]
 resolver = "2"

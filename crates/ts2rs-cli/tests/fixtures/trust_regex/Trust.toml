@@ -1,0 +1,11 @@
+[dependencies]
+regex = "1.10"
+
+[[rust_binding]]
+crate = "regex"
+type_name = "Regex"
+rust_type = "regex::Regex"
+new = { rust = "regex::Regex::new", unwrap = true }
+method = [
+  { name = "is_match", args = ["string"], returns = "boolean" },
+]

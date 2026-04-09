@@ -9,6 +9,12 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn fixture_subpath(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(relative)
+}
+
 fn regression_case(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/regression")
@@ -1154,6 +1160,49 @@ fn compile_stdlib_hir_ok_writes_utf16_and_json_helpers() {
 #[test]
 fn run_json_uri_trust_ok_prints_expected() {
     assert_run_stdout("json_uri_trust_ok.ts", "162.5\n");
+}
+
+#[test]
+fn run_trust_regex_ok_prints_one() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture_subpath("trust_regex/main.ts");
+    let out = Command::new(&exe)
+        .args(["run", ts.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "1\n");
+}
+
+#[test]
+fn compile_trust_regex_ok_emits_regex_crate() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture_subpath("trust_regex/main.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(&exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("regex::"),
+        "expected qualified regex path in output: {body}"
+    );
+    assert!(
+        body.contains("is_match"),
+        "expected inherent is_match call: {body}"
+    );
 }
 
 #[test]

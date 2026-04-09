@@ -1,23 +1,98 @@
 //! 从 swc `Program` 构建 IR。
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use swc_common::comments::{Comment, CommentKind, SingleThreadedComments};
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, CallExpr, Callee, ClassDecl, ClassMember, Decl,
     DefaultDecl, EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, Ident,
-    KeyValueProp, Lit, MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, ObjectLit,
-    OptCall, OptChainBase, OptChainExpr, Param, ParamOrTsParamProp, Pat, Program, Prop, PropName,
-    PropOrSpread, SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl,
-    VarDeclKind, VarDeclOrExpr,
+    KeyValueProp, Lit, MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleExportName,
+    ModuleItem, ObjectLit, OptCall, OptChainBase, OptChainExpr, Param, ParamOrTsParamProp, Pat,
+    Program, Prop, PropName, PropOrSpread, SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn,
+    UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
 };
 
 use crate::error::{diag, diag_spanned, push_diag, CompileError};
 use crate::ir::*;
 use crate::json_parse_fold::{fold_json_parse_arg, JsonParseFold};
+use ts2rs_trust_manifest::TrustManifest;
 
 mod build_types;
+
+fn merge_trust_rust_imports_into_iface(
+    program: &Program,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &mut HashMap<String, TsType>,
+    trust: Option<&TrustManifest>,
+    errs: &mut Vec<CompileError>,
+) {
+    let Some(manifest) = trust else {
+        return;
+    };
+    let Program::Module(m) = program else {
+        return;
+    };
+    for item in &m.body {
+        let ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) = item else {
+            continue;
+        };
+        if imp.type_only {
+            continue;
+        }
+        let raw = imp.src.value.to_string_lossy();
+        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        if raw.starts_with("./") || raw.starts_with("../") {
+            continue;
+        }
+        if !manifest.has_dependency(raw) {
+            continue;
+        }
+        let crate_name = raw.to_string();
+        use swc_ecma_ast::ImportSpecifier;
+        for spec in &imp.specifiers {
+            match spec {
+                ImportSpecifier::Named(named) => {
+                    if named.is_type_only {
+                        continue;
+                    }
+                    let export_sym = match &named.imported {
+                        Some(ModuleExportName::Ident(id)) => id.sym.to_string(),
+                        Some(ModuleExportName::Str(s)) => s.value.to_string_lossy().into_owned(),
+                        None => named.local.sym.to_string(),
+                    };
+                    let local_sym = named.local.sym.to_string();
+                    let Some(b) = manifest.binding_for(&crate_name, &export_sym) else {
+                        continue;
+                    };
+                    let rust_new = b.new.as_ref().map(|n| (n.rust.clone(), n.unwrap));
+                    let ty = TsType::RustExtern {
+                        crate_key: crate_name.clone(),
+                        export_name: export_sym.clone(),
+                        rust_type: b.rust_type.clone(),
+                        rust_new,
+                    };
+                    if iface.contains_key(&local_sym) {
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
+                            path,
+                            named.local.span,
+                            format!(
+                                "name `{local_sym}` conflicts with an existing type or another Rust import"
+                            ),
+                        );
+                    } else {
+                        iface.insert(local_sym, ty);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
 
 fn freeze_leading_comments(c: &SingleThreadedComments) -> TsLeadingComments {
     let mut out = TsLeadingComments::new();
@@ -103,6 +178,7 @@ pub fn build_module(
         generic_types: HashMap::new(),
         entry_path: path.to_string(),
         ts_comments_by_path,
+        trust: None,
     })
 }
 
@@ -122,9 +198,11 @@ pub fn build_module_ir_fragment(
     file_comments: &SingleThreadedComments,
     multi_file: bool,
     next_id: &mut u32,
+    trust: Option<&TrustManifest>,
 ) -> Result<ModuleIrFragment, CompileError> {
     let mut errs = Vec::new();
-    let iface = build_types::collect_named_types_with_errors(program, cm, path, &mut errs);
+    let mut iface = build_types::collect_named_types_with_errors(program, cm, path, &mut errs);
+    merge_trust_rust_imports_into_iface(program, cm, path, &mut iface, trust, &mut errs);
     let classes = collect_class_decls(program, cm, path, &iface, &mut errs);
     let mut fns = collect_fn_decls(program, cm, path, multi_file, next_id, &iface, &mut errs);
     let mut lowered = lower_classes_to_functions(&classes, cm, path, next_id, &iface)?;
@@ -149,6 +227,7 @@ pub fn build_module_ir_fragment(
 pub fn merge_module_ir_fragments(
     fragments: &[(String, ModuleIrFragment)],
     entry_path: &str,
+    trust: Option<Arc<TrustManifest>>,
 ) -> Result<IRModule, CompileError> {
     let mut all = Vec::new();
     let mut classes_all = Vec::new();
@@ -183,6 +262,7 @@ pub fn merge_module_ir_fragments(
         generic_types: HashMap::new(),
         entry_path: entry_path.to_string(),
         ts_comments_by_path,
+        trust,
     })
 }
 
@@ -196,6 +276,7 @@ fn reassign_ir_ids(fns: &mut [IRFunction]) {
 pub fn build_program_multi(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
+    trust: Option<&TrustManifest>,
 ) -> Result<IRModule, CompileError> {
     let mut next_id = 0u32;
     let mut fragments: Vec<(String, ModuleIrFragment)> = Vec::with_capacity(units.len());
@@ -207,10 +288,11 @@ pub fn build_program_multi(
             file_comments,
             true,
             &mut next_id,
+            trust,
         )?;
         fragments.push((path.clone(), frag));
     }
-    merge_module_ir_fragments(&fragments, entry_path)
+    merge_module_ir_fragments(&fragments, entry_path, trust.map(|t| Arc::new(t.clone())))
 }
 
 fn collect_class_decls(
@@ -625,6 +707,11 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
         }
         IRExpr::Unary { arg, .. } => rewrite_this_in_expr(arg, span),
         IRExpr::Call { args, .. } | IRExpr::OptionalCall { args, .. } => {
+            for a in args {
+                rewrite_this_in_expr(a, span);
+            }
+        }
+        IRExpr::RustNew { args, .. } => {
             for a in args {
                 rewrite_this_in_expr(a, span);
             }
@@ -1891,17 +1978,6 @@ fn build_expr(
         Expr::Object(o) => build_object_expr(o, cm, path, iface, in_async),
         Expr::This(t) => Ok(IRExpr::This(t.span)),
         Expr::New(n) => {
-            let callee = match &*n.callee {
-                Expr::Ident(i) => format!("{}_new", i.sym),
-                _ => {
-                    return Err(diag_spanned(
-                        cm,
-                        path,
-                        n,
-                        "`new` currently supports only identifier callee",
-                    ));
-                }
-            };
             let mut args = Vec::new();
             if let Some(a) = &n.args {
                 for x in a {
@@ -1916,6 +1992,40 @@ fn build_expr(
                     args.push(build_expr(&x.expr, cm, path, iface, in_async)?);
                 }
             }
+            if let Expr::Ident(i) = &*n.callee {
+                let name = i.sym.to_string();
+                if let Some(TsType::RustExtern { rust_new, .. }) = iface.get(&name) {
+                    let Some((rust_fn_path, unwrap_result)) = rust_new.clone() else {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            n,
+                            format!(
+                                "`new {name}(...)` has no `new` entry in Trust.toml [[rust_binding]]"
+                            ),
+                        ));
+                    };
+                    let result_ty = iface.get(&name).expect("RustExtern checked").clone();
+                    return Ok(IRExpr::RustNew {
+                        result_ty,
+                        rust_fn_path,
+                        unwrap_result,
+                        args,
+                        span: n.span,
+                    });
+                }
+            }
+            let callee = match &*n.callee {
+                Expr::Ident(i) => format!("{}_new", i.sym),
+                _ => {
+                    return Err(diag_spanned(
+                        cm,
+                        path,
+                        n,
+                        "`new` currently supports only identifier callee",
+                    ));
+                }
+            };
             Ok(IRExpr::Call {
                 callee,
                 args,
@@ -2521,6 +2631,8 @@ fn build_expr(
                             args,
                             type_args,
                             span: c.span,
+                            inherent_rust: None,
+                            inherent_rust_str_ref: None,
                         });
                     }
                     return Err(diag_spanned(
@@ -2930,6 +3042,8 @@ fn build_opt_chain_call_expr(
                     args,
                     type_args,
                     span: call.span,
+                    inherent_rust: None,
+                    inherent_rust_str_ref: None,
                 })
             } else {
                 Err(diag_spanned(
@@ -2967,6 +3081,8 @@ fn build_opt_chain_call_expr(
                         args,
                         type_args,
                         span: call.span,
+                        inherent_rust: None,
+                        inherent_rust_str_ref: None,
                     })
                 } else {
                     Err(diag_spanned(

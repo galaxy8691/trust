@@ -1,9 +1,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ts2rs_parser::{parse_module_graph_with_extra_roots, ParsedModuleGraph};
+use ts2rs_parser::{
+    discover_trust_toml, parse_module_graph_with_trust, ParsedModuleGraph, TrustManifest,
+};
 
 use crate::tsconfig_resolve::resolve_project_ts_roots;
+
+fn load_trust_manifest(entry: &Path) -> Result<Option<TrustManifest>, String> {
+    let Some(p) = discover_trust_toml(entry) else {
+        return Ok(None);
+    };
+    TrustManifest::load(&p).map(Some).map_err(|e| e.to_string())
+}
 
 pub(crate) fn load_module_graph(
     project: Option<&Path>,
@@ -19,14 +28,16 @@ pub(crate) fn load_module_graph(
         let paths = resolve_project_ts_roots(tsconfig)?;
         let entry = &paths[0];
         let extra: Vec<PathBuf> = paths[1..].to_vec();
-        parse_module_graph_with_extra_roots(entry, &extra).map_err(|e| e.to_string())
+        let trust = load_trust_manifest(entry)?;
+        parse_module_graph_with_trust(entry, &extra, trust.as_ref()).map_err(|e| e.to_string())
     } else {
         if inputs.is_empty() {
             return Err("expected at least one .ts file, or use --project".to_string());
         }
         let entry = &inputs[0];
         let extra: Vec<PathBuf> = inputs[1..].to_vec();
-        parse_module_graph_with_extra_roots(entry, &extra).map_err(|e| e.to_string())
+        let trust = load_trust_manifest(entry)?;
+        parse_module_graph_with_trust(entry, &extra, trust.as_ref()).map_err(|e| e.to_string())
     }
 }
 

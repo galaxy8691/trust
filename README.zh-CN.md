@@ -32,6 +32,19 @@ flowchart LR
 
 [`ts2rs-lower`](crates/ts2rs-lower) 串联 HIR 构建、语义与代码生成。[`ts2rs-driver`](crates/ts2rs-driver) 负责临时 crate 与 `cargo`（`ts2rs run` 使用）。
 
+## Rust 生态：`Trust.toml`（非 npm）
+
+编译器可通过清单把 **crates.io（或 path/git）依赖** 链进生成 crate，并在 TypeScript 中调用。**不是** npm、`node_modules`，也**不是** `tsc` 的包解析。
+
+- **发现规则**：自入口 `.ts` 所在目录**向上**查找 **`Trust.toml`**（见 [`discover_trust_toml`](crates/ts2rs-trust-manifest/src/lib.rs)）。
+- **`[dependencies]`**：与 Cargo 子集对齐的表；条目会**合并**进生成 crate 的 `Cargo.toml`（见 [`crate_writer`](crates/ts2rs-driver/src/crate_writer.rs)）。TS 里 `import … from "…"` 的说明符须与依赖**键名**一致（例如 `import { Regex } from "regex"` 需要存在 `regex = "…"`）。
+- **`[[rust_binding]]`**：把从该 crate 键导入的 TS 符号映射到 Rust 类型路径、可选的 `new`（`rust` 路径 + 是否在 `Result` 上 `unwrap`）、以及 `method`（`name`、`args` 如 `string` / `number` / `boolean`、`returns`）。**不做 API 反射**：编译器**不会**扫 Rust 源码或 rustdoc，绑定由作者维护。
+- **代码生成**：`new T("…")` 降为配置的构造路径；方法降为 Rust **固有方法**调用。TS `string` 在生成代码中为 Rust `String`；绑定里将形参标为 `string` 时，调用点会生成 `.as_str()`，以匹配如 `regex::Regex::is_match(&self, &str)` 等签名。
+
+**serde 类 crate**：仅在 `[dependencies]` 中声明只会增加 Cargo 依赖（供后续 `#[derive]` 或传递依赖）；一般**不能**指望 `import { Serialize } from "serde"`，除非手写绑定，且纯过程宏 API 在 TS 侧通常无意义。
+
+样例：[`tests/fixtures/trust_regex/`](crates/ts2rs-cli/tests/fixtures/trust_regex/) — 测试 `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate`。
+
 ## 不支持的 TypeScript 特性（trust 强类型拒斥边界）
 
 以下为常见**显式拒绝**形态（诊断为英文；详见 [`build.rs`](crates/ts2rs-hir/src/build.rs) / [`sem.rs`](crates/ts2rs-hir/src/sem.rs)）。与下文「泛型与类型参数」表及语言矩阵**互补**；矩阵中已标为支持/部分支持的特性（如受限 **`?.`**、单态化泛型、顶层 `class` 子集）**不在此列**。
@@ -51,7 +64,7 @@ flowchart LR
 - **矩阵覆盖**：下表「支持」或「部分支持」行均有代表性 **fixture**（[`fixtures/`](crates/ts2rs-cli/tests/fixtures/)）与 **[`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)** 测试对应，详见下文 **[矩阵与集成测试对照](#矩阵与集成测试对照)**。手工大样例另见 [`test-ts/main.ts`](test-ts/main.ts)、[`test-ts/math.ts`](test-ts/math.ts)。**回归**用例目录见 [`tests/regression/`](crates/ts2rs-cli/tests/regression/)。
 - **诊断**：编译**错误**为**英文**，格式为 `path:line:col: message`（[`CompileError`](crates/ts2rs-hir/src/error.rs)）。**警告**（如不可达代码）同为该格式，经 [`CompileWarning`](crates/ts2rs-hir/src/error.rs) 收集；成功编译时 CLI / driver 将警告打印到 **stderr**，不抬高退出码。
 - **CI**：推送与 PR 在 GitHub Actions 上运行 `cargo fmt --all --check`、`cargo test --workspace` 与 `cargo clippy --workspace --all-targets`（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）。
-- **非 1.0**：与完整 `tsc` 的 `tsconfig` 行为对齐、任意 `export default` 表达式、`export * as` 等；**不计划支持 npm / `node_modules` / 包管理器式模块解析。** **相对路径** `import { x } from "./dep.ts"`、**`import main from "./dep.ts"`**（绑定名**必须**为 `main`，对应依赖的默认导出 `main`）与相对 **`export *` / `export { … } from`**（桶文件重导出）已支持；CLI 支持**多根**（位置参数 `.ts`）或 **`--project`** 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude` glob**，见 [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs)）+ [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs) + [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs)，HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)；入口须含 `main`，全局函数名唯一。**可选增量**：`compile` / `run` 的 **`--incremental [DIR]`** 将各模块 HIR 片段写入磁盘缓存（无参时默认 `.ts2rs-cache`）；每次仍会解析全部 `.ts`，节省主要在 HIR 构建与 I/O；见 [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs)。
+- **非 1.0**：与完整 `tsc` 的 `tsconfig` 行为对齐、任意 `export default` 表达式、`export * as` 等；**不计划支持 npm / `node_modules` / 包管理器式模块解析。** Rust crate 仅通过 **`Trust.toml`** 接入（见上文 **Rust 生态：`Trust.toml`**）。**相对路径** `import { x } from "./dep.ts"`、**`import main from "./dep.ts"`**（绑定名**必须**为 `main`，对应依赖的默认导出 `main`）与相对 **`export *` / `export { … } from`**（桶文件重导出）已支持；CLI 支持**多根**（位置参数 `.ts`）或 **`--project`** 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude` glob**，见 [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs)）+ [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs) + [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs)，HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)；入口须含 `main`，全局函数名唯一。**可选增量**：`compile` / `run` 的 **`--incremental [DIR]`** 将各模块 HIR 片段写入磁盘缓存（无参时默认 `.ts2rs-cache`）；每次仍会解析全部 `.ts`，节省主要在 HIR 构建与 I/O；见 [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs)。
 
 ## 诊断与前端健壮性（§1.1）
 
@@ -83,7 +96,7 @@ flowchart LR
 |------|------|------|
 | 单文件 `.ts` | 支持 | |
 | `function` 顶层声明 | 支持 | `export function` 同文件内支持；其它 `export` 形式见上文 §1.1 |
-| `import` | 部分支持 | `import { name } from "./relative.ts"` 与 **`import main from "./relative.ts"`**（绑定名须为 `main`）；依赖模块须在**有效导出**中含对应符号（`export function`、`export default function main` / `export default main`、相对 re-export）；见 `import_add_main.ts`、`export_default_*_ok.ts`、`run_reexport_export_star_ok` 与负例 `import_missing_export_*`、`import_default_wrong_binding_fail.ts`、`circular_*` |
+| `import` | 部分支持 | `import { name } from "./relative.ts"` 与 **`import main from "./relative.ts"`**（绑定名须为 `main`）；依赖模块须在**有效导出**中含对应符号；**Rust crate**：当 `Trust.toml` 的 `[dependencies]` 含键名且 `[[rust_binding]]` 声明类型时，支持 `import { T } from "crate_key"`（见上文 **Rust 生态：`Trust.toml`**）；`trust_regex/main.ts`；负例 `import_missing_export_*`、`import_default_wrong_binding_fail.ts`、`circular_*` |
 | `number` / `boolean` / `string` / `void` | 支持 | `void` 仅作返回类型；`let` 不可用 `void` |
 | `let`（单声明） | 部分支持 | 须类型注解；可无初始化，但使用前须明确赋值（见上文 §3.4）；可变 `let` 可二次赋值（`IRStmt::Assign`）；见 `definite_assign_ok.ts` |
 | `const` | 支持 | 与 `let` 同形，语义禁止赋值 |
@@ -125,6 +138,7 @@ flowchart LR
 |------|----------------|----------------|
 | 单文件 / 算术 / 条件 / 字符串 | `sample.ts`、`ops.ts`、`boolean_if.ts`、`string_concat.ts` | `compile_writes_rust`、`compile_exec_writes_binary_and_runs`、`compile_exec_without_o_defaults_to_entry_stem_in_cwd`、`run_prints_main_result`、`run_ops_prints_six` 等 |
 | `import` / 多文件 / 导出 / default | `import_add_main.ts`+`add_dep.ts`、`export_default_*_ok.ts`、`multi_entry_*`、`export_main.ts` | `run_import_add_main_prints_three`、`run_export_default_function_main_prints_42`、`run_multi_entry_extra_roots_prints_main`、`compile_export_main_writes_ts_main`、`run_reexport_export_star_ok` |
+| `Trust.toml` / Rust extern | `trust_regex/main.ts` + `trust_regex/Trust.toml` | `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate` |
 | 增量 HIR（`--incremental`） | e2e 临时目录 `lib.ts` + `app.ts` | `compile_incremental_rebuilds_only_changed_module` |
 | 负例（import/export/重复） | `import_missing_export_*`、`circular_*`、`dup_*`、`export_*_fail.ts`、`import_fail.ts` | `compile_import_missing_export_fails`、`compile_circular_import_fails` 等 |
 | `let`/`const`/块/赋值 | `const_ok.ts`、`assign_simple.ts`、`empty_stmt.ts`、`let_if.ts` | `run_const_ok_prints_42`、`run_assign_simple_prints_five` 等 |

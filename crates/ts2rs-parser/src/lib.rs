@@ -4,6 +4,11 @@ mod import_utils;
 mod module_graph;
 mod resolve_imports;
 
+pub use import_utils::{
+    resolve_module_specifier, resolve_supported_import_path_with_trust, ModuleSpecifierResolution,
+};
+pub use ts2rs_trust_manifest::{discover_trust_toml, TrustManifest, TrustManifestError};
+
 use std::fmt;
 use std::path::Path;
 
@@ -158,8 +163,8 @@ pub fn parse_typescript_file(
 
 pub use module_graph::{
     effective_exported_function_names_by_path, exported_function_names, parse_module_graph,
-    parse_module_graph_with_extra_roots, rebuild_transitive_importers_from_forward,
-    validate_imports, ParsedModule, ParsedModuleGraph,
+    parse_module_graph_with_extra_roots, parse_module_graph_with_trust,
+    rebuild_transitive_importers_from_forward, validate_imports, ParsedModule, ParsedModuleGraph,
 };
 #[allow(deprecated)]
 pub use resolve_imports::parse_typescript_resolving_imports;

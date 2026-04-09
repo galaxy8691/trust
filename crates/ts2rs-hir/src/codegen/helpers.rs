@@ -72,11 +72,15 @@ pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
         TsType::Fn { .. } => "std::rc::Rc<dyn Fn(f64) -> f64>",
         TsType::ClassInstance(_) => "std::collections::HashMap<String, f64>",
         TsType::Promise(_) => unreachable!("rust_ty_scalar: Promise is not a Rust value type"),
-        TsType::Union(_) => unreachable!("rust_ty_scalar: use rust_ty for unions"),
+        TsType::Union(_) => unreachable!("rust_ty_scalar: use rust_ty_string for unions"),
+        TsType::RustExtern { .. } => {
+            unreachable!("rust_ty_scalar: use rust_ty_string for Rust extern types")
+        }
     }
 }
 
-pub(super) fn rust_ty(t: &TsType, f: &IRFunction) -> Result<&'static str, CompileError> {
+/// Rust 类型字符串（含 [`TsType::RustExtern`] 与同质联合）。
+pub(super) fn rust_ty_string(t: &TsType, f: &IRFunction) -> Result<String, CompileError> {
     match t {
         TsType::Union(members) => {
             if members.is_empty() {
@@ -87,10 +91,18 @@ pub(super) fn rust_ty(t: &TsType, f: &IRFunction) -> Result<&'static str, Compil
                     "empty union type",
                 ));
             }
+            if members.len() == 2 {
+                use TsType::{Null, String as TsString, StringLit};
+                let (a, b) = (&members[0], &members[1]);
+                let stringish = |t: &TsType| matches!(t, TsString | StringLit(_));
+                if matches!((a, b), (Null, _) | (_, Null)) && (stringish(a) || stringish(b)) {
+                    return Ok("Option<String>".to_string());
+                }
+            }
             let mut it = members.iter();
-            let first = rust_ty(it.next().unwrap(), f)?;
+            let first = rust_ty_string(it.next().unwrap(), f)?;
             for m in it {
-                let r = rust_ty(m, f)?;
+                let r = rust_ty_string(m, f)?;
                 if r != first {
                     return Err(diag(
                         f.cm.as_ref(),
@@ -108,7 +120,8 @@ pub(super) fn rust_ty(t: &TsType, f: &IRFunction) -> Result<&'static str, Compil
             f.span,
             format!("internal error: uninstantiated type parameter `{name}` reached codegen"),
         )),
-        _ => Ok(rust_ty_scalar(t)),
+        TsType::RustExtern { rust_type, .. } => Ok(rust_type.clone()),
+        _ => Ok(rust_ty_scalar(t).to_string()),
     }
 }
 

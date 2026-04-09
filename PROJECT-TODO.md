@@ -366,6 +366,14 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 - [x] **Numeric model**: 全局 `number` → Rust **`f64`**（[`IRExpr::Number(f64)`](crates/ts2rs-hir/src/ir.rs)，[`rust_ty_scalar`](crates/ts2rs-hir/src/codegen/helpers.rs)，`Math`/`Number`/`JSON.parse` / `indexOf` 等）；下标与 UTF-16 内部仍 `as i32`。破坏性：原 `i32` 截断语义不再；与 Node/IEEE 细节见 README。
 - [x] **HIR stdlib / JSON / strings**: `JSON.parse` — **string literal** args fold at build time via `serde_json` to trust-closed IR (`number` / `boolean` / `string` / `null` / homogeneous `number[]` \| `string[]` / flat `{ k: number }`); **dynamic** arg stays JSON **number** document → `f64` via **`serde_json::from_str`** (same as `await response.json()`). Global **`encodeURIComponent`** / **`decodeURIComponent`** → `urlencoding` (`string` → `string`). Generated `Cargo.toml` injects `serde_json` / `urlencoding` when needed ([`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs)). Fixtures [`json_uri_trust_ok.ts`](crates/ts2rs-cli/tests/fixtures/json_uri_trust_ok.ts), [`json_parse_hetero_array_fail.ts`](crates/ts2rs-cli/tests/fixtures/json_parse_hetero_array_fail.ts); tests `run_json_uri_trust_ok_prints_expected`, `compile_json_uri_trust_ok_emits_serde_json_and_urlencoding`, `compile_json_parse_hetero_array_literal_fails`.
 
+### Trust.toml / Rust extern (crates.io)
+
+- [x] **Manifest**: parse `Trust.toml`; merge `[dependencies]` into the generated crate `Cargo.toml`; discover walking up from the entry `.ts` ([`ts2rs-trust-manifest`](crates/ts2rs-trust-manifest), [`crate_writer`](crates/ts2rs-driver/src/crate_writer.rs), [`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs) / [`pipeline`](crates/ts2rs-driver/src/pipeline.rs)).
+- [x] **Module graph**: `import … from "crate_key"` when the key is in the manifest; `validate_imports` checks `[[rust_binding]]`; no filesystem DFS into a fake Rust module tree.
+- [x] **HIR / sem / codegen**: `TsType::RustExtern`, `IRExpr::RustNew`, inherent `MethodCall` with `inherent_rust_str_ref` for `string` → `&str` (`.as_str()` at call sites).
+- [x] **E2E**: [`tests/fixtures/trust_regex/`](crates/ts2rs-cli/tests/fixtures/trust_regex/) — `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate`.
+- [ ] **Prebuilt binding shims** for popular crates (optional community crates / monorepo packages): backlog.
+
 ### Documentation and examples
 
 - [x] **README + this file**: periodic sweep so matrix / §1.3 / §2.1 lines match shipped features (e.g. stdlib, `string[i]`, `Math.*` extensions). *(This sweep: §1.3 / §2.1 bullets above + `.json()`/`JSON.parse` serde_json wording; README matrix already lists member/`JSON`/URI/async — see [Language feature matrix](README.md).)*

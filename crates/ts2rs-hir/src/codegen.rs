@@ -212,7 +212,8 @@ fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> f64 
     } else {
         out.push_str("fn main() {\n");
     }
-    let ret_ty = rust_ty(&main_fn.ret, main_fn)?;
+    let ret_ty_s = rust_ty(&main_fn.ret, main_fn)?;
+    let ret_ty = ret_ty_s.as_str();
     let await_main = if main_fn.is_async { ".await" } else { "" };
     match ret_ty {
         "()" => {
@@ -231,11 +232,8 @@ fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> f64 
             ));
         }
         _ => {
-            return Err(diag(
-                main_fn.cm.as_ref(),
-                &main_fn.source_path,
-                main_fn.span,
-                "unexpected return type classification in codegen",
+            out.push_str(&format!(
+                "    println!(\"{{:?}}\", ts_main(){await_main});\n"
             ));
         }
     }
@@ -356,7 +354,8 @@ fn expr_maybe_http_stream(e: &IRExpr) -> bool {
         | IRExpr::This(..)
         | IRExpr::Super(..)
         | IRExpr::ReadStdinLine { .. }
-        | IRExpr::FetchText { .. } => false,
+        | IRExpr::FetchText { .. }
+        | IRExpr::RustNew { .. } => false,
     }
 }
 
@@ -498,7 +497,8 @@ fn expr_maybe_fetch_text_only(e: &IRExpr) -> bool {
         | IRExpr::Undefined(..)
         | IRExpr::This(..)
         | IRExpr::Super(..)
-        | IRExpr::ReadStdinLine { .. } => false,
+        | IRExpr::ReadStdinLine { .. }
+        | IRExpr::RustNew { .. } => false,
     }
 }
 
@@ -564,7 +564,8 @@ fn expr_maybe_fetch_request(e: &IRExpr) -> bool {
         | IRExpr::Undefined(..)
         | IRExpr::This(..)
         | IRExpr::Super(..)
-        | IRExpr::ReadStdinLine { .. } => false,
+        | IRExpr::ReadStdinLine { .. }
+        | IRExpr::RustNew { .. } => false,
     }
 }
 
@@ -787,8 +788,8 @@ fn is_stringish(t: &TsType) -> bool {
     helpers::is_stringish(t)
 }
 
-fn rust_ty(t: &TsType, f: &IRFunction) -> Result<&'static str, CompileError> {
-    helpers::rust_ty(t, f)
+fn rust_ty(t: &TsType, f: &IRFunction) -> Result<String, CompileError> {
+    helpers::rust_ty_string(t, f)
 }
 
 fn emit_fn(
@@ -825,10 +826,10 @@ fn emit_fn(
         }
         out.push_str(p);
         out.push_str(": ");
-        out.push_str(rust_ty(ty, f)?);
+        out.push_str(&rust_ty(ty, f)?);
     }
     out.push_str(") -> ");
-    out.push_str(rust_ty(&f.ret, f)?);
+    out.push_str(&rust_ty(&f.ret, f)?);
     out.push_str(" {\n");
     for s in &f.body {
         emit_stmt(out, s, level + 1, f, opts, module)?;
@@ -929,7 +930,7 @@ fn emit_stmt(
             }
             out.push_str(name);
             out.push_str(": ");
-            out.push_str(rust_ty(ty, f)?);
+            out.push_str(&rust_ty(ty, f)?);
             if let Some(init_e) = init {
                 out.push_str(" = ");
                 out.push_str(&emit_expr(init_e, f, level, module)?);
@@ -1232,6 +1233,32 @@ fn emit_expr(
             }
             Ok(format!("{}({})", name, a.join(", ")))
         }
+        IRExpr::RustNew {
+            rust_fn_path,
+            unwrap_result,
+            args,
+            span,
+            ..
+        } => {
+            if args.len() != 1 {
+                return Err(diag(
+                    f.cm.as_ref(),
+                    &f.source_path,
+                    *span,
+                    format!(
+                        "internal error: RustNew expects 1 argument, got {}",
+                        args.len()
+                    ),
+                ));
+            }
+            let a0 = emit_expr(&args[0], f, stmt_level, module)?;
+            let inner = format!("{rust_fn_path}(&({a0}))");
+            if *unwrap_result {
+                Ok(format!("({inner}).unwrap()"))
+            } else {
+                Ok(inner)
+            }
+        }
         IRExpr::ArrowFn {
             params, ret, body, ..
         } => {
@@ -1266,14 +1293,48 @@ fn emit_expr(
         }
         IRExpr::MethodCall {
             receiver,
+            method: _,
+            args,
+            inherent_rust: Some(rust_m),
+            inherent_rust_str_ref,
+            ..
+        }
+        | IRExpr::OptionalMethodCall {
+            receiver,
+            method: _,
+            args,
+            inherent_rust: Some(rust_m),
+            inherent_rust_str_ref,
+            ..
+        } => {
+            let recv = emit_expr(receiver, f, stmt_level, module)?;
+            let mut ps: Vec<String> = Vec::new();
+            for (i, x) in args.iter().enumerate() {
+                let e = emit_expr(x, f, stmt_level, module)?;
+                let as_ref = inherent_rust_str_ref
+                    .as_ref()
+                    .and_then(|v| v.get(i).copied())
+                    .unwrap_or(false);
+                ps.push(if as_ref {
+                    format!("({e}).as_str()")
+                } else {
+                    e
+                });
+            }
+            Ok(format!("({recv}).{rust_m}({})", ps.join(", ")))
+        }
+        IRExpr::MethodCall {
+            receiver,
             method,
             args,
+            inherent_rust: None,
             ..
         }
         | IRExpr::OptionalMethodCall {
             receiver,
             method,
             args,
+            inherent_rust: None,
             ..
         } => {
             let name = rust_fn_name(method);

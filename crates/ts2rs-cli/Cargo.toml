@@ -20,6 +20,7 @@ ts2rs-hir = { version = "0.1.0", path = "../ts2rs-hir" }
 ts2rs-driver = { version = "0.1.0", path = "../ts2rs-driver" }
 ts2rs-lower = { version = "0.1.0", path = "../ts2rs-lower" }
 ts2rs-parser = { version = "0.1.0", path = "../ts2rs-parser" }
+ts2rs-trust-manifest = { version = "0.1.0", path = "../ts2rs-trust-manifest" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

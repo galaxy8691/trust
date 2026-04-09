@@ -19,6 +19,7 @@ pub use ir_cache::{
     decode_fragment_from_bytes, encode_fragment_to_bytes, source_map_for_path, IrCacheError,
     SCHEMA_VERSION,
 };
+pub use ts2rs_trust_manifest::TrustManifest;
 
 pub use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
@@ -50,15 +51,16 @@ pub fn compile_graph(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
-    compile_graph_with_options(units, entry_path, &CodegenOptions::default())
+    compile_graph_with_options(units, entry_path, None, &CodegenOptions::default())
 }
 
 /// 多文件模块图：构建 IR 并完成语义检查（不生成 Rust）。
 pub fn build_checked_module(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
+    trust: Option<&TrustManifest>,
 ) -> Result<(IRModule, Vec<CompileWarning>), CompileError> {
-    let mut module = build_program_multi(units, entry_path)?;
+    let mut module = build_program_multi(units, entry_path, trust)?;
     let warnings = sem::check_module(&mut module)?;
     Ok((module, warnings))
 }
@@ -68,16 +70,26 @@ pub fn check_graph(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<Vec<CompileWarning>, CompileError> {
-    let (_, warnings) = build_checked_module(units, entry_path)?;
-    Ok(warnings)
+    check_graph_with_trust(units, entry_path, None)
+}
+
+/// 与 [`check_graph`] 相同，但传入 `Trust.toml` 清单（若有）。
+pub fn check_graph_with_trust(
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
+    entry_path: &str,
+    trust: Option<&TrustManifest>,
+) -> Result<Vec<CompileWarning>, CompileError> {
+    let mut module = build_program_multi(units, entry_path, trust)?;
+    sem::check_module(&mut module)
 }
 
 pub fn compile_graph_with_options(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
+    trust: Option<&TrustManifest>,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
-    let (module, warnings) = build_checked_module(units, entry_path)?;
+    let (module, warnings) = build_checked_module(units, entry_path, trust)?;
     let rust = emit_rust_with_options(&module, codegen)?;
     Ok((rust, warnings))
 }
@@ -86,9 +98,10 @@ pub fn compile_graph_with_options(
 pub fn compile_merged_fragments_with_options(
     fragments: &[(String, ModuleIrFragment)],
     entry_path: &str,
+    trust: Option<std::sync::Arc<TrustManifest>>,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
-    let mut module = crate::build::merge_module_ir_fragments(fragments, entry_path)?;
+    let mut module = crate::build::merge_module_ir_fragments(fragments, entry_path, trust)?;
     let warnings = sem::check_module(&mut module)?;
     let rust = emit_rust_with_options(&module, codegen)?;
     Ok((rust, warnings))

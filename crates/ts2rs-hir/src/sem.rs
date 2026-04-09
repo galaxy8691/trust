@@ -1,16 +1,86 @@
 //! 名字解析、类型检查、简化 return 路径检查。
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rayon::prelude::*;
 use swc_common::{sync::Lrc, SourceMap, Span, DUMMY_SP};
+use ts2rs_trust_manifest::TrustManifest;
 
 use crate::error::{diag, push_diag, warn, CompileError, CompileWarning};
 use crate::ir::*;
 
 mod helpers;
 mod mono;
+
+thread_local! {
+    static SEM_TRUST_STACK: RefCell<Vec<Option<Arc<TrustManifest>>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn sem_trust_manifest() -> Option<Arc<TrustManifest>> {
+    SEM_TRUST_STACK.with(|c| c.borrow().last().cloned().flatten())
+}
+
+struct SemTrustGuard;
+
+impl SemTrustGuard {
+    fn set(t: Option<Arc<TrustManifest>>) -> Self {
+        SEM_TRUST_STACK.with(|c| c.borrow_mut().push(t));
+        Self
+    }
+}
+
+impl Drop for SemTrustGuard {
+    fn drop(&mut self) {
+        SEM_TRUST_STACK.with(|c| {
+            c.borrow_mut().pop();
+        });
+    }
+}
+
+fn trust_method_returns_ty(
+    cm: &SendSourceMap,
+    path: &str,
+    span: Span,
+    s: &str,
+) -> Result<TsType, CompileError> {
+    let t = s.trim();
+    match t {
+        "boolean" => Ok(TsType::Boolean),
+        "number" => Ok(TsType::Number),
+        "string" => Ok(TsType::String),
+        "void" => Ok(TsType::Void),
+        _ if t.replace(' ', "") == "string|null" => {
+            Ok(normalize_union(vec![TsType::String, TsType::Null]))
+        }
+        _ => Err(diag(
+            cm,
+            path,
+            span,
+            format!("unsupported Trust.toml method returns `{s}`"),
+        )),
+    }
+}
+
+fn trust_method_arg_ty(
+    cm: &SendSourceMap,
+    path: &str,
+    span: Span,
+    s: &str,
+) -> Result<TsType, CompileError> {
+    match s.trim() {
+        "string" => Ok(TsType::String),
+        "number" => Ok(TsType::Number),
+        "boolean" => Ok(TsType::Boolean),
+        _ => Err(diag(
+            cm,
+            path,
+            span,
+            format!("unsupported Trust.toml method arg type `{s}`"),
+        )),
+    }
+}
 
 #[derive(Clone)]
 struct FnSig {
@@ -188,12 +258,13 @@ pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, Compil
         }
     }
 
+    let trust = module.trust.clone();
     let par = Mutex::new((Vec::<CompileWarning>::new(), Vec::<CompileError>::new()));
     module.fns.par_iter_mut().for_each(|f| {
         let mut local = Vec::new();
         let cm = f.cm.clone();
         let p = f.source_path.clone();
-        match check_function(f, &globals, &cm, &p, &mut local) {
+        match check_function(f, &globals, &cm, &p, &mut local, trust.clone()) {
             Ok(()) => {
                 let mut g = par.lock().expect("poisoned mutex in check_module");
                 g.0.extend(local);
@@ -357,7 +428,9 @@ fn check_function(
     cm: &SendSourceMap,
     path: &str,
     warnings: &mut Vec<CompileWarning>,
+    trust: Option<Arc<TrustManifest>>,
 ) -> Result<(), CompileError> {
+    let _trust_guard = SemTrustGuard::set(trust);
     let mut merged = globals.clone();
     merged.extend(collect_fn_sigs_in_stmts(&f.body));
 
@@ -1041,6 +1114,12 @@ fn reject_readline_in_async_expr(
             }
             Ok(())
         }
+        IRExpr::RustNew { args, .. } => {
+            for a in args {
+                reject_readline_in_async_expr(a, cm, path, span)?;
+            }
+            Ok(())
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -1622,7 +1701,7 @@ fn check_stmt(
         IRStmt::FnDecl { func, .. } => {
             let c = func.cm.clone();
             let p = func.source_path.clone();
-            check_function(func, globals, &c, &p, warnings)?;
+            check_function(func, globals, &c, &p, warnings, sem_trust_manifest())?;
             Ok(())
         }
     }
@@ -1865,12 +1944,42 @@ fn infer_expr_mut(
                 Ok(ret)
             }
         }
+        IRExpr::RustNew {
+            result_ty,
+            args,
+            span,
+            ..
+        } => {
+            if args.len() != 1 {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    format!(
+                        "Trust `new` currently supports exactly one argument, got {}",
+                        args.len()
+                    ),
+                ));
+            }
+            let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
+            if !type_assignable(&TsType::String, &t) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "Trust `new` expects a `string` argument",
+                ));
+            }
+            Ok(result_ty.clone())
+        }
         IRExpr::MethodCall {
             receiver,
             method,
             args,
             type_args: _,
             span,
+            inherent_rust,
+            inherent_rust_str_ref,
         }
         | IRExpr::OptionalMethodCall {
             receiver,
@@ -1878,7 +1987,55 @@ fn infer_expr_mut(
             args,
             type_args: _,
             span,
+            inherent_rust,
+            inherent_rust_str_ref,
         } => {
+            let rt = infer_expr_mut(receiver, stack, globals, cm, path)?;
+            if let TsType::RustExtern {
+                crate_key,
+                export_name,
+                ..
+            } = &rt
+            {
+                if let Some(tm) = sem_trust_manifest() {
+                    if let Some(bind) = tm.binding_for(crate_key, export_name) {
+                        if let Some(mb) = bind.method.iter().find(|m| m.name == *method) {
+                            if mb.args.len() != args.len() {
+                                return Err(diag(
+                                    cm,
+                                    path,
+                                    *span,
+                                    format!(
+                                        "wrong argument count for Rust method `{method}`: expected {}, got {}",
+                                        mb.args.len(),
+                                        args.len()
+                                    ),
+                                ));
+                            }
+                            for (a, spec) in args.iter_mut().zip(mb.args.iter()) {
+                                let expected = trust_method_arg_ty(cm, path, *span, spec)?;
+                                let at = infer_expr_mut(a, stack, globals, cm, path)?;
+                                if !type_assignable(&expected, &at) {
+                                    return Err(diag(
+                                        cm,
+                                        path,
+                                        *span,
+                                        format!(
+                                            "argument type mismatch for Rust method `{method}`"
+                                        ),
+                                    ));
+                                }
+                            }
+                            let rust_name =
+                                mb.rust.as_deref().unwrap_or(mb.name.as_str()).to_string();
+                            *inherent_rust = Some(rust_name);
+                            *inherent_rust_str_ref =
+                                Some(mb.args.iter().map(|s| s.trim() == "string").collect());
+                            return trust_method_returns_ty(cm, path, *span, &mb.returns);
+                        }
+                    }
+                }
+            }
             let sig = globals.get(method).ok_or_else(|| {
                 diag(
                     cm,
@@ -1900,7 +2057,6 @@ fn infer_expr_mut(
                     ),
                 ));
             }
-            let rt = infer_expr_mut(receiver, stack, globals, cm, path)?;
             if !type_assignable(&sig.params[0], &rt) {
                 return Err(diag(
                     cm,

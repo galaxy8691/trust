@@ -6,7 +6,7 @@ use ts2rs_driver::{
     build_rust_and_copy_with_options, build_rust_to_executable_with_options, RustBuildOptions,
 };
 use ts2rs_hir::{build_checked_module, emit_rust_with_options, CodegenOptions};
-use ts2rs_lower::{check_module_graph, lower_module_graph};
+use ts2rs_lower::{check_module_graph, lower_module_graph_with_options};
 use ts2rs_parser::validate_imports;
 
 use crate::graph_loader::{ensure_entry_nonempty, load_module_graph};
@@ -78,8 +78,8 @@ pub(crate) fn cmd_compile(
         (rust, warnings, None::<ts2rs_hir::IRModule>)
     } else {
         let units = graph.compile_units();
-        let (module, warnings) =
-            build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
+        let (module, warnings) = build_checked_module(&units, &entry_path, graph.trust.as_ref())
+            .map_err(|e| e.to_string())?;
         let rust = emit_rust_with_options(&module, &codegen).map_err(|e| e.to_string())?;
         (rust, warnings, Some(module))
     };
@@ -92,19 +92,22 @@ pub(crate) fn cmd_compile(
             Some(m) => eprintln!("{:#?}", m),
             None => {
                 let units = graph.compile_units();
-                let (m, _) =
-                    build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
+                let (m, _) = build_checked_module(&units, &entry_path, graph.trust.as_ref())
+                    .map_err(|e| e.to_string())?;
                 eprintln!("{:#?}", m);
             }
         }
     }
 
     if exec {
-        let opts = RustBuildOptions {
+        let mut opts = RustBuildOptions {
             link_ts2rs_rt,
             release,
             ..Default::default()
         };
+        if let Some(ref m) = graph.trust {
+            opts.trust_dependency_lines = m.cargo_dependency_lines.clone();
+        }
         build_rust_and_copy_with_options(&rust, &out_path, &opts).map_err(|e| e.to_string())?;
     } else {
         if let Some(parent) = out_path.parent() {
@@ -144,7 +147,12 @@ pub(crate) fn cmd_run(
         }
         None => {
             let units = graph.compile_units();
-            match lower_module_graph(&units, &graph.entry_path_str()) {
+            match lower_module_graph_with_options(
+                &units,
+                &graph.entry_path_str(),
+                graph.trust.as_ref(),
+                &codegen,
+            ) {
                 Ok(x) => x,
                 Err(e) => return RunOutcome::Ts2rsErr(e.to_string()),
             }
@@ -154,11 +162,14 @@ pub(crate) fn cmd_run(
         print_warnings(&warnings);
     }
 
-    let opts = RustBuildOptions {
+    let mut opts = RustBuildOptions {
         link_ts2rs_rt,
         release,
         ..Default::default()
     };
+    if let Some(ref m) = graph.trust {
+        opts.trust_dependency_lines = m.cargo_dependency_lines.clone();
+    }
     let (_dir, exe) = match build_rust_to_executable_with_options(&rust, &opts) {
         Ok(x) => x,
         Err(e) => return RunOutcome::Ts2rsErr(e.to_string()),
@@ -193,8 +204,8 @@ pub(crate) fn cmd_check(
     let entry_path = graph.entry_path_str();
 
     if emit_ir {
-        let (module, warnings) =
-            build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;
+        let (module, warnings) = build_checked_module(&units, &entry_path, graph.trust.as_ref())
+            .map_err(|e| e.to_string())?;
         if !quiet {
             print_warnings(&warnings);
         }
@@ -202,7 +213,8 @@ pub(crate) fn cmd_check(
         return Ok(());
     }
 
-    let warnings = check_module_graph(&units, &entry_path).map_err(|e| e.to_string())?;
+    let warnings =
+        check_module_graph(&units, &entry_path, graph.trust.as_ref()).map_err(|e| e.to_string())?;
     if !quiet {
         print_warnings(&warnings);
     }

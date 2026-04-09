@@ -8,6 +8,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use swc_common::sync::Lrc;
@@ -90,6 +91,14 @@ pub enum TsType {
     ClassInstance(String),
     /// `Promise<T>`（async / `fetch` / `fetchText` 等）
     Promise(Box<TsType>),
+    /// Trust.toml `[[rust_binding]]` 映射的外部 Rust 类型（如 `regex::Regex`）。
+    RustExtern {
+        crate_key: String,
+        export_name: String,
+        rust_type: String,
+        /// `new` 调用：`Some((path, unwrap))` 如 `regex::Regex::new` + `unwrap`。
+        rust_new: Option<(String, bool)>,
+    },
 }
 
 fn cmp_object_props(a: &[ObjectProp], b: &[ObjectProp]) -> Ordering {
@@ -175,6 +184,24 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
             }
             cmp_ts_type(ar, br)
         }
+        (
+            RustExtern {
+                crate_key: ca,
+                export_name: ea,
+                rust_type: ra,
+                rust_new: na,
+            },
+            RustExtern {
+                crate_key: cb,
+                export_name: eb,
+                rust_type: rb,
+                rust_new: nb,
+            },
+        ) => ca
+            .cmp(cb)
+            .then_with(|| ea.cmp(eb))
+            .then_with(|| ra.cmp(rb))
+            .then_with(|| na.cmp(nb)),
         (Union(x), Union(y)) => {
             let mut ita = x.iter();
             let mut itb = y.iter();
@@ -220,7 +247,8 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::Fn { .. } => 19,
         TsType::ClassInstance(_) => 20,
         TsType::Promise(_) => 21,
-        TsType::Union(_) => 22,
+        TsType::RustExtern { .. } => 22,
+        TsType::Union(_) => 23,
     }
 }
 
@@ -424,6 +452,10 @@ pub enum IRExpr {
         args: Vec<IRExpr>,
         type_args: Vec<TsType>,
         span: Span,
+        /// `Some` 时生成 Rust 固有方法调用 `{receiver}.{name}(...)`（Trust.toml extern 类型）。
+        inherent_rust: Option<String>,
+        /// 与 `args` 对齐；`true` 表示该实参在 Rust 侧以 `&str` 传递（对 `String` 生成 `.as_str()`）。
+        inherent_rust_str_ref: Option<Vec<bool>>,
     },
     /// `f?.(args)`：可选调用（callee 为顶层标识符）；类型检查与 [`IRExpr::Call`] 一致，代码生成同 [`IRExpr::Call`]（非空 callee 下与 `f(args)` 等价）。
     OptionalCall {
@@ -438,6 +470,17 @@ pub enum IRExpr {
         method: String,
         args: Vec<IRExpr>,
         type_args: Vec<TsType>,
+        span: Span,
+        inherent_rust: Option<String>,
+        inherent_rust_str_ref: Option<Vec<bool>>,
+    },
+    /// Trust extern：`new Regex("…")` → `regex::Regex::new(...).unwrap()` 等。
+    RustNew {
+        /// `new` 表达式的结果类型（[`TsType::RustExtern`]）。
+        result_ty: TsType,
+        rust_fn_path: String,
+        unwrap_result: bool,
+        args: Vec<IRExpr>,
         span: Span,
     },
     /// `console.log` / `console.error` / `console.debug`（`stderr: true` 时生成 `eprintln!`）
@@ -802,4 +845,6 @@ pub struct IRModule {
     pub entry_path: String,
     /// 各源路径对应的 TS leading 注释快照（由解析器收集；无注释时为空）。
     pub ts_comments_by_path: HashMap<String, TsLeadingComments>,
+    /// 与入口同目录或上级找到的 `Trust.toml`（若有）。
+    pub trust: Option<Arc<ts2rs_trust_manifest::TrustManifest>>,
 }

@@ -33,6 +33,12 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
     } else {
         String::new()
     };
+    let trust_deps = opts.trust_dependency_lines.trim();
+    let trust_block = if trust_deps.is_empty() {
+        String::new()
+    } else {
+        format!("{trust_deps}\n")
+    };
 
     let cargo_toml = if opts.link_ts2rs_rt {
         let rt_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ts2rs_rt");
@@ -48,7 +54,7 @@ edition = "2021"
 
 [dependencies]
 ts2rs_rt = {{ path = "{path}", optional = true }}
-{serde_json_dep}{urlencoding_dep}{async_deps}
+{serde_json_dep}{urlencoding_dep}{async_deps}{trust_block}
 [features]
 default = []
 ts2rs_rt = ["dep:ts2rs_rt"]
@@ -58,6 +64,7 @@ ts2rs_rt = ["dep:ts2rs_rt"]
             serde_json_dep = serde_json_dep,
             urlencoding_dep = urlencoding_dep,
             async_deps = async_deps,
+            trust_block = trust_block,
         )
     } else {
         format!(
@@ -67,11 +74,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-{serde_json_dep}{urlencoding_dep}{async_deps}"#,
+{serde_json_dep}{urlencoding_dep}{async_deps}{trust_block}"#,
             name = CRATE_NAME,
             serde_json_dep = serde_json_dep,
             urlencoding_dep = urlencoding_dep,
             async_deps = async_deps,
+            trust_block = trust_block,
         )
     };
     fs::write(root.join("Cargo.toml"), cargo_toml)?;

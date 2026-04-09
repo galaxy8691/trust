@@ -57,6 +57,9 @@ pub enum DriverError {
     #[error(transparent)]
     Lower(#[from] ts2rs_lower::LowerError),
 
+    #[error(transparent)]
+    TrustManifest(#[from] ts2rs_trust_manifest::TrustManifestError),
+
     #[error("cannot resolve ts2rs_rt path dependency; build from the ts2rs source tree or omit --link-ts2rs-rt (looked for {0})")]
     Ts2rsRtPathResolveFailed(String),
 }
@@ -72,6 +75,8 @@ pub struct RustBuildOptions {
     pub cargo_timeout: Option<Duration>,
     /// When set, each of stdout and stderr is capped at this many bytes when captured (bounds host memory). When `None`, read the full streams.
     pub max_cargo_output_bytes: Option<usize>,
+    /// Lines merged into generated `[dependencies]` from `Trust.toml` (trailing newline optional).
+    pub trust_dependency_lines: String,
 }
 
 impl Default for RustBuildOptions {
@@ -81,6 +86,7 @@ impl Default for RustBuildOptions {
             release: true,
             cargo_timeout: None,
             max_cargo_output_bytes: None,
+            trust_dependency_lines: String::new(),
         }
     }
 }

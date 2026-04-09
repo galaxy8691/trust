@@ -5,7 +5,7 @@ use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_ecma_ast::Program;
 use thiserror::Error;
-use ts2rs_hir::{CodegenOptions, CompileError, CompileWarning};
+use ts2rs_hir::{CodegenOptions, CompileError, CompileWarning, TrustManifest};
 
 #[derive(Debug, Error)]
 pub enum LowerError {
@@ -36,16 +36,17 @@ pub fn lower_module_graph(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<(String, Vec<CompileWarning>), LowerError> {
-    lower_module_graph_with_options(units, entry_path, &CodegenOptions::default())
+    lower_module_graph_with_options(units, entry_path, None, &CodegenOptions::default())
 }
 
 pub fn lower_module_graph_with_options(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
+    trust: Option<&TrustManifest>,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), LowerError> {
     Ok(ts2rs_hir::compile_graph_with_options(
-        units, entry_path, codegen,
+        units, entry_path, trust, codegen,
     )?)
 }
 
@@ -53,8 +54,9 @@ pub fn lower_module_graph_with_options(
 pub fn check_module_graph(
     units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
+    trust: Option<&TrustManifest>,
 ) -> Result<Vec<CompileWarning>, LowerError> {
-    Ok(ts2rs_hir::check_graph(units, entry_path)?)
+    Ok(ts2rs_hir::check_graph_with_trust(units, entry_path, trust)?)
 }
 
 #[cfg(test)]

@@ -1,8 +1,44 @@
 use std::path::{Path, PathBuf};
 
 use swc_ecma_ast::{ImportDecl, ImportSpecifier, ModuleExportName, Str};
+use ts2rs_trust_manifest::TrustManifest;
 
 use crate::ParseError;
+
+/// `import` 说明符解析结果：相对 `.ts` 文件或 **Trust.toml 声明的 Rust crate**（如 `regex`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModuleSpecifierResolution {
+    Relative(PathBuf),
+    RustCrate(String),
+}
+
+/// 解析 `import ... from "…"`：相对路径，或 `trust` 中 `[dependencies]` 的键名。
+pub fn resolve_module_specifier(
+    file: &Path,
+    imp: &ImportDecl,
+    trust: Option<&TrustManifest>,
+) -> Result<ModuleSpecifierResolution, ParseError> {
+    if imp.type_only {
+        return Err(ParseError::Message(
+            "`import type` is not supported for import resolution".to_string(),
+        ));
+    }
+    let raw = imp.src.value.to_string_lossy();
+    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+    if raw.starts_with("./") || raw.starts_with("../") {
+        return Ok(ModuleSpecifierResolution::Relative(
+            resolve_relative_ts_path(file, &imp.src)?,
+        ));
+    }
+    if let Some(t) = trust {
+        if t.has_dependency(raw) {
+            return Ok(ModuleSpecifierResolution::RustCrate(raw.to_string()));
+        }
+    }
+    Err(ParseError::Message(format!(
+        "only relative paths (`./` / `../`) or a Rust crate name from Trust.toml `[dependencies]` are supported as import specifiers, got `{raw}`"
+    )))
+}
 
 /// Resolve `./` / `../` module specifier (import or re-export).
 pub(crate) fn resolve_relative_ts_path(file: &Path, src: &Str) -> Result<PathBuf, ParseError> {
@@ -23,12 +59,21 @@ pub(crate) fn resolve_supported_import_path(
     file: &Path,
     imp: &ImportDecl,
 ) -> Result<PathBuf, ParseError> {
-    if imp.type_only {
-        return Err(ParseError::Message(
-            "`import type` is not supported for import resolution".to_string(),
-        ));
+    match resolve_module_specifier(file, imp, None)? {
+        ModuleSpecifierResolution::Relative(p) => Ok(p),
+        ModuleSpecifierResolution::RustCrate(name) => Err(ParseError::Message(format!(
+            "Rust crate import `{name}` requires a Trust.toml next to the project; use `ts2rs` driver path that loads Trust.toml"
+        ))),
     }
-    resolve_relative_ts_path(file, &imp.src)
+}
+
+/// 与 [`resolve_supported_import_path`] 相同，但在提供 `trust` 时允许 `from \"crate\"`。
+pub fn resolve_supported_import_path_with_trust(
+    file: &Path,
+    imp: &ImportDecl,
+    trust: Option<&TrustManifest>,
+) -> Result<ModuleSpecifierResolution, ParseError> {
+    resolve_module_specifier(file, imp, trust)
 }
 
 pub(crate) fn named_import_target(spec: &ImportSpecifier) -> Result<String, ParseError> {

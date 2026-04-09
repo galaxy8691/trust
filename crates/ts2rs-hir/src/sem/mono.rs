@@ -328,6 +328,8 @@ fn rewrite_expr(
             args,
             type_args,
             span,
+            inherent_rust,
+            ..
         }
         | IRExpr::OptionalMethodCall {
             receiver,
@@ -335,10 +337,15 @@ fn rewrite_expr(
             args,
             type_args,
             span,
+            inherent_rust,
+            ..
         } => {
             rewrite_expr(receiver, templates, queue, cm, path, fn_span, env, errs);
             for a in args.iter_mut() {
                 rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+            }
+            if inherent_rust.is_some() {
+                return;
             }
             if templates.contains_key(method.as_str()) {
                 let Some(tpl) = templates.get(method.as_str()) else {
@@ -473,6 +480,11 @@ fn rewrite_expr(
         IRExpr::ReaderRead { .. } => {}
         IRExpr::PromiseAll { elems, .. } => {
             for a in elems.iter_mut() {
+                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+            }
+        }
+        IRExpr::RustNew { args, .. } => {
+            for a in args.iter_mut() {
                 rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
             }
         }
@@ -938,6 +950,14 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
                 subst_expr(a, subst);
             }
         }
+        IRExpr::RustNew {
+            result_ty, args, ..
+        } => {
+            *result_ty = subst_type(result_ty, subst);
+            for a in args {
+                subst_expr(a, subst);
+            }
+        }
         IRExpr::Number(..)
         | IRExpr::Bool(..)
         | IRExpr::Str(..)
@@ -969,7 +989,7 @@ fn subst_type(t: &TsType, subst: &BTreeMap<String, TsType>) -> TsType {
                 })
                 .collect(),
         ),
-        TsType::ClassInstance(_) => t.clone(),
+        TsType::ClassInstance(_) | TsType::RustExtern { .. } => t.clone(),
         _ => t.clone(),
     }
 }
@@ -1036,5 +1056,14 @@ fn type_key(t: &TsType) -> String {
             type_key(ret)
         ),
         TsType::Promise(inner) => format!("P{}", type_key(inner)),
+        TsType::RustExtern {
+            crate_key,
+            export_name,
+            rust_type,
+            ..
+        } => {
+            let rt = rust_type.replace(':', "_");
+            format!("rust_{crate_key}_{export_name}_{rt}")
+        }
     }
 }

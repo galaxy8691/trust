@@ -363,6 +363,14 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 - [x] **数值模型**：全局 `number` → Rust **`f64`**（`IRExpr::Number(f64)`、codegen）；下标等仍 `as i32`。与旧 `i32` 截断不兼容；见 README。
 - [x] **HIR 标准库 / JSON / 字符串**：`JSON.parse` 对**字符串字面量**在构建期用 `serde_json` 折叠为 trust 闭合 IR（`number` / `boolean` / `string` / `null` / 同质 `number[]` \| `string[]` / 扁平 `{ k: number }`）；**非常量**实参仍为 JSON **number** 文档 → `f64`（`serde_json::from_str`，与 `await response.json()` 一致）。全局 **`encodeURIComponent`** / **`decodeURIComponent`** → `urlencoding`。生成 crate 按需注入 `serde_json` / `urlencoding`。见 `json_uri_trust_ok.ts`、`json_parse_hetero_array_fail.ts` 与对应 `run_` / `compile_` 测试。
 
+### Trust.toml / Rust extern（crates.io）
+
+- [x] **清单**：解析 `Trust.toml`；将 `[dependencies]` 合并进生成 crate 的 `Cargo.toml`；自入口 `.ts` 向上发现（[`ts2rs-trust-manifest`](crates/ts2rs-trust-manifest)、[`crate_writer`](crates/ts2rs-driver/src/crate_writer.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs) / [`pipeline`](crates/ts2rs-driver/src/pipeline.rs)）。
+- [x] **模块图**：`import … from "crate_key"` 且键在清单中；`validate_imports` 校验 `[[rust_binding]]`；不对虚构的 Rust 模块做文件系统 DFS。
+- [x] **HIR / sem / codegen**：`TsType::RustExtern`、`IRExpr::RustNew`、带 `inherent_rust_str_ref` 的固有 `MethodCall`（`string` 实参生成 `.as_str()` 以匹配 `&str`）。
+- [x] **E2E**：[`tests/fixtures/trust_regex/`](crates/ts2rs-cli/tests/fixtures/trust_regex/) — `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate`。
+- [ ] **常用 crate 的预置绑定 shim**（社区或 monorepo 可选包）：仍属 backlog。
+
 ### 文档与示例
 
 - [x] **README + 本清单**：定期对照实现扫一遍（矩阵、§1.3、§2.1 等），避免与已交付特性（如 stdlib、`string[i]`、`Math` 扩展）矛盾。*（本次已对齐 §1.3 / §2.1 与 `.json` 语义；README 矩阵见 [语言功能矩阵](README.zh-CN.md)。）*

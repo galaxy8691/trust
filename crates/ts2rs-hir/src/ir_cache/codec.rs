@@ -8,7 +8,7 @@ use crate::build::ModuleIrFragment;
 use crate::ir::*;
 use crate::ir_cache::disk::*;
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug)]
 pub enum IrCacheError {
@@ -122,12 +122,16 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             args,
             type_args,
             span,
+            inherent_rust,
+            inherent_rust_str_ref,
         } => DiskIRExpr::MethodCall {
             receiver: Box::new(encode_expr(cm, receiver)),
             method: method.clone(),
             args: args.iter().map(|a| encode_expr(cm, a)).collect(),
             type_args: type_args.clone(),
             span: to_dspan(cm, *span),
+            inherent_rust: inherent_rust.clone(),
+            inherent_rust_str_ref: inherent_rust_str_ref.clone(),
         },
         IRExpr::OptionalCall {
             callee,
@@ -146,11 +150,28 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             args,
             type_args,
             span,
+            inherent_rust,
+            inherent_rust_str_ref,
         } => DiskIRExpr::OptionalMethodCall {
             receiver: Box::new(encode_expr(cm, receiver)),
             method: method.clone(),
             args: args.iter().map(|a| encode_expr(cm, a)).collect(),
             type_args: type_args.clone(),
+            span: to_dspan(cm, *span),
+            inherent_rust: inherent_rust.clone(),
+            inherent_rust_str_ref: inherent_rust_str_ref.clone(),
+        },
+        IRExpr::RustNew {
+            result_ty,
+            rust_fn_path,
+            unwrap_result,
+            args,
+            span,
+        } => DiskIRExpr::RustNew {
+            result_ty: result_ty.clone(),
+            rust_fn_path: rust_fn_path.clone(),
+            unwrap_result: *unwrap_result,
+            args: args.iter().map(|a| encode_expr(cm, a)).collect(),
             span: to_dspan(cm, *span),
         },
         IRExpr::BuiltinLog { args, stderr, span } => DiskIRExpr::BuiltinLog {
@@ -383,12 +404,16 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             args,
             type_args,
             span,
+            inherent_rust,
+            inherent_rust_str_ref,
         } => IRExpr::MethodCall {
             receiver: Box::new(decode_expr(cm, base, *receiver)),
             method,
             args: args.into_iter().map(|a| decode_expr(cm, base, a)).collect(),
             type_args,
             span: from_dspan(base, span),
+            inherent_rust,
+            inherent_rust_str_ref,
         },
         DiskIRExpr::OptionalCall {
             callee,
@@ -407,11 +432,28 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             args,
             type_args,
             span,
+            inherent_rust,
+            inherent_rust_str_ref,
         } => IRExpr::OptionalMethodCall {
             receiver: Box::new(decode_expr(cm, base, *receiver)),
             method,
             args: args.into_iter().map(|a| decode_expr(cm, base, a)).collect(),
             type_args,
+            span: from_dspan(base, span),
+            inherent_rust,
+            inherent_rust_str_ref,
+        },
+        DiskIRExpr::RustNew {
+            result_ty,
+            rust_fn_path,
+            unwrap_result,
+            args,
+            span,
+        } => IRExpr::RustNew {
+            result_ty,
+            rust_fn_path,
+            unwrap_result,
+            args: args.into_iter().map(|a| decode_expr(cm, base, a)).collect(),
             span: from_dspan(base, span),
         },
         DiskIRExpr::BuiltinLog { args, stderr, span } => IRExpr::BuiltinLog {
@@ -1005,6 +1047,7 @@ mod tests {
             &parsed.comments,
             false,
             &mut next,
+            None,
         )
         .unwrap();
         let bytes = encode_fragment_to_bytes(&frag).unwrap();
