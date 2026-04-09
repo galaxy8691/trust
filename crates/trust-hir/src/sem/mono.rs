@@ -439,6 +439,14 @@ fn rewrite_expr(
             }
         }
         IRExpr::ReadStdinLine { .. } => {}
+        IRExpr::ReadFileText {
+            path: file_path, ..
+        }
+        | IRExpr::ReadFileTextAsync {
+            path: file_path, ..
+        } => {
+            rewrite_expr(file_path, templates, queue, cm, path, fn_span, env, errs)
+        }
         IRExpr::ArrayLit { elems, .. } => {
             for a in elems.iter_mut() {
                 rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
@@ -934,6 +942,9 @@ fn subst_expr(e: &mut IRExpr, subst: &BTreeMap<String, TsType>) {
         }
         IRExpr::Await { arg, .. } => subst_expr(arg, subst),
         IRExpr::FetchText { url, .. } => subst_expr(url, subst),
+        IRExpr::ReadFileText { path, .. } | IRExpr::ReadFileTextAsync { path, .. } => {
+            subst_expr(path, subst)
+        }
         IRExpr::Fetch { url, init, .. } => {
             subst_expr(url, subst);
             if let Some(i) = init {

@@ -382,6 +382,111 @@ fn compile_fetch_post_init_ok() {
     assert!(body.contains("\"POST\""), "{body}");
 }
 
+#[test]
+fn compile_file_read_text_sync_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
+    let ts = fixture("file_read_text_sync_compile_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn trust compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("std::fs::read_to_string"), "{body}");
+}
+
+#[test]
+fn compile_file_read_text_async_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
+    let ts = fixture("file_read_text_async_compile_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn trust compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("tokio::fs::read_to_string"), "{body}");
+    assert!(body.contains(".await"), "{body}");
+}
+
+#[test]
+fn compile_file_read_text_arg_type_fails() {
+    assert_compile_fails_stderr(
+        "file_read_text_arg_type_fail.ts",
+        "`readFileText` argument must be `string`",
+    );
+}
+
+#[test]
+fn compile_file_read_text_async_without_await_fails() {
+    assert_compile_fails_stderr(
+        "file_read_text_async_no_await_fail.ts",
+        "readFileTextAsync",
+    );
+}
+
+#[test]
+fn run_file_read_text_sync_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file_path = dir.path().join("in.txt");
+    std::fs::write(&file_path, "hello").expect("write input");
+    let ts_path = dir.path().join("main.ts");
+    let ts_src = format!(
+        "function main(): number {{ let s: string = readFileText({:?}); console.log(s); return s.length; }}\n",
+        file_path.to_string_lossy()
+    );
+    std::fs::write(&ts_path, ts_src).expect("write ts");
+    let out = Command::new(exe)
+        .args(["run", ts_path.to_str().unwrap()])
+        .output()
+        .expect("spawn trust run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "hello\n5\n");
+}
+
+#[test]
+fn run_file_read_text_async_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file_path = dir.path().join("in.txt");
+    std::fs::write(&file_path, "hello").expect("write input");
+    let ts_path = dir.path().join("main.ts");
+    let ts_src = format!(
+        "export async function main(): Promise<number> {{ let s: string = await readFileTextAsync({:?}); return s.length; }}\n",
+        file_path.to_string_lossy()
+    );
+    std::fs::write(&ts_path, ts_src).expect("write ts");
+    let out = Command::new(exe)
+        .args(["run", ts_path.to_str().unwrap()])
+        .output()
+        .expect("spawn trust run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "5\n");
+}
+
 // --- §3.1 符号表 / void+log 分支 ---
 
 #[test]

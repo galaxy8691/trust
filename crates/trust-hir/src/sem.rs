@@ -851,6 +851,7 @@ fn needs_await_surrounding(e: &IRExpr) -> bool {
         e,
         IRExpr::FetchText { .. }
             | IRExpr::Fetch { .. }
+            | IRExpr::ReadFileTextAsync { .. }
             | IRExpr::HttpResponseMethodBuiltin { .. }
             | IRExpr::ReaderRead { .. }
             | IRExpr::PromiseAll { .. }
@@ -863,7 +864,7 @@ fn reject_naked_fetchtext_in_stmts(
     path: &str,
 ) -> Result<(), CompileError> {
     const AWAIT_MSG: &str =
-        "`fetch` / `fetchText` and `Promise.all(...)` must be used as `await ...`";
+        "`fetch` / `fetchText` / `readFileTextAsync` and `Promise.all(...)` must be used as `await ...`";
     for s in stmts {
         match s {
             IRStmt::Let { init, span, .. } => {
@@ -1093,6 +1094,9 @@ fn reject_readline_in_async_expr(
         IRExpr::ArrowFn { body, .. } => reject_readline_in_async_stmts(body, cm, path),
         IRExpr::Await { arg, .. } => reject_readline_in_async_expr(arg, cm, path, span),
         IRExpr::FetchText { url, .. } => reject_readline_in_async_expr(url, cm, path, span),
+        IRExpr::ReadFileText { path: p, .. } | IRExpr::ReadFileTextAsync { path: p, .. } => {
+            reject_readline_in_async_expr(p, cm, path, span)
+        }
         IRExpr::Fetch { url, init, .. } => {
             reject_readline_in_async_expr(url, cm, path, span)?;
             if let Some(i) = init {
@@ -2464,6 +2468,33 @@ fn infer_expr_mut(
             }
         }
         IRExpr::ReadStdinLine { .. } => Ok(TsType::String),
+        IRExpr::ReadFileText { path: file_path, span } => {
+            let t = infer_expr_mut(file_path, stack, globals, cm, path)?;
+            if !is_stringish(&t) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`readFileText` argument must be `string`",
+                ));
+            }
+            Ok(TsType::String)
+        }
+        IRExpr::ReadFileTextAsync {
+            path: file_path,
+            span,
+        } => {
+            let t = infer_expr_mut(file_path, stack, globals, cm, path)?;
+            if !is_stringish(&t) {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    "`readFileTextAsync` argument must be `string`",
+                ));
+            }
+            Ok(TsType::Promise(Box::new(TsType::String)))
+        }
         IRExpr::NullishCoalesce { left, right, span } => {
             let lt = infer_expr_mut(left, stack, globals, cm, path)?;
             let rt = infer_expr_mut(right, stack, globals, cm, path)?;

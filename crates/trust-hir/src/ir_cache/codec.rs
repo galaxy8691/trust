@@ -8,7 +8,7 @@ use crate::build::ModuleIrFragment;
 use crate::ir::*;
 use crate::ir_cache::disk::*;
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug)]
 pub enum IrCacheError {
@@ -279,6 +279,14 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             span: to_dspan(cm, *span),
         },
         IRExpr::ReadStdinLine { span } => DiskIRExpr::ReadStdinLine {
+            span: to_dspan(cm, *span),
+        },
+        IRExpr::ReadFileText { path, span } => DiskIRExpr::ReadFileText {
+            path: Box::new(encode_expr(cm, path)),
+            span: to_dspan(cm, *span),
+        },
+        IRExpr::ReadFileTextAsync { path, span } => DiskIRExpr::ReadFileTextAsync {
+            path: Box::new(encode_expr(cm, path)),
             span: to_dspan(cm, *span),
         },
         IRExpr::ArrayLit { elems, span } => DiskIRExpr::ArrayLit {
@@ -567,6 +575,14 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             span: from_dspan(base, span),
         },
         DiskIRExpr::ReadStdinLine { span } => IRExpr::ReadStdinLine {
+            span: from_dspan(base, span),
+        },
+        DiskIRExpr::ReadFileText { path, span } => IRExpr::ReadFileText {
+            path: Box::new(decode_expr(cm, base, *path)),
+            span: from_dspan(base, span),
+        },
+        DiskIRExpr::ReadFileTextAsync { path, span } => IRExpr::ReadFileTextAsync {
+            path: Box::new(decode_expr(cm, base, *path)),
             span: from_dspan(base, span),
         },
         DiskIRExpr::ArrayLit { elems, span } => IRExpr::ArrayLit {

@@ -343,6 +343,9 @@ fn expr_maybe_http_stream(e: &IRExpr) -> bool {
         }
         IRExpr::ArrowFn { body, .. } => stmts_maybe_http_stream(body),
         IRExpr::PromiseAll { elems, .. } => elems.iter().any(expr_maybe_http_stream),
+        IRExpr::ReadFileText { path, .. } | IRExpr::ReadFileTextAsync { path, .. } => {
+            expr_maybe_http_stream(path)
+        }
         IRExpr::Fetch { .. }
         | IRExpr::HttpResponseMethodBuiltin { .. }
         | IRExpr::Number(..)
@@ -485,6 +488,9 @@ fn expr_maybe_fetch_text_only(e: &IRExpr) -> bool {
         }
         IRExpr::ArrowFn { body, .. } => stmts_maybe_fetch_text_only(body),
         IRExpr::PromiseAll { elems, .. } => elems.iter().any(expr_maybe_fetch_text_only),
+        IRExpr::ReadFileText { path, .. } | IRExpr::ReadFileTextAsync { path, .. } => {
+            expr_maybe_fetch_text_only(path)
+        }
         IRExpr::HttpResponseBodyGetReader { response, .. } => expr_maybe_fetch_text_only(response),
         IRExpr::ReaderRead { .. } => false,
         IRExpr::Fetch { .. }
@@ -553,6 +559,9 @@ fn expr_maybe_fetch_request(e: &IRExpr) -> bool {
         }
         IRExpr::ArrowFn { body, .. } => stmts_maybe_fetch_request(body),
         IRExpr::PromiseAll { elems, .. } => elems.iter().any(expr_maybe_fetch_request),
+        IRExpr::ReadFileText { path, .. } | IRExpr::ReadFileTextAsync { path, .. } => {
+            expr_maybe_fetch_request(path)
+        }
         IRExpr::HttpResponseBodyGetReader { response, .. } => expr_maybe_fetch_request(response),
         IRExpr::ReaderRead { .. } => false,
         IRExpr::FetchText { .. }
@@ -696,6 +705,9 @@ fn expr_maybe_utf16_stdlib(e: &IRExpr) -> bool {
         IRExpr::ArrowFn { body, .. } => stmts_maybe_utf16_stdlib(body),
         IRExpr::Await { arg, .. } => expr_maybe_utf16_stdlib(arg),
         IRExpr::FetchText { url, .. } => expr_maybe_utf16_stdlib(url),
+        IRExpr::ReadFileText { path, .. } | IRExpr::ReadFileTextAsync { path, .. } => {
+            expr_maybe_utf16_stdlib(path)
+        }
         IRExpr::Fetch { url, init, .. } => {
             expr_maybe_utf16_stdlib(url)
                 || init
@@ -758,6 +770,9 @@ fn expr_maybe_json_stringify(e: &IRExpr) -> bool {
         IRExpr::ArrowFn { body, .. } => stmts_maybe_json_stringify(body),
         IRExpr::Await { arg, .. } => expr_maybe_json_stringify(arg),
         IRExpr::FetchText { url, .. } => expr_maybe_json_stringify(url),
+        IRExpr::ReadFileText { path, .. } | IRExpr::ReadFileTextAsync { path, .. } => {
+            expr_maybe_json_stringify(path)
+        }
         IRExpr::Fetch { url, init, .. } => {
             expr_maybe_json_stringify(url)
                 || init.as_ref().is_some_and(|i| {
@@ -1645,6 +1660,18 @@ fn emit_expr(
     __line
 })"#
         .to_string()),
+        IRExpr::ReadFileText { path, .. } => {
+            let p = emit_expr(path, f, stmt_level, module)?;
+            Ok(format!(
+                "std::fs::read_to_string(({p}).as_str()).expect(\"readFileText failed\")"
+            ))
+        },
+        IRExpr::ReadFileTextAsync { path, .. } => {
+            let p = emit_expr(path, f, stmt_level, module)?;
+            Ok(format!(
+                "tokio::fs::read_to_string(({p}).as_str())"
+            ))
+        },
         IRExpr::NullishCoalesce { left, right, .. } => {
             if matches!(&**left, IRExpr::Null(_) | IRExpr::Undefined(_)) {
                 emit_expr(right, f, stmt_level, module)
@@ -1710,6 +1737,12 @@ fn emit_expr(
             Ok(format!("vec![{}]", parts.join(", ")))
         }
         IRExpr::Await { arg, .. } => match &**arg {
+            IRExpr::ReadFileTextAsync { path, .. } => {
+                let p = emit_expr(path, f, stmt_level, module)?;
+                Ok(format!(
+                    "tokio::fs::read_to_string(({p}).as_str()).await.expect(\"readFileTextAsync failed\")"
+                ))
+            }
             IRExpr::HttpResponseMethodBuiltin {
                 kind,
                 receiver,

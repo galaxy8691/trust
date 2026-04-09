@@ -153,6 +153,14 @@ pub enum DiskIRExpr {
     ReadStdinLine {
         span: DSpan,
     },
+    ReadFileText {
+        path: Box<DiskIRExpr>,
+        span: DSpan,
+    },
+    ReadFileTextAsync {
+        path: Box<DiskIRExpr>,
+        span: DSpan,
+    },
     ArrayLit {
         elems: Vec<DiskIRExpr>,
         span: DSpan,

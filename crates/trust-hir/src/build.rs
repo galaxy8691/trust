@@ -739,6 +739,9 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
             }
         }
         IRExpr::ReadStdinLine { .. } => {}
+        IRExpr::ReadFileText { path, .. } | IRExpr::ReadFileTextAsync { path, .. } => {
+            rewrite_this_in_expr(path, span)
+        }
         IRExpr::Conditional {
             test, cons, alt, ..
         } => {
@@ -2077,6 +2080,74 @@ fn build_expr(
                     }
                 }
                 if let Expr::Ident(fname) = &**ce {
+                    if fname.sym == "readFileText" {
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`readFileText` does not take type arguments",
+                            ));
+                        }
+                        if c.args.len() != 1 {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`readFileText` expects exactly one argument (path: string)",
+                            ));
+                        }
+                        let a0 = match &c.args[0] {
+                            ExprOrSpread { spread: None, expr } => expr,
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "spread arguments are not supported",
+                                ));
+                            }
+                        };
+                        let path_expr = build_expr(a0, cm, path, iface, in_async)?;
+                        return Ok(IRExpr::ReadFileText {
+                            path: Box::new(path_expr),
+                            span: c.span,
+                        });
+                    }
+                    if fname.sym == "readFileTextAsync" {
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`readFileTextAsync` does not take type arguments",
+                            ));
+                        }
+                        if c.args.len() != 1 {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`readFileTextAsync` expects exactly one argument (path: string)",
+                            ));
+                        }
+                        let a0 = match &c.args[0] {
+                            ExprOrSpread { spread: None, expr } => expr,
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "spread arguments are not supported",
+                                ));
+                            }
+                        };
+                        let path_expr = build_expr(a0, cm, path, iface, in_async)?;
+                        return Ok(IRExpr::ReadFileTextAsync {
+                            path: Box::new(path_expr),
+                            span: c.span,
+                        });
+                    }
                     if fname.sym == "fetchText" {
                         if !type_args.is_empty() {
                             return Err(diag_spanned(

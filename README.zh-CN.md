@@ -73,6 +73,8 @@ trust run --project tsconfig.json
 - JSON/URI：`JSON.parse`、`JSON.stringify`、`encodeURIComponent`、`decodeURIComponent`
 - IO/网络：
   - `readLine()`（同步；在 async 函数体内会被拒绝）
+  - `readFileText(path)`（同步读取文本，UTF-8）
+  - `readFileTextAsync(path)`（异步读取文本，必须 `await`）
   - `fetchText(url)`
   - `fetch(url, init?)`、`await response.text()`、`await response.json()`
   - `response.body.getReader()` + `await reader.read()`（流式子集）
@@ -194,7 +196,7 @@ flowchart LR
 | `void` 函数 | 支持 | 不要求 `return` 路径检查 |
 | `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 在 Rust 侧为 **`f64`**；见下文 §4.1 |
 | `Math.*` 内建 | 部分支持 | `abs`、`min`、`max`、`floor`、`ceil`、`sign`、`trunc`、`round`、`pow`（`f64`；`pow` 非负指数）；见 `math_builtin.ts`、`stdlib_hir_ok.ts` |
-| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`（`string` / `number` / `boolean` / trust **对象**形状）；`JSON.parse`（字面量折叠为 trust 闭合形状，含嵌套纯 number 对象；非常量仍为 JSON number 文档 → `f64`，`serde_json`）；`encodeURIComponent` / `decodeURIComponent`（`urlencoding`）；`charAt` 等（UTF-16）；`readLine()`；见 `stdlib_hir_ok.ts`、`json_uri_trust_ok.ts` |
+| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`（`string` / `number` / `boolean` / trust **对象**形状）；`JSON.parse`（字面量折叠为 trust 闭合形状，含嵌套纯 number 对象；非常量仍为 JSON number 文档 → `f64`，`serde_json`）；`encodeURIComponent` / `decodeURIComponent`（`urlencoding`）；`charAt` 等（UTF-16）；`readLine()`；`readFileText(path)`（同步文本读取，UTF-8）；见 `stdlib_hir_ok.ts`、`json_uri_trust_ok.ts` |
 | `console.log` / `console.error` / `console.debug` | 支持 | `log` → `println!`；`error` / `debug` → `eprintln!`；多参数均为 `"{}"` **空格分隔**（与 §4.1 一致） |
 | 字面量类型 | 部分支持 | `42`、`"a"`、`true` 等类型位置；向 `number`/`string`/`boolean` 拓宽；见 `literal_type_ok.ts`；`bigint`/模板字面量类型位置拒绝 |
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
@@ -202,7 +204,7 @@ flowchart LR
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types_with_errors`](crates/trust-hir/src/build/build_types.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化：可写显式 `f<number>(x)`，或在实参类型可合成时省略（字面量、已注解的 `let`/参数）；不可推、冲突或多处错误会分别报错；`obj.m` 脱糖后的泛型全局函数同样推断；Rust 侧符号为 `name__` + 16 位十六进制指纹 |
 | 高阶函数 | 部分支持 | 函数类型与箭头闭包（`(number) => number` → `(f64) -> f64`）；变量调用 `f(...)` 等 |
-| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` JSON number → `f64`，`serde_json`）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
+| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`readFileTextAsync(path)`** → `Promise<string>`（必须 `await`）；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` JSON number → `f64`，`serde_json`）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
 

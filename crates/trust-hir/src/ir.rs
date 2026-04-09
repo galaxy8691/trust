@@ -579,6 +579,16 @@ pub enum IRExpr {
     ReadStdinLine {
         span: Span,
     },
+    /// 同步读取本地文件文本（UTF-8），`string`
+    ReadFileText {
+        path: Box<IRExpr>,
+        span: Span,
+    },
+    /// 异步读取本地文件文本（UTF-8），`Promise<string>`（须由 `await` 包裹）
+    ReadFileTextAsync {
+        path: Box<IRExpr>,
+        span: Span,
+    },
     /// 数组字面量 `[a, b, ...]`（无空洞、无 spread）
     ArrayLit {
         elems: Vec<IRExpr>,

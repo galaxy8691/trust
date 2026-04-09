@@ -22,7 +22,7 @@ pub(crate) fn write_minimal_crate(
     };
     let async_deps = if needs_async {
         let mut s = String::from(
-            r#"tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+            r#"tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 "#,
         );
