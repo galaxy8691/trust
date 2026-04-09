@@ -120,7 +120,16 @@ pub fn build_rust_to_executable_with_options(
 ///
 /// 内部调用 [`build_rust_to_executable`] 后立刻复制并丢弃临时目录，适合不需要长期保留 `TempDir` 的场景。
 pub fn build_rust_and_copy(rust_source: &str, output: &Path) -> Result<(), DriverError> {
-    let (_dir, exe) = build_rust_to_executable(rust_source)?;
+    build_rust_and_copy_with_options(rust_source, output, &RustBuildOptions::default())
+}
+
+/// 同 [`build_rust_and_copy`]，但使用 [`RustBuildOptions`]（如 `release`、`link_ts2rs_rt`）。
+pub fn build_rust_and_copy_with_options(
+    rust_source: &str,
+    output: &Path,
+    opts: &RustBuildOptions,
+) -> Result<(), DriverError> {
+    let (_dir, exe) = build_rust_to_executable_with_options(rust_source, opts)?;
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }

@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
-use ts2rs_driver::{build_rust_to_executable_with_options, RustBuildOptions};
+use ts2rs_driver::{
+    build_rust_and_copy_with_options, build_rust_to_executable_with_options, RustBuildOptions,
+};
 use ts2rs_hir::{build_checked_module, emit_rust_with_options, CodegenOptions};
 use ts2rs_lower::{check_module_graph, lower_module_graph};
 use ts2rs_parser::validate_imports;
@@ -22,8 +24,11 @@ pub(crate) fn cmd_compile(
     inputs: &[PathBuf],
     project: Option<&Path>,
     output: &PathBuf,
+    exec: bool,
     span_comments: bool,
     ts_source_comments: bool,
+    link_ts2rs_rt: bool,
+    release: bool,
     emit_ir: bool,
     incremental: Option<&PathBuf>,
     quiet: bool,
@@ -64,10 +69,19 @@ pub(crate) fn cmd_compile(
         }
     }
 
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    if exec {
+        let opts = RustBuildOptions {
+            link_ts2rs_rt,
+            release,
+            ..Default::default()
+        };
+        build_rust_and_copy_with_options(&rust, output, &opts).map_err(|e| e.to_string())?;
+    } else {
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(output, rust).map_err(|e| e.to_string())?;
     }
-    fs::write(output, rust).map_err(|e| e.to_string())?;
     Ok(())
 }
 

@@ -123,7 +123,7 @@ flowchart LR
 
 | 主题 | 代表性 fixture | 代表性集成测试 |
 |------|----------------|----------------|
-| 单文件 / 算术 / 条件 / 字符串 | `sample.ts`、`ops.ts`、`boolean_if.ts`、`string_concat.ts` | `compile_writes_rust`、`run_prints_main_result`、`run_ops_prints_six` 等 |
+| 单文件 / 算术 / 条件 / 字符串 | `sample.ts`、`ops.ts`、`boolean_if.ts`、`string_concat.ts` | `compile_writes_rust`、`compile_exec_writes_binary_and_runs`、`run_prints_main_result`、`run_ops_prints_six` 等 |
 | `import` / 多文件 / 导出 | `import_add_main.ts`+`add_dep.ts`、`multi_entry_*`、`export_main.ts` | `run_import_add_main_prints_three`、`run_multi_entry_extra_roots_prints_main`、`compile_export_main_writes_ts_main`、`run_reexport_export_star_ok` |
 | 增量 HIR（`--incremental`） | e2e 临时目录 `lib.ts` + `app.ts` | `compile_incremental_rebuilds_only_changed_module` |
 | 负例（import/export/重复） | `import_missing_export_*`、`circular_*`、`dup_*`、`export_*_fail.ts`、`import_fail.ts` | `compile_import_missing_export_fails`、`compile_circular_import_fails` 等 |
@@ -197,6 +197,7 @@ cargo test
 
 ```bash
 cargo run -p ts2rs-cli -- compile path/to/app.ts -o out.rs
+cargo run -p ts2rs-cli -- compile path/to/app.ts -o ./my-app --exec
 cargo run -p ts2rs-cli -- compile path/to/entry.ts path/to/extra.ts -o out.rs
 cargo run -p ts2rs-cli -- run path/to/app.ts
 cargo run -p ts2rs-cli -- run --project path/to/tsconfig.json
@@ -208,7 +209,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 
 | 子命令 | 作用 |
 |--------|------|
-| **`compile`** | 解析 → HIR → 语义 → 生成 Rust，写入 **`-o` / `--output`** 路径 |
+| **`compile`** | 解析 → HIR → 语义 → 默认将 Rust 写入 **`-o` / `--output`**；加 **`--exec`** 时走临时 crate + **`cargo build`**，将**可执行文件**复制到 **`-o`**（不再写 `.rs`） |
 | **`run`** | 同上后写入临时 crate，**`cargo build`**（默认 **`--release`**）并运行生成的可执行文件 |
 | **`check`** | 仅解析 + HIR + **语义检查**，不写 `.rs`、**不**调用 `cargo` |
 
@@ -219,7 +220,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | **`-q` / `--quiet`** | 成功时不打印 **warning**（错误仍输出） |
 | **`--color`** | `auto` / `always` / `never`，帮助文本等着色；`never` / `always` 在解析前会同步 `NO_COLOR`（亦可直接设 `NO_COLOR=1`） |
 
-**`compile`**：`--span-comments`、`--ts-source-comments`（将 TS leading 注释写成 Rust `//` 行）、`--emit-ir`（将 [`IRModule`](crates/ts2rs-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、`--link-ts2rs-rt`（无效果，与 `run` 对齐）、**`--incremental` / `--incremental DIR`**（多文件 HIR 片段缓存；单独写 `--incremental` 时默认目录 `.ts2rs-cache`）。
+**`compile`**：`--span-comments`、`--ts-source-comments`（将 TS leading 注释写成 Rust `//` 行）、`--emit-ir`（将 [`IRModule`](crates/ts2rs-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、**`--exec`**（见上表：**`-o`** 为可执行文件路径，流程与 `run` 的 `cargo build` 一致）、**`--incremental` / `--incremental DIR`**（多文件 HIR 片段缓存；单独写 `--incremental` 时默认目录 `.ts2rs-cache`）。**仅在 `--exec` 时**：**`--link-ts2rs-rt`**、**`--debug`**、**`-O` / `--release`**（含义与互斥关系同 `run`）。
 
 **`run`**：`--link-ts2rs-rt`；**`--debug`** 使用非 release 的 `cargo build`（`target/debug/`）；**`-O` / `--release`** 显式要求 release 构建（与默认一致，与 `--debug` 互斥）；**`--incremental`** 与 `compile` 相同。
 
@@ -228,7 +229,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 - **多文件**：第一个位置参数为**入口**（须含 `export function main`），其余为**额外根**（入口 DFS 未覆盖的 `.ts` 仍会加入模块图）。
 - **`--project` tsconfig**（简化 JSON）：可选 **`extends`**、**`files`**、**`include`**、**`exclude`**（glob）；路径相对**书写该字段的配置文件**所在目录；**`exclude`** 在 `extends` 链上**累积**。若合并后 **`files` 非空**则只用 `files`；否则展开 **`include`**（仅 `.ts`）。**仅 `include`** 时匹配文件会排序，**入口**为字典序第一个——需固定顺序时用显式 **`files`**。与多个 `.ts` 位置参数**互斥**。
 - **`run --link-ts2rs-rt`**：在临时 crate 的 `Cargo.toml` 中加入可选 path 依赖 **`ts2rs_rt`**（须在本仓库源码树内构建；仅从 crates.io 安装时通常会失败）。生成代码默认仍不 `use ts2rs_rt`。
-- **`compile --link-ts2rs-rt`**：仅为 CLI 一致性保留，不生成 `Cargo.toml`，无效果。
+- **`compile --link-ts2rs-rt`**：不加 **`--exec`** 时不生成 `Cargo.toml`，无效果；与 **`--exec`** 联用时与 **`run --link-ts2rs-rt`** 相同。
 
 `compile` 可加 `--span-comments`，在生成的 Rust 中为每条语句前置 `// ts: path:line:col`（对照 TS **位置**）。另可加 `--ts-source-comments`，写入 TS **注释正文**（leading，转为 `//` 行；与 `--span-comments` 独立）。
 

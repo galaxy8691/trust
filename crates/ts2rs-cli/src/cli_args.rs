@@ -79,18 +79,32 @@ pub(crate) struct GraphInput {
 pub(crate) struct CompileCmd {
     #[command(flatten)]
     pub(crate) graph: GraphInput,
-    /// 输出 `.rs` 路径
+    /// 输出路径：默认为生成的 `.rs`；`--exec` 时为可执行文件路径
     #[arg(short, long)]
     pub(crate) output: PathBuf,
+    /// 在生成 Rust 后经临时 crate `cargo build`，将可执行文件写到 `-o`（不再写入 `.rs`）
+    #[arg(long)]
+    pub(crate) exec: bool,
     /// 每条语句前生成 `// ts: path:line:col`
     #[arg(long)]
     pub(crate) span_comments: bool,
     /// 将 TS 源码中的 leading 注释（`//` / `/* */`）写入生成的 Rust 行注释
     #[arg(long)]
     pub(crate) ts_source_comments: bool,
-    /// 为与 `run` 对齐保留；`compile` 不写 Cargo.toml，无效果
+    /// 仅在 `--exec` 时生效：临时 crate 的 Cargo.toml 中加入可选 path 依赖 `ts2rs_rt`
     #[arg(long)]
     pub(crate) link_ts2rs_rt: bool,
+    /// 仅在 `--exec` 时生效：`cargo build` 不用 `--release`
+    #[arg(long, conflicts_with = "release_flag")]
+    pub(crate) debug: bool,
+    /// 仅在 `--exec` 时生效：显式 `cargo build --release`（默认与 `run` 一致为 release）
+    #[arg(
+        short = 'O',
+        long = "release",
+        action = ArgAction::SetTrue,
+        conflicts_with = "debug"
+    )]
+    pub(crate) release_flag: bool,
     /// 将 [`ts2rs_hir::IRModule`] 的 `Debug` 打到 stderr（调试用，输出可能很大）
     #[arg(long)]
     pub(crate) emit_ir: bool,

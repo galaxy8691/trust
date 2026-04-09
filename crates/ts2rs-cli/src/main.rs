@@ -27,19 +27,25 @@ fn run(cli: Cli) -> RunOutcome {
     let _ = cli.global.color;
 
     match cli.command {
-        Commands::Compile(c) => match cmd_compile(
-            &c.graph.inputs,
-            c.graph.project.as_deref(),
-            &c.output,
-            c.span_comments,
-            c.ts_source_comments,
-            c.emit_ir,
-            c.incremental.as_ref(),
-            quiet,
-        ) {
-            Ok(()) => RunOutcome::Ok,
-            Err(e) => RunOutcome::Ts2rsErr(e),
-        },
+        Commands::Compile(c) => {
+            let release = c.release_flag || !c.debug;
+            match cmd_compile(
+                &c.graph.inputs,
+                c.graph.project.as_deref(),
+                &c.output,
+                c.exec,
+                c.span_comments,
+                c.ts_source_comments,
+                c.link_ts2rs_rt,
+                release,
+                c.emit_ir,
+                c.incremental.as_ref(),
+                quiet,
+            ) {
+                Ok(()) => RunOutcome::Ok,
+                Err(e) => RunOutcome::Ts2rsErr(e),
+            }
+        }
         Commands::Run(r) => {
             let release = r.release_flag || !r.debug;
             cmd_run(

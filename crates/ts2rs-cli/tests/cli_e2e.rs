@@ -48,6 +48,34 @@ fn run_prints_main_result() {
 }
 
 #[test]
+fn compile_exec_writes_binary_and_runs() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("sample.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bin = dir
+        .path()
+        .join(if cfg!(windows) { "out.exe" } else { "out" });
+    let status = Command::new(&exe)
+        .args([
+            "compile",
+            "--exec",
+            ts.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile --exec");
+    assert!(status.success(), "compile --exec should succeed");
+    let out = Command::new(&bin).output().expect("spawn compiled binary");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "3\n");
+}
+
+#[test]
 fn compile_writes_rust() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
     let ts = fixture("sample.ts");

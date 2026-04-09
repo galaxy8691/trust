@@ -118,7 +118,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 
 | Theme | Representative fixtures | Representative tests |
 |-------|-------------------------|-------------------------|
-| Single file / ops / strings | `sample.ts`, `ops.ts`, `boolean_if.ts`, `string_concat.ts` | `compile_writes_rust`, `run_prints_main_result`, … |
+| Single file / ops / strings | `sample.ts`, `ops.ts`, `boolean_if.ts`, `string_concat.ts` | `compile_writes_rust`, `compile_exec_writes_binary_and_runs`, `run_prints_main_result`, … |
 | Import / multi-file | `import_add_main.ts` + `add_dep.ts`, `multi_entry_*`, `export_main.ts` | `run_import_add_main_prints_three`, … |
 | Incremental HIR cache (`--incremental`) | ad hoc `lib.ts` + `app.ts` in e2e tempdir | `compile_incremental_rebuilds_only_changed_module` |
 | Negative import/export | `import_missing_export_*`, `circular_*`, `dup_*`, `export_*_fail.ts` | `compile_import_missing_export_fails`, … |
@@ -174,6 +174,7 @@ cargo test
 
 ```bash
 cargo run -p ts2rs-cli -- compile path/to/app.ts -o out.rs
+cargo run -p ts2rs-cli -- compile path/to/app.ts -o ./my-app --exec
 cargo run -p ts2rs-cli -- compile path/to/entry.ts path/to/extra.ts -o out.rs
 cargo run -p ts2rs-cli -- run path/to/app.ts
 cargo run -p ts2rs-cli -- run --project path/to/tsconfig.json
@@ -185,7 +186,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 
 | Subcommand | Role |
 |------------|------|
-| **`compile`** | Parse → HIR → sem → Rust written to **`-o` / `--output`** |
+| **`compile`** | Parse → HIR → sem → Rust written to **`-o` / `--output`** (default); with **`--exec`**, temp crate + **`cargo build`** and copy the **executable** to **`-o`** (not `.rs`) |
 | **`run`** | Same, then temp crate, **`cargo build`** (default **`--release`**) and run |
 | **`check`** | Parse + HIR + **semantics only**; no `.rs`, no `cargo` |
 
@@ -196,7 +197,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | **`-q` / `--quiet`** | Suppress warnings on success (errors still stderr) |
 | **`--color`** | `auto` / `always` / `never` for help styling; interacts with `NO_COLOR` |
 
-**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/ts2rs-hir/src/ir.rs) `Debug` to stderr), `--link-ts2rs-rt` (no-op for compile), **`--incremental` / `--incremental DIR`** (multi-file HIR fragment cache; default dir `.ts2rs-cache` when flag is present without value).
+**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/ts2rs-hir/src/ir.rs) `Debug` to stderr), **`--exec`** (see table: **`-o`** is the executable path; uses `cargo` like `run`), **`--incremental` / `--incremental DIR`** (multi-file HIR fragment cache; default dir `.ts2rs-cache` when flag is present without value). With **`--exec`** only: **`--link-ts2rs-rt`**, **`--debug`**, **`-O` / `--release`** (same semantics and mutual exclusion as `run`).
 
 **`run`**: `--link-ts2rs-rt`; **`--debug`** → debug `cargo build`; **`-O` / `--release`** (conflicts with `--debug`); **`--incremental`** same as `compile`.
 
@@ -205,6 +206,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 - **Multi-file**: first path is **entry** (`export function main`), rest are **extra roots**.
 - **`--project` tsconfig** (simplified JSON): optional **`extends`**, **`files`**, **`include`**, **`exclude`** (globs); paths relative to the config file that contains them; **`exclude`** accumulates along the `extends` chain. If merged **`files`** is non-empty, only those entries are used; otherwise **`include`** globs are expanded (`.ts` only). **`include`-only**: roots are sorted; first path is entry — use **`files`** to pin entry order. Mutually exclusive with positional `.ts` args.
 - **`--link-ts2rs-rt`**: optional path dep on **`ts2rs_rt`** (build from this repo).
+- **`compile --link-ts2rs-rt`**: has no effect without **`--exec`**; with **`--exec`**, same as **`run --link-ts2rs-rt`**.
 
 ## Crate layout
 
