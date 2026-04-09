@@ -1,6 +1,8 @@
 [dependencies]
 regex = "1.12"
 url = "2.5"
+trust_orm_facade = { path = "crates/trust_orm_facade" }
+trust_ffi_facade = { path = "crates/trust_ffi_facade" }
 
 [[rust_binding]]
 crate = "regex"
@@ -19,4 +21,24 @@ new = { rust = "url::Url::parse", unwrap = true }
 method = [
   { name = "scheme", args = [], returns = "string" },
   { name = "path", args = [], returns = "string" },
+]
+
+# Diesel：链式查询、`?`、关联类型 留在 Rust（见 `examples/crates/trust_orm_facade`）；TS 只绑窄 API。
+[[rust_binding]]
+crate = "trust_orm_facade"
+type_name = "OrmFacade"
+rust_type = "trust_orm_facade::OrmFacade"
+new = { rust = "trust_orm_facade::OrmFacade::new", unwrap = false }
+method = [
+  { name = "users_named_tom_count", args = [], returns = "number" },
+]
+
+# C FFI：`extern "C"` 在 `trust_ffi_facade` + `native/*.c`；TS 只调用 Rust 包装方法。
+[[rust_binding]]
+crate = "trust_ffi_facade"
+type_name = "Cffi"
+rust_type = "trust_ffi_facade::Cffi"
+new = { rust = "trust_ffi_facade::Cffi::new", unwrap = false }
+method = [
+  { name = "add_nums", args = ["number", "number"], returns = "number" },
 ]

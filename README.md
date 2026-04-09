@@ -61,6 +61,7 @@ trust run --project tsconfig.json
 - `--project` and positional `.ts` are mutually exclusive.
 - `--link-trust-rt` only matters with `compile --exec` or `run`.
 - `trust add` supports `crate::Type` (type-only), `crate::Type::new_fn` (constructor `new` in `Trust.toml`), `crate::Type::method --returns … --args …` (append/replace a `method` row), and `crate::*` (nightly `cargo rustdoc` JSON to heuristically fill bindings; not the compiler reflecting crates). Rust extern method signatures remain explicit in `Trust.toml`.
+- Diesel / C FFI patterns: see [`examples/orm_ffi_demo.ts`](examples/orm_ffi_demo.ts) and [`examples/crates/trust_orm_facade`](examples/crates/trust_orm_facade) / [`trust_ffi_facade`](examples/crates/trust_ffi_facade).
 
 ## Standard Library (trust Surface)
 
@@ -113,14 +114,33 @@ flowchart LR
 
 The compiler can link **real crates.io (or path/git) dependencies** and call into them from TypeScript using an explicit manifest. This path is **not** npm, `node_modules`, or `tsc` module resolution.
 
+### Two different jobs (read this first)
+
+| Piece in `Trust.toml` | What it actually does |
+|----------------------|------------------------|
+| **`[dependencies]`** | Tells **Cargo** to link a crate into the **generated** Rust binary. This is **not** FFI by itself, and it does **not** give TypeScript any callable API. Putting `diesel = "2"` (or any crate) here only means “the generated crate may `use` that dependency from Rust.” |
+| **`[[rust_binding]]`** | The **only** place that defines how TS `import { Name } from "crate-key"` maps to Rust: `rust_type`, optional `new`, and `method` rows. Without a binding for a symbol, you cannot use that symbol from TS even if the crate is in `[dependencies]`. |
+
+So: **dependencies = build-time Cargo graph**; **rust_binding = TS ↔ Rust surface the compiler knows how to codegen**. Confusing the two is the main reason things feel “unclear.”
+
+### What can be mapped from TS (and what cannot)
+
+- **Fits the model**: One exported Rust type (path in `rust_type`) plus **inherent**-style usage: `new …` wired to a concrete `fn` path (often `Type::parse` / `::new`), and methods whose parameters and returns can be expressed in the manifest (`string` \| `number` \| `boolean` \| `void`, etc.—see [`RustMethodBinding`](crates/trust-manifest/src/lib.rs)). Example: `regex::Regex`, `url::Url` in the fixtures.
+- **Does not map “directly” from TS**: APIs built from **proc macros**, **query-builder DSLs**, **deep trait / associated-type** surfaces, or **chained types that change each step**—typical of ORMs (e.g. **Diesel**’s `filter(...).load(&mut conn)?`). The compiler does **not** expand macros or compile Diesel’s query language from TypeScript. Listing `diesel = "…"` under `[dependencies]` **does not** let you write Diesel in `.ts`; it only adds the crate to the Rust build.
+- **Practical approach for “complex” crates**: Write a **thin Rust layer** (your own small crate or module) that exposes a **few** plain functions or simple `struct`s with signatures you *can* describe in `[[rust_binding]]`, and call that layer from TS. Alternatively, keep DB/ORM entirely **outside** Trust (e.g. HTTP service) and use `fetch` from TS.
+
+**No reflection in the compiler**: `trust compile` does **not** scrape Rust sources or rustdoc. Bindings are normally author-maintained; the **`trust add crate::*`** CLI can optionally invoke **nightly** `cargo rustdoc` JSON to pre-fill rows (still hand-review).
+
 - **Discovery**: walk **up** from the entry `.ts` file’s directory (and parents) for a file named **`Trust.toml`** (see [`discover_trust_toml`](crates/trust-manifest/src/lib.rs)).
 - **`[dependencies]`**: a Cargo-shaped table; lines are **merged** into the generated crate’s `Cargo.toml` [`dependencies`] (see [`crate_writer`](crates/trust-driver/src/crate_writer.rs)). The import string in TS must match the dependency **key** (e.g. `import { Regex } from "regex"` requires a `regex = "…"` entry).
-- **`[[rust_binding]]`**: maps a TS symbol imported from that crate key to a Rust type path, optional `new` (`rust` path + optional `unwrap` on `Result`), and `method` rows (`name`, `args` like `string` \| `number` \| `boolean`, `returns`). **No reflection in the compiler**: `trust compile` does **not** scrape Rust sources or rustdoc. Bindings are normally author-maintained; the **`trust add crate::*`** CLI can optionally invoke **nightly** `cargo rustdoc` JSON to pre-fill rows (still hand-review).
+- **`[[rust_binding]]`**: maps a TS symbol imported from that crate key to a Rust type path, optional `new` (`rust` path + optional `unwrap` on `Result`), and `method` rows (`name`, `args` like `string` \| `number` \| `boolean`, `returns`).
 - **Codegen**: `new T("…")` lowers to the configured Rust constructor path; methods become **inherent** calls on the Rust type. TS `string` values are `String` in generated Rust; binding specs of `string` for a method argument emit `.as_str()` at the call site so APIs like `regex::Regex::is_match(&self, &str)` type-check.
 
 **Serde-style crates**: listing `serde` under `[dependencies]` only adds a Cargo dependency for future derives or transitive use; you generally **cannot** `import { Serialize } from "serde"` unless you add a binding, and proc-macro-only APIs are not meaningful on the TS surface.
 
 Fixture: [`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — tests `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate`.
+
+**Examples (Diesel-style ORM + C FFI)**: [`examples/orm_ffi_demo.ts`](examples/orm_ffi_demo.ts) — [`examples/crates/trust_orm_facade`](examples/crates/trust_orm_facade) keeps the real Diesel chain (`filter(...).load::<User>(...)?`, etc.) inside Rust and exposes a narrow bound method; [`examples/crates/trust_ffi_facade`](examples/crates/trust_ffi_facade) links `native/trust_ffi_add.c` via `extern "C"` and exposes `Cffi::add_nums`. Run: `cargo run -p trust-cli -- run examples/orm_ffi_demo.ts`. **Note:** `[[rust_binding]].new` for Rust extern types currently requires **exactly one TS `string` argument**; use a placeholder (e.g. `""`) when the Rust `fn new` ignores it (see the example crates’ `new(_: &String)`).
 
 ## Unsupported TypeScript (trust rejection boundary)
 

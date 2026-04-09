@@ -8,6 +8,62 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
+fn resolve_path_dependency_value(v: toml::Value, base: &Path) -> toml::Value {
+    match v {
+        toml::Value::Table(mut t) => {
+            if let Some(toml::Value::String(rel)) = t.get("path") {
+                let joined = base.join(rel);
+                let abs = joined.canonicalize().unwrap_or(joined);
+                t.insert(
+                    "path".to_string(),
+                    toml::Value::String(abs.to_string_lossy().into_owned()),
+                );
+            }
+            toml::Value::Table(t)
+        }
+        other => other,
+    }
+}
+
+fn sorted_dependency_table_string(deps: &toml::Table, path_base: Option<&Path>) -> String {
+    let mut keys: Vec<_> = deps.keys().cloned().collect();
+    keys.sort();
+    let mut out = String::new();
+    for k in keys {
+        let mut v = deps.get(&k).expect("key from iteration").clone();
+        if let Some(base) = path_base {
+            v = resolve_path_dependency_value(v, base);
+        }
+        match &v {
+            toml::Value::String(_) => {
+                let line = toml::to_string(&toml::Value::Table({
+                    let mut m = toml::map::Map::new();
+                    m.insert(k.clone(), v.clone());
+                    m
+                }))
+                .unwrap_or_default();
+                out.push_str(&line);
+            }
+            toml::Value::Table(t)
+                if t.len() == 1 && t.get("path").and_then(|x| x.as_str()).is_some() =>
+            {
+                let path_val = t.get("path").expect("path key");
+                out.push_str(&format!("{k} = {{ path = {path_val} }}\n"));
+            }
+            _ => {
+                let line = toml::to_string(&toml::Value::Table({
+                    let mut m = toml::map::Map::new();
+                    m.insert(k.clone(), v);
+                    m
+                }))
+                .unwrap_or_default();
+                out.push_str(&line);
+            }
+        }
+    }
+    out
+}
+
 #[derive(Debug, Error)]
 pub enum TrustManifestError {
     #[error("io reading `{0}`: {1}")]
@@ -88,18 +144,21 @@ impl TrustManifest {
     }
 
     /// 合并进生成 crate 时追加在 `[dependencies]` 中（不含 `[dependencies]` 头）。
+    ///
+    /// 必须将**整张**依赖表一次序列化：若按 crate 名逐条 `toml::to_string`，则 `path = "…"` 依赖会变成
+    /// 顶层的 `[crate_name]` 表，Cargo 会视为无效键（`unused manifest key`），且依赖不会进入 `[dependencies]`。
     pub fn format_cargo_dependency_lines(deps: &toml::Table) -> String {
-        let mut out = String::new();
-        let mut keys: Vec<_> = deps.keys().cloned().collect();
-        keys.sort();
-        for k in keys {
-            let v = deps.get(&k).expect("key from iteration");
-            let mut one = toml::map::Map::new();
-            one.insert(k.clone(), v.clone());
-            let s = toml::to_string(&toml::Value::Table(one)).unwrap_or_default();
-            out.push_str(&s);
-        }
-        out
+        sorted_dependency_table_string(deps, None)
+    }
+
+    /// 与 [`format_cargo_dependency_lines`] 相同，但将 `{ path = "..." }` **相对于 `Trust.toml` 所在目录**
+    /// 解析为绝对路径，以便 `cargo build` 在**临时目录**生成 crate 时仍能解析 path 依赖。
+    pub fn format_cargo_dependency_lines_resolving_paths(
+        deps: &toml::Table,
+        trust_toml_path: &Path,
+    ) -> String {
+        let base = trust_toml_path.parent().unwrap_or_else(|| Path::new("."));
+        sorted_dependency_table_string(deps, Some(base))
     }
 
     fn parse(path: PathBuf, text: &str) -> Result<Self, TrustManifestError> {
@@ -113,7 +172,7 @@ impl TrustManifest {
         let cargo_dependency_lines = raw
             .dependencies
             .as_ref()
-            .map(Self::format_cargo_dependency_lines)
+            .map(|t| Self::format_cargo_dependency_lines_resolving_paths(t, &path))
             .unwrap_or_default();
 
         let mut bindings_by_crate: BTreeMap<String, BTreeMap<String, RustTypeBinding>> =
@@ -161,6 +220,23 @@ pub fn discover_trust_toml(entry_ts: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn examples_trust_resolves_path_deps() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let p = root.join("../../examples/Trust.toml");
+        let m = TrustManifest::load(&p).expect("examples/Trust.toml");
+        assert!(
+            m.cargo_dependency_lines.contains("trust_orm_facade"),
+            "got:\n{}",
+            m.cargo_dependency_lines
+        );
+        assert!(m.cargo_dependency_lines.contains("trust_ffi_facade"));
+        assert!(
+            m.cargo_dependency_lines.contains(" = { path = "),
+            "path deps must be inline tables under [dependencies]"
+        );
+    }
 
     #[test]
     fn parse_sample_regex() {

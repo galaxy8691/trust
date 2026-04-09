@@ -1,0 +1,11 @@
+[package]
+name = "trust_ffi_facade"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tiny C library + Rust shim for Trust FFI example."
+
+[dependencies]
+
+[build-dependencies]
+cc = "1.2"

@@ -62,6 +62,7 @@ trust run --project tsconfig.json
 - `--link-trust-rt` 只在 `compile --exec` 或 `run` 时有意义。
 - `trust add` 支持 `crate::Type`（仅类型）、`crate::Type::new_fn`（写入 `new`）、`crate::Type::method --returns … --args …`（写入 `method` 行）、`crate::*`（需 **nightly**，用 `cargo rustdoc` 的 JSON 启发式填绑定；**编译器本身**仍不从 crate 反射 API）。
 - Rust extern 方法签名必须在 `Trust.toml` 显式声明。
+- Diesel / C FFI 写法见 [`examples/orm_ffi_demo.ts`](examples/orm_ffi_demo.ts) 与 [`examples/crates/trust_orm_facade`](examples/crates/trust_orm_facade)、[`trust_ffi_facade`](examples/crates/trust_ffi_facade)。
 
 ## Standard Lib 清单（trust 语言表面）
 
@@ -114,14 +115,33 @@ flowchart LR
 
 编译器可通过清单把 **crates.io（或 path/git）依赖** 链进生成 crate，并在 TypeScript 中调用。**不是** npm、`node_modules`，也**不是** `tsc` 的包解析。
 
+### 先分清两件事（`[dependencies]` 不是 FFI，也不等于「能在 TS 里用」）
+
+| `Trust.toml` 里的块 | 实际作用 |
+|---------------------|----------|
+| **`[dependencies]`** | 只告诉 **Cargo**：生成出来的 Rust 可执行文件**链接**哪些 crate。**不是** C 那种 FFI，也**不会**自动让 TS 能调用这些库。这里写 `diesel = "…"` 只表示「生成 crate 在 Rust 侧可以依赖 Diesel」，**并不**表示能在 `.ts` 里写 Diesel 查询。 |
+| **`[[rust_binding]]`** | **唯一**规定 TS 侧 `import { 名字 } from "依赖键"` 如何对应到 Rust：写清 `rust_type`、`new`、各条 `method` 的签名。没有绑定，即使 `[dependencies]` 里已有该 crate，TS 也**不能** `import` 使用对应符号。 |
+
+容易混淆的点：**依赖行 = 编译时拉 crate**；**绑定表 = TS 能调用的 Rust 表面**。两者都要，但职责不同。
+
+### 什么样的第三方能「直接」从 TS 用，什么样的不能
+
+- **和当前模型匹配**：一个 Rust 类型路径 + **固有方法风格**的用法：`new` 对应到具体函数路径（如 `Url::parse`），方法参数/返回能用清单里的类型表达（`string` / `number` / `boolean` / `void` 等，见 [`RustMethodBinding`](crates/trust-manifest/src/lib.rs)）。fixture 里的 `regex::Regex`、`url::Url` 即此类。
+- **不能指望在 TS 里「直接用」的**：**过程宏**、**链式查询 DSL**、**大量 trait/关联类型** 堆出来的 API——典型是 **ORM（如 Diesel）** 的 `filter(...).load(...)?` 那种。编译器**不会**展开宏，也**不会**把 Diesel 的查询语言从 TypeScript 编出来。仅在 `[dependencies]` 加 `diesel`，**不等于**能在 Trust 的 TS 里写 Diesel；只等于 Cargo 能编进 Diesel。
+- **可行做法**：在 **纯 Rust** 里写薄封装（少量函数或简单 `struct`，签名可被 `[[rust_binding]]` 描述），再在 TS 里只绑这一层；或把数据库访问放到 **独立 HTTP 服务**，Trust 里只用 `fetch`。
+
+**编译器不做反射**：`trust compile` **不会**扫 Rust 源码或 rustdoc；绑定通常手写，也可用 **`trust add crate::*`**（nightly `cargo rustdoc` JSON）预填后再人工核对。
+
 - **发现规则**：自入口 `.ts` 所在目录**向上**查找 **`Trust.toml`**（见 [`discover_trust_toml`](crates/trust-manifest/src/lib.rs)）。
 - **`[dependencies]`**：与 Cargo 子集对齐的表；条目会**合并**进生成 crate 的 `Cargo.toml`（见 [`crate_writer`](crates/trust-driver/src/crate_writer.rs)）。TS 里 `import … from "…"` 的说明符须与依赖**键名**一致（例如 `import { Regex } from "regex"` 需要存在 `regex = "…"`）。
-- **`[[rust_binding]]`**：把从该 crate 键导入的 TS 符号映射到 Rust 类型路径、可选的 `new`（`rust` 路径 + 是否在 `Result` 上 `unwrap`）、以及 `method`（`name`、`args` 如 `string` / `number` / `boolean`、`returns`）。**编译器不做反射**：`trust compile` **不会**扫 Rust 源码或 rustdoc；绑定通常手写，也可用 **`trust add crate::*`**（nightly `cargo rustdoc` JSON）预填后再人工核对。
+- **`[[rust_binding]]`**：把从该 crate 键导入的 TS 符号映射到 Rust 类型路径、可选的 `new`、以及 `method` 各行。
 - **代码生成**：`new T("…")` 降为配置的构造路径；方法降为 Rust **固有方法**调用。TS `string` 在生成代码中为 Rust `String`；绑定里将形参标为 `string` 时，调用点会生成 `.as_str()`，以匹配如 `regex::Regex::is_match(&self, &str)` 等签名。
 
 **serde 类 crate**：仅在 `[dependencies]` 中声明只会增加 Cargo 依赖（供后续 `#[derive]` 或传递依赖）；一般**不能**指望 `import { Serialize } from "serde"`，除非手写绑定，且纯过程宏 API 在 TS 侧通常无意义。
 
 样例：[`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — 测试 `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate`。
+
+**示例（Diesel 式 ORM + C FFI）**：[`examples/orm_ffi_demo.ts`](examples/orm_ffi_demo.ts) — [`examples/crates/trust_orm_facade`](examples/crates/trust_orm_facade) 在 **Rust 内**保留 Diesel 链式查询（`filter(...).load::<User>(...)?` 等），TS 只绑定窄方法；[`examples/crates/trust_ffi_facade`](examples/crates/trust_ffi_facade) 用 `extern "C"` 链接 `native/trust_ffi_add.c`，再暴露 `Cffi::add_nums`。运行：`cargo run -p trust-cli -- run examples/orm_ffi_demo.ts`。**说明：** 当前 Rust extern 的 `[[rust_binding]].new` 要求 **恰好一个 TS `string` 实参**；若 Rust 侧 `new` 不用该参数，可传占位字符串（如 `""`），见示例 crate 的 `new(_: &String)`。
 
 ## 不支持的 TypeScript 特性（trust 强类型拒斥边界）
 
