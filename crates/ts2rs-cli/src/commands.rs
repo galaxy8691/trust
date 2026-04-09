@@ -21,6 +21,7 @@ pub(crate) fn cmd_compile(
     project: Option<&Path>,
     output: &PathBuf,
     span_comments: bool,
+    ts_source_comments: bool,
     emit_ir: bool,
     quiet: bool,
 ) -> Result<(), String> {
@@ -29,7 +30,10 @@ pub(crate) fn cmd_compile(
     validate_imports(&graph).map_err(|e| e.to_string())?;
     let units = graph.compile_units();
     let entry_path = graph.entry_path_str();
-    let codegen = CodegenOptions { span_comments };
+    let codegen = CodegenOptions {
+        span_comments,
+        emit_ts_source_comments: ts_source_comments,
+    };
 
     let (module, warnings) =
         build_checked_module(&units, &entry_path).map_err(|e| e.to_string())?;

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_ecma_ast::{Decl, ExportDecl, ModuleDecl, ModuleItem, Program};
@@ -24,8 +25,8 @@ pub struct ParsedModuleGraph {
 }
 
 impl ParsedModuleGraph {
-    /// 供 `ts2rs_hir::compile_graph` / `lower_module_graph` 使用的 `(path, program, cm)` 列表。
-    pub fn compile_units(&self) -> Vec<(String, Program, Lrc<SourceMap>)> {
+    /// 供 `ts2rs_hir::compile_graph` / `lower_module_graph` 使用的 `(path, program, cm, comments)` 列表。
+    pub fn compile_units(&self) -> Vec<(String, Program, Lrc<SourceMap>, SingleThreadedComments)> {
         self.modules
             .iter()
             .map(|m| {
@@ -33,6 +34,7 @@ impl ParsedModuleGraph {
                     m.path.to_string_lossy().into_owned(),
                     m.source.program.clone(),
                     m.source.source_map.clone(),
+                    m.source.comments.clone(),
                 )
             })
             .collect()

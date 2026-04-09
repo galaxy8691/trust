@@ -1,5 +1,6 @@
 //! TypeScript → Rust：HIR 构建、语义检查、代码生成。
 
+use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_ecma_ast::Program;
@@ -32,14 +33,14 @@ pub fn lower_program_with_options(
 
 /// 多文件模块图：与 [`ts2rs_hir::compile_graph`] 等价，供 driver/CLI 主路径调用。
 pub fn lower_module_graph(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<(String, Vec<CompileWarning>), LowerError> {
     lower_module_graph_with_options(units, entry_path, &CodegenOptions::default())
 }
 
 pub fn lower_module_graph_with_options(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), LowerError> {
@@ -50,7 +51,7 @@ pub fn lower_module_graph_with_options(
 
 /// 多文件：仅 HIR 构建与语义检查，不生成 Rust。
 pub fn check_module_graph(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<Vec<CompileWarning>, LowerError> {
     Ok(ts2rs_hir::check_graph(units, entry_path)?)

@@ -733,6 +733,9 @@ pub struct IRGenericTypeDecl {
     pub body: TsType,
 }
 
+/// 单文件内按 swc `BytePos.0` 索引的 leading 注释行（已规范化，codegen 可加 `// ` 前缀）。
+pub type TsLeadingComments = HashMap<u32, Vec<String>>;
+
 #[derive(Debug, Clone)]
 pub struct IRModule {
     pub fns: Vec<IRFunction>,
@@ -740,4 +743,6 @@ pub struct IRModule {
     pub generic_types: HashMap<String, IRGenericTypeDecl>,
     /// 编译入口文件路径（用于要求 `main` 定义在入口模块）。
     pub entry_path: String,
+    /// 各源路径对应的 TS leading 注释快照（由解析器收集；无注释时为空）。
+    pub ts_comments_by_path: HashMap<String, TsLeadingComments>,
 }

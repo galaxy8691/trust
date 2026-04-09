@@ -11,6 +11,8 @@ mod helpers;
 pub struct CodegenOptions {
     /// 在每条语句前写入 `// ts: path:line:col`（与诊断格式一致）。
     pub span_comments: bool,
+    /// 在语句（及顶层函数）前写入 TS 源码中的 leading 注释（`//` / `/* */` 转为 Rust 行注释）。
+    pub emit_ts_source_comments: bool,
 }
 
 pub fn emit_rust(module: &IRModule) -> Result<String, CompileError> {
@@ -771,6 +773,7 @@ fn emit_fn(
         ));
     }
     let ind = indent(level);
+    emit_frozen_ts_leading_comments(out, &ind, module, &f.source_path, f.span, opts);
     let name = rust_fn_name(&f.name);
     out.push_str(&ind);
     if f.is_async {
@@ -813,6 +816,31 @@ fn emit_ts_span_comment(out: &mut String, ind: &str, f: &IRFunction, span: Span)
     helpers::emit_ts_span_comment(out, ind, f, span);
 }
 
+fn emit_frozen_ts_leading_comments(
+    out: &mut String,
+    ind: &str,
+    module: &IRModule,
+    source_path: &str,
+    span: Span,
+    opts: &CodegenOptions,
+) {
+    if !opts.emit_ts_source_comments {
+        return;
+    }
+    let Some(map) = module.ts_comments_by_path.get(source_path) else {
+        return;
+    };
+    let Some(lines) = map.get(&span.lo().0) else {
+        return;
+    };
+    for line in lines {
+        out.push_str(ind);
+        out.push_str("// ");
+        out.push_str(line);
+        out.push('\n');
+    }
+}
+
 fn emit_stmt(
     out: &mut String,
     s: &IRStmt,
@@ -822,8 +850,10 @@ fn emit_stmt(
     module: &IRModule,
 ) -> Result<(), CompileError> {
     let ind = indent(level);
+    let sp = stmt_span(s);
+    emit_frozen_ts_leading_comments(out, &ind, module, &f.source_path, sp, opts);
     if opts.span_comments && !matches!(s, IRStmt::Empty { .. }) {
-        emit_ts_span_comment(out, &ind, f, stmt_span(s));
+        emit_ts_span_comment(out, &ind, f, sp);
     }
     match s {
         IRStmt::Empty { .. } => {}
@@ -1784,7 +1814,7 @@ mod tests {
     fn emit_rust_contains_ts_main_and_println() {
         let src = r#"function main(): number { return 42; }"#;
         let p = parse_typescript_file("t.ts", src).unwrap();
-        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts", Some(&p.comments)).unwrap();
         check_module(&mut m).unwrap();
         let rs = emit_rust_with_options(&m, &CodegenOptions::default()).unwrap();
         assert!(rs.contains("fn ts_main"), "{rs}");
@@ -1797,10 +1827,37 @@ mod tests {
   return "ab".slice(0, 1).length + JSON.stringify(1).length;
 }"#;
         let p = parse_typescript_file("t.ts", src).unwrap();
-        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts", Some(&p.comments)).unwrap();
         check_module(&mut m).unwrap();
         let rs = emit_rust_with_options(&m, &CodegenOptions::default()).unwrap();
         assert!(rs.contains("__ts2rs_utf16_slice"), "{rs}");
         assert!(rs.contains("__ts2rs_json_escape_string"), "{rs}");
+    }
+
+    #[test]
+    fn emit_ts_source_comments_writes_frozen_leading() {
+        let src = r#"// __hdr__
+function main(): number {
+  // __body__
+  let x: number = 1;
+  return x;
+}
+"#;
+        let p = parse_typescript_file("t.ts", src).unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts", Some(&p.comments)).unwrap();
+        check_module(&mut m).unwrap();
+        let opts = CodegenOptions {
+            emit_ts_source_comments: true,
+            ..Default::default()
+        };
+        let rs = emit_rust_with_options(&m, &opts).unwrap();
+        assert!(
+            rs.contains("// __hdr__"),
+            "expected function-level TS comment in Rust: {rs}"
+        );
+        assert!(
+            rs.contains("// __body__"),
+            "expected statement-level TS comment in Rust: {rs}"
+        );
     }
 }

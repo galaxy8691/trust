@@ -7,6 +7,7 @@ mod resolve_imports;
 use std::fmt;
 use std::path::Path;
 
+use swc_common::comments::SingleThreadedComments;
 use swc_common::{sync::Lrc, FileName, SourceMap, Span, Spanned};
 use swc_ecma_ast::Program;
 use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax};
@@ -92,10 +93,11 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// 解析结果：AST + 源映射（供语义/诊断行列号）。
+/// 解析结果：AST + 源映射（供语义/诊断行列号）+ 该文件的注释表（与 `source_map` 中 BytePos 一致）。
 pub struct ParsedSource {
     pub program: Program,
     pub source_map: Lrc<SourceMap>,
+    pub comments: SingleThreadedComments,
 }
 
 /// 解析单文件 TypeScript。
@@ -120,7 +122,12 @@ pub fn parse_typescript_file(
         disallow_ambiguous_jsx_like: true,
     };
 
-    let mut parser = Parser::new(Syntax::Typescript(ts), StringInput::from(&*fm), None);
+    let comments = SingleThreadedComments::default();
+    let mut parser = Parser::new(
+        Syntax::Typescript(ts),
+        StringInput::from(&*fm),
+        Some(&comments),
+    );
 
     let program_result = parser.parse_program();
 
@@ -136,6 +143,7 @@ pub fn parse_typescript_file(
                 return Ok(ParsedSource {
                     program,
                     source_map: cm,
+                    comments,
                 });
             }
             Err(merge_parse_errors(collected))
@@ -174,13 +182,36 @@ pub mod ast {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use swc_ecma_ast::Program;
+    use swc_common::comments::Comments;
+    use swc_common::Spanned;
+    use swc_ecma_ast::{Decl, ModuleItem, Program as P, Stmt};
+
+    fn first_fn_decl_lo(program: &P) -> swc_common::BytePos {
+        match program {
+            P::Module(m) => {
+                for item in &m.body {
+                    if let ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) = item {
+                        return f.span().lo;
+                    }
+                }
+                panic!("no function decl in module");
+            }
+            P::Script(s) => {
+                for stmt in &s.body {
+                    if let Stmt::Decl(Decl::Fn(f)) = stmt {
+                        return f.span().lo;
+                    }
+                }
+                panic!("no function decl in script");
+            }
+        }
+    }
 
     #[test]
     fn parses_empty_main() {
         let src = r#"function main(): number { return 0; }"#;
         let p = parse_typescript_file("test.ts", src).unwrap();
-        assert!(matches!(p.program, Program::Module(_) | Program::Script(_)));
+        assert!(matches!(p.program, P::Module(_) | P::Script(_)));
     }
 
     #[test]
@@ -241,7 +272,7 @@ export function main(): number { return add(1, 2); }
 "#;
         let p = parse_typescript_file("entry.ts", src).unwrap();
         assert!(
-            matches!(p.program, Program::Module(_)),
+            matches!(p.program, P::Module(_)),
             "expected module for import/export"
         );
         let dbg = format!("{:?}", p.program);
@@ -276,5 +307,25 @@ export function f(): void {}
             let mixed = format!("{s}{garbled}{base}");
             let _ = parse_typescript_file("fuzz.ts", &mixed);
         }
+    }
+
+    #[test]
+    fn parse_preserves_leading_comments_before_function() {
+        let src = "// line note\n/* block note */\nfunction main(): number { return 0; }\n";
+        let p = parse_typescript_file("c.ts", src).unwrap();
+        let lo = first_fn_decl_lo(&p.program);
+        let leading = p
+            .comments
+            .get_leading(lo)
+            .expect("expected leading comments on function");
+        let joined: String = leading
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            joined.contains("line note") && joined.contains("block note"),
+            "got: {joined}"
+        );
     }
 }

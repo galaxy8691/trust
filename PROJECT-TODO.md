@@ -31,7 +31,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ### 1.1 Robustness on supported paths
 
 - [x] **Error recovery**: **single diagnostic** today (fail on first); multi-diagnostic collection is future work; see [README — Diagnostics (§1.1)](README.md).
-- [x] **Preserving comments**: **assessed** — AST has no comments, `source_map` exists; end-to-end comments need parser/token work; conclusion in README §1.1.
+- [x] **Preserving comments**: [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) populates [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs) (swc); frozen into HIR and optionally emitted as Rust `//` lines ([§14 — Comments vs generated Rust](PROJECT-TODO.md)); see README §1.1.
 - [x] **`export` variants**: everything except `export function` is explicitly rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs)); negative fixtures `export_*_fail.ts` + `cli_e2e`.
 
 ### 1.2 Statements and declarations
@@ -153,7 +153,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ### 4.3 Readability of emitted Rust
 
 - [x] **Indent / line breaks**: comma (`Seq`) block lines and closing `})` align for rustfmt (`codegen_43_comma_seq_indented`; [`emit_seq_expr`](crates/ts2rs-hir/src/codegen.rs) / `emit_expr` `stmt_level`).
-- [x] **Comments**: optional `// ts: path:line:col` per statement (`codegen_43_span_comments_emits_ts_anchors`; `ts2rs-cli` `compile_span_comments_writes_ts_anchors`; [`emit_stmt`](crates/ts2rs-hir/src/codegen.rs), `CodegenOptions`; `ts2rs compile --span-comments`).
+- [x] **Comments**: optional `// ts: path:line:col` per statement (`codegen_43_span_comments_emits_ts_anchors`; `ts2rs-cli` `compile_span_comments_writes_ts_anchors`; [`emit_stmt`](crates/ts2rs-hir/src/codegen.rs), `CodegenOptions`; `ts2rs compile --span-comments`). Optional TS leading comment text as Rust `//` lines (`emit_ts_source_comments_writes_frozen_leading`; `compile_ts_source_comments_writes_ts_text`; `CodegenOptions::emit_ts_source_comments`; `ts2rs compile --ts-source-comments`).
 
 ---
 
@@ -317,7 +317,7 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 **Comments vs generated Rust** (see [README §1.1 — Comments](README.md))
 
 - [x] **Span anchors (supported)**: `ts2rs compile --span-comments` sets [`CodegenOptions::span_comments`](crates/ts2rs-hir/src/codegen.rs) to emit `// ts: path:line:col` before statements (§4.3; maps TS **positions**, not TS comment text).
-- [ ] **TS source comments** reflected in generated Rust: needs comment/token preservation in the parse pipeline (swc `Program` has no comment nodes); still **not** implemented.
+- [x] **TS source comments** in generated Rust (opt-in): parser collects swc leading comments into [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs); [`build_module`](crates/ts2rs-hir/src/build.rs) / [`build_program_multi`](crates/ts2rs-hir/src/build.rs) freeze them into [`IRModule::ts_comments_by_path`](crates/ts2rs-hir/src/ir.rs); [`CodegenOptions::emit_ts_source_comments`](crates/ts2rs-hir/src/codegen.rs) emits Rust `//` lines before each statement and each top-level function. **Limitations**: leading only (no trailing / per-expression); lowered AST (e.g. large `switch` desugar) may shift or drop placement; [`compile_with_options`](crates/ts2rs-hir/src/lib.rs) passes `None` for comments (no TS text unless using `build_module` / graph with parser output). CLI: `ts2rs compile --ts-source-comments`. Tests: `emit_ts_source_comments_writes_frozen_leading`, `compile_ts_source_comments_writes_ts_text`.
 
 **Project-scale tooling** (see [README — Scope (1.0)](README.md) “Not 1.0” and [Unsupported TypeScript](README.md))
 

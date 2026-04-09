@@ -85,6 +85,9 @@ pub(crate) struct CompileCmd {
     /// 每条语句前生成 `// ts: path:line:col`
     #[arg(long)]
     pub(crate) span_comments: bool,
+    /// 将 TS 源码中的 leading 注释（`//` / `/* */`）写入生成的 Rust 行注释
+    #[arg(long)]
+    pub(crate) ts_source_comments: bool,
     /// 为与 `run` 对齐保留；`compile` 不写 Cargo.toml，无效果
     #[arg(long)]
     pub(crate) link_ts2rs_rt: bool,

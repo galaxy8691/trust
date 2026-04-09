@@ -69,6 +69,34 @@ fn compile_writes_rust() {
 }
 
 #[test]
+fn compile_ts_source_comments_writes_ts_text() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("ts_source_comment_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+            "--ts-source-comments",
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("// __TS2RS_SOURCE_COMMENT_TOP__"),
+        "expected TS top comment in Rust: {body}"
+    );
+    assert!(
+        body.contains("// __TS2RS_SOURCE_COMMENT_BODY__"),
+        "expected TS body comment in Rust: {body}"
+    );
+}
+
+#[test]
 fn compile_span_comments_writes_ts_anchors() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
     let ts = fixture("sample.ts");

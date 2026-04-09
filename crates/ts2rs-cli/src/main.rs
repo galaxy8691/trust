@@ -30,6 +30,7 @@ fn run(cli: Cli) -> RunOutcome {
             c.graph.project.as_deref(),
             &c.output,
             c.span_comments,
+            c.ts_source_comments,
             c.emit_ir,
             quiet,
         ) {

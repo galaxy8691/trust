@@ -29,7 +29,7 @@
 ### 1.1 已支持路径的健壮性
 
 - [x] **错误恢复**：解析与 build/sem 可在一次失败中输出**多条**诊断（见 README.zh-CN.md §1.1）；模块图仍可能在**首个无法解析的文件**处返回（单文件内可多条）。
-- [x] **保留注释**：**已评估**：AST 不挂注释，`source_map` 已有；贯通注释需 parser/token 层扩展，结论写在 README §1.1。
+- [x] **保留注释**：[`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 写入 [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs)（swc）；可冻结进 HIR 并可选生成 Rust `//` 行（[§14 — 注释与生成 Rust](PROJECT-TODO.zh-CN.md)）；详见 README.zh-CN.md §1.1。
 - [x] **`export` 变体**：除 `export function` 外均已显式拒绝（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；负例 fixtures `export_*_fail.ts` + `cli_e2e`。
 
 ### 1.2 语句与声明扩展
@@ -151,7 +151,7 @@
 ### 4.3 生成代码可读性
 
 - [x] **缩进与换行**：逗号表达式（`Seq`）块内行与闭合 `})` 与外层语句层级对齐，便于 rustfmt。（验收：`ts2rs-lower` `codegen_43_comma_seq_indented`；[`emit_seq_expr`](crates/ts2rs-hir/src/codegen.rs) / `emit_expr` 的 `stmt_level`；`cargo test --workspace`。）
-- [x] **注释**：可选在每条语句前注入 `// ts: path:line:col`（与诊断同源 `lookup_char_pos`）。（验收：`ts2rs-lower` `codegen_43_span_comments_emits_ts_anchors`；`ts2rs-cli` `compile_span_comments_writes_ts_anchors`；[`emit_stmt`](crates/ts2rs-hir/src/codegen.rs) 与 `CodegenOptions`；`ts2rs compile --span-comments`；`cargo test --workspace`。）
+- [x] **注释**：可选在每条语句前注入 `// ts: path:line:col`（与诊断同源 `lookup_char_pos`）。（验收：`ts2rs-lower` `codegen_43_span_comments_emits_ts_anchors`；`ts2rs-cli` `compile_span_comments_writes_ts_anchors`；[`emit_stmt`](crates/ts2rs-hir/src/codegen.rs) 与 `CodegenOptions`；`ts2rs compile --span-comments`；`cargo test --workspace`。）另可选将 TS **leading** 注释正文写成 Rust `//` 行（`emit_ts_source_comments_writes_frozen_leading`；`compile_ts_source_comments_writes_ts_text`；`CodegenOptions::emit_ts_source_comments`；`ts2rs compile --ts-source-comments`。）
 
 ---
 
@@ -315,7 +315,7 @@
 **注释与生成 Rust**（见 [README.zh-CN.md](README.zh-CN.md) §1.1「注释」）
 
 - [x] **位置锚点（已支持）**：`ts2rs compile --span-comments` 设置 [`CodegenOptions::span_comments`](crates/ts2rs-hir/src/codegen.rs)，在每条语句前生成 `// ts: path:line:col`（§4.3；映射 TS **位置**，非 TS 注释正文；用法见 README「Usage」中 `compile`）。
-- [ ] **TS 源码注释**反映到生成 Rust：解析管线须保留注释/token（swc `Program` 无注释节点）；**尚未**实现。
+- [x] **TS 源码注释**进入生成 Rust（可选）：解析器将 swc leading 注释写入 [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs)；[`build_module`](crates/ts2rs-hir/src/build.rs) / [`build_program_multi`](crates/ts2rs-hir/src/build.rs) 冻结为 [`IRModule::ts_comments_by_path`](crates/ts2rs-hir/src/ir.rs)；[`CodegenOptions::emit_ts_source_comments`](crates/ts2rs-hir/src/codegen.rs) 在语句与顶层函数前输出 Rust `//` 行。**局限**：仅 leading（无 trailing / 表达式级）；大粒度 lowering（如 `switch`）可能导致位置偏移或丢失；[`compile_with_options`](crates/ts2rs-hir/src/lib.rs) 仍传 `None` 注释（单文件 API 不带来 TS 正文，除非自行 `build_module` 并传入解析结果）。CLI：`ts2rs compile --ts-source-comments`。验收：`emit_ts_source_comments_writes_frozen_leading`、`compile_ts_source_comments_writes_ts_text`。
 
 **工程级工具链**（见 [README.zh-CN.md](README.zh-CN.md)「非 1.0」与「不支持」边界）
 

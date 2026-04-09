@@ -57,8 +57,8 @@ flowchart LR
 
 - **多条编译错误**：build 与语义阶段可在**一次失败**中收集多条诊断（[`CompileError::Many`](crates/ts2rs-hir/src/error.rs)），按行输出多条 `path:line:col: message`（已排序）。解析器 [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 会输出 swc **`take_errors()` 的全部**诊断。**单态化**与 **codegen** 仍可能在首条内部错误处停止。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
 - **`export` 形态**：除 `export function …` 与顶层 `function …` 外，其余 `export`（如 `export { … }`、`export default`、`export * from`、`export const`、`export class` 等）均**显式报错**（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；**顶层、无 `export` 的 `class`** 见矩阵。负例样例见 `export_*_fail.ts`（与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)）。
-- **注释**：swc 产出的 `Program` **不携带**注释节点；[`ParsedSource`](crates/ts2rs-parser/src/lib.rs) 已含 `source_map` 供行列号。若要将 TS 注释反映到生成的 Rust，需在 parser 侧保留注释或扫描 token，并在 IR/codegen 中单独设计；**当前未实现**。
-- **后续与 backlog**（TS 原文注释进入生成物、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
+- **注释**：swc 的 `Program` **仍无**注释节点；[`ParsedSource`](crates/ts2rs-parser/src/lib.rs) 含 `source_map` 与解析器收集的 `comments`（swc 注释表）。**将 TS leading 注释写入生成 Rust** 为可选：[`CodegenOptions::emit_ts_source_comments`](crates/ts2rs-hir/src/codegen.rs)，CLI `ts2rs compile --ts-source-comments`，在语句与顶层函数前输出 `//` 行；trailing 与大粒度 lowering 后的位置不保证（见 [PROJECT-TODO.zh-CN.md §14](PROJECT-TODO.zh-CN.md)）。
+- **后续与 backlog**（更细粒度注释映射、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
 
 ## 控制流与 return（简化语义 + §3.4）
 
@@ -217,7 +217,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | **`-q` / `--quiet`** | 成功时不打印 **warning**（错误仍输出） |
 | **`--color`** | `auto` / `always` / `never`，帮助文本等着色；`never` / `always` 在解析前会同步 `NO_COLOR`（亦可直接设 `NO_COLOR=1`） |
 
-**`compile`**：`--span-comments`、`--emit-ir`（将 [`IRModule`](crates/ts2rs-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、`--link-ts2rs-rt`（无效果，与 `run` 对齐）。
+**`compile`**：`--span-comments`、`--ts-source-comments`（将 TS leading 注释写成 Rust `//` 行）、`--emit-ir`（将 [`IRModule`](crates/ts2rs-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、`--link-ts2rs-rt`（无效果，与 `run` 对齐）。
 
 **`run`**：`--link-ts2rs-rt`；**`--debug`** 使用非 release 的 `cargo build`（`target/debug/`）；**`-O` / `--release`** 显式要求 release 构建（与默认一致，与 `--debug` 互斥）。
 
@@ -228,13 +228,13 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 - **`run --link-ts2rs-rt`**：在临时 crate 的 `Cargo.toml` 中加入可选 path 依赖 **`ts2rs_rt`**（须在本仓库源码树内构建；仅从 crates.io 安装时通常会失败）。生成代码默认仍不 `use ts2rs_rt`。
 - **`compile --link-ts2rs-rt`**：仅为 CLI 一致性保留，不生成 `Cargo.toml`，无效果。
 
-`compile` 可加 `--span-comments`，在生成的 Rust 中为每条语句前置 `// ts: path:line:col`（对照 TS 位置）。
+`compile` 可加 `--span-comments`，在生成的 Rust 中为每条语句前置 `// ts: path:line:col`（对照 TS **位置**）。另可加 `--ts-source-comments`，写入 TS **注释正文**（leading，转为 `//` 行；与 `--span-comments` 独立）。
 
 ## 仓库布局
 
 | Crate | 说明 |
 |-------|------|
-| `ts2rs-parser` | swc 封装；`ParsedSource` 含 `source_map`；[`module_graph`](crates/ts2rs-parser/src/module_graph.rs) 多文件入口；共享 import 解析见 [`import_utils`](crates/ts2rs-parser/src/import_utils.rs) |
+| `ts2rs-parser` | swc 封装；`ParsedSource`（`program`、`source_map`、`comments`）；[`module_graph`](crates/ts2rs-parser/src/module_graph.rs) 多文件入口；共享 import 解析见 [`import_utils`](crates/ts2rs-parser/src/import_utils.rs) |
 | `ts2rs-hir` | IR、构建、语义、`emit_rust`；[`compile_graph`](crates/ts2rs-hir/src/lib.rs) 多模块；诊断与 codegen 共用节点 `Span` + 函数级 `ir_id`（见 [`ir.rs`](crates/ts2rs-hir/src/ir.rs)）；拆分辅助模块：[`build/build_types.rs`](crates/ts2rs-hir/src/build/build_types.rs)、[`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs)、[`codegen/helpers.rs`](crates/ts2rs-hir/src/codegen/helpers.rs) |
 | `ts2rs-lower` | `lower_program` / [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) |
 | `ts2rs-driver` | 临时 crate + `cargo build`（需本机 `cargo` 在 `PATH`）；[`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)；未找到 `cargo` 时 [`DriverError::CargoNotFound`](crates/ts2rs-driver/src/lib.rs)；流水线拆分：[`pipeline.rs`](crates/ts2rs-driver/src/pipeline.rs)、[`cargo_runner.rs`](crates/ts2rs-driver/src/cargo_runner.rs)、[`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs) |

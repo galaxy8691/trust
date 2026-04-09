@@ -12,6 +12,7 @@ pub use codegen::{emit_rust, emit_rust_with_options, CodegenOptions};
 pub use error::{CompileError, CompileWarning};
 pub use ir::*;
 
+pub use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_ecma_ast::Program;
@@ -30,15 +31,15 @@ pub fn compile_with_options(
     path: &str,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
-    let mut module = build_module(program, cm, path)?;
+    let mut module = build_module(program, cm, path, None)?;
     let warnings = sem::check_module(&mut module)?;
     let rust = emit_rust_with_options(&module, codegen)?;
     Ok((rust, warnings))
 }
 
-/// 多文件模块图：各单元为 `(source_path, Program, SourceMap)`，须与入口文件路径一致以便校验 `main`。
+/// 多文件模块图：各单元为 `(source_path, Program, SourceMap, SingleThreadedComments)`（与 [`ts2rs_parser::ParsedModuleGraph::compile_units`] 一致）。
 pub fn compile_graph(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
     compile_graph_with_options(units, entry_path, &CodegenOptions::default())
@@ -46,7 +47,7 @@ pub fn compile_graph(
 
 /// 多文件模块图：构建 IR 并完成语义检查（不生成 Rust）。
 pub fn build_checked_module(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<(IRModule, Vec<CompileWarning>), CompileError> {
     let mut module = build_program_multi(units, entry_path)?;
@@ -56,7 +57,7 @@ pub fn build_checked_module(
 
 /// 仅语义检查（与 [`compile_graph`] 前半段相同，无 codegen）。
 pub fn check_graph(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<Vec<CompileWarning>, CompileError> {
     let (_, warnings) = build_checked_module(units, entry_path)?;
@@ -64,7 +65,7 @@ pub fn check_graph(
 }
 
 pub fn compile_graph_with_options(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {

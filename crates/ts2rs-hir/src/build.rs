@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use swc_common::comments::{Comment, CommentKind, SingleThreadedComments};
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, CallExpr, Callee, ClassDecl, ClassMember, Decl,
@@ -18,10 +19,52 @@ use crate::json_parse_fold::{fold_json_parse_arg, JsonParseFold};
 
 mod build_types;
 
+fn freeze_leading_comments(c: &SingleThreadedComments) -> TsLeadingComments {
+    let mut out = TsLeadingComments::new();
+    let (leading, _) = c.borrow_all();
+    for (pos, cmts) in leading.iter() {
+        let mut lines: Vec<String> = Vec::new();
+        for cmt in cmts {
+            lines.extend(comment_to_lines(cmt));
+        }
+        if !lines.is_empty() {
+            out.insert(pos.0, lines);
+        }
+    }
+    out
+}
+
+fn comment_to_lines(c: &Comment) -> Vec<String> {
+    let t = c.text.as_str();
+    match c.kind {
+        CommentKind::Line => {
+            let s = sanitize_ts_comment_line(t);
+            if s.is_empty() {
+                vec![]
+            } else {
+                vec![s]
+            }
+        }
+        CommentKind::Block => t
+            .lines()
+            .map(sanitize_ts_comment_line)
+            .filter(|s| !s.is_empty())
+            .collect(),
+    }
+}
+
+fn sanitize_ts_comment_line(s: &str) -> String {
+    let s = s.replace('\r', "");
+    let s = s.trim();
+    let s = s.trim_start_matches('*').trim();
+    s.to_string()
+}
+
 pub fn build_module(
     program: &Program,
     cm: &Lrc<SourceMap>,
     path: &str,
+    comments: Option<&SingleThreadedComments>,
 ) -> Result<IRModule, CompileError> {
     let mut next_id = 0u32;
     let mut errs = Vec::new();
@@ -47,24 +90,33 @@ pub fn build_module(
     if !errs.is_empty() {
         return Err(CompileError::merge_sorted(errs));
     }
+    let mut ts_comments_by_path = HashMap::new();
+    if let Some(c) = comments {
+        let frozen = freeze_leading_comments(c);
+        if !frozen.is_empty() {
+            ts_comments_by_path.insert(path.to_string(), frozen);
+        }
+    }
     Ok(IRModule {
         fns: all_fns,
         classes,
         generic_types: HashMap::new(),
         entry_path: path.to_string(),
+        ts_comments_by_path,
     })
 }
 
 /// 多文件模块图：合并各模块中的顶层函数，要求全局函数名唯一；`entry_path` 用于语义上定位 `main`。
 pub fn build_program_multi(
-    units: &[(String, Program, Lrc<SourceMap>)],
+    units: &[(String, Program, Lrc<SourceMap>, SingleThreadedComments)],
     entry_path: &str,
 ) -> Result<IRModule, CompileError> {
     let mut next_id = 0u32;
     let mut all = Vec::new();
     let mut classes_all = Vec::new();
     let mut all_errs = Vec::new();
-    for (path, program, cm) in units {
+    let mut ts_comments_by_path = HashMap::new();
+    for (path, program, cm, file_comments) in units {
         let mut errs = Vec::new();
         let iface =
             build_types::collect_named_types_with_errors(program, cm, path.as_str(), &mut errs);
@@ -84,6 +136,10 @@ pub fn build_program_multi(
         fns.append(&mut lowered);
         all.append(&mut fns);
         all_errs.extend(errs);
+        let frozen = freeze_leading_comments(file_comments);
+        if !frozen.is_empty() {
+            ts_comments_by_path.insert(path.clone(), frozen);
+        }
     }
     let mut seen = std::collections::HashSet::<String>::new();
     for f in &all {
@@ -105,6 +161,7 @@ pub fn build_program_multi(
         classes: classes_all,
         generic_types: HashMap::new(),
         entry_path: entry_path.to_string(),
+        ts_comments_by_path,
     })
 }
 
@@ -2998,7 +3055,7 @@ mod tests {
     fn build_module_records_main() {
         let src = r#"function main(): number { return 0; }"#;
         let p = parse_typescript_file("t.ts", src).unwrap();
-        let m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let m = build_module(&p.program, &p.source_map, "t.ts", Some(&p.comments)).unwrap();
         assert!(m.fns.iter().any(|f| f.name == "main"));
     }
 }

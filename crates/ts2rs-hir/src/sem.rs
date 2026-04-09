@@ -2643,7 +2643,7 @@ mod tests {
     fn check_module_accepts_simple_main() {
         let src = r#"function main(): number { return 0; }"#;
         let p = parse_typescript_file("t.ts", src).unwrap();
-        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts", Some(&p.comments)).unwrap();
         let w = check_module(&mut m).unwrap();
         assert!(w.is_empty());
     }
@@ -2652,7 +2652,7 @@ mod tests {
     fn check_module_rejects_missing_return() {
         let src = r#"function main(): number { let x: number = 1; }"#;
         let p = parse_typescript_file("t.ts", src).unwrap();
-        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts", Some(&p.comments)).unwrap();
         let e = check_module(&mut m).unwrap_err();
         let s = e.to_string();
         assert!(
@@ -2674,7 +2674,7 @@ function main(): number {
 }
 "#;
         let p = parse_typescript_file("t.ts", src).unwrap();
-        let mut m = build_module(&p.program, &p.source_map, "t.ts").unwrap();
+        let mut m = build_module(&p.program, &p.source_map, "t.ts", Some(&p.comments)).unwrap();
         let w = check_module(&mut m).unwrap();
         assert!(w.is_empty());
     }
