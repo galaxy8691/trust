@@ -3,5 +3,7 @@ function id<T>(x: T): T {
 }
 
 function main(): number {
-  return id(3);
+  id(u);
+  id(v);
+  return 0;
 }

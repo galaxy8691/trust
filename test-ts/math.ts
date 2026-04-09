@@ -102,7 +102,7 @@ export function len_label_twice(): number {
   return n + n;
 }
 
-// --- 泛型（须在调用点写显式类型实参，见 generic_function_ok.ts）---
+// --- 泛型（可写显式实参，或在实参可合成类型时省略，见 generic_function_ok.ts）---
 export function identity<T>(x: T): T {
   return x;
 }

@@ -488,7 +488,69 @@ fn run_generic_function_ok_prints_three() {
 fn compile_generic_function_missing_type_args_fails() {
     assert_compile_fails_stderr(
         "generic_function_missing_type_args_fail.ts",
-        "requires explicit type arguments",
+        "cannot infer type arguments for generic function",
+    );
+}
+
+#[test]
+fn compile_generic_function_infer_conflict_fails() {
+    assert_compile_fails_stderr(
+        "generic_function_infer_conflict_fail.ts",
+        "conflicting inferred type arguments",
+    );
+}
+
+#[test]
+fn compile_generic_function_multi_infer_fail_reports_multiple_errors() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("generic_function_multi_infer_fail.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let out = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn ts2rs compile");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let n = stderr
+        .matches("cannot infer type arguments for generic function")
+        .count();
+    assert!(
+        n >= 2,
+        "expected at least two monomorphization errors, got {n} in:\n{stderr}"
+    );
+}
+
+#[test]
+fn run_generic_method_call_infer_ok_prints_three() {
+    assert_run_stdout("generic_method_call_infer_ok.ts", "3\n");
+}
+
+#[test]
+fn compile_generic_method_call_infer_ok_writes_rust() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("generic_method_call_infer_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("fn ts_main"),
+        "expected generated Rust with ts_main: {body}"
     );
 }
 

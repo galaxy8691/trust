@@ -111,7 +111,7 @@ flowchart LR
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
 | `interface`（受限） | 部分支持 | 顶层 `interface` / `export interface`；声明体与 `{ k: number }` 相同规则，解析为 [`TsType::ObjectNum`](crates/ts2rs-hir/src/ir.rs)（`build.rs` 中具名表）；类型位置用 `Point` 形式引用；**单文件**内按出现顺序声明，引用尚未声明的接口名会报错；**不**从依赖模块导入接口名；`extends`、泛型、可选属性拒绝；见 `interface_ok.ts`、`export_interface_ok.ts`、负例 `interface_extends_fail.ts`、`interface_generic_fail.ts` |
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types_with_errors`](crates/ts2rs-hir/src/build/build_types.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
-| 泛型 / 类型实参 | 部分支持 | 单态化子集：泛型调用需显式类型实参；泛型声明可解析；更宽泛语义仍拒绝 |
+| 泛型 / 类型实参 | 部分支持 | 单态化：可写显式 `f<number>(x)`，或在实参类型可合成时省略（字面量、已注解的 `let`/参数）；不可推、冲突或多处错误会分别报错；`obj.m` 脱糖后的泛型全局函数同样推断；Rust 侧符号为 `name__` + 16 位十六进制指纹 |
 | 高阶函数 | 部分支持 | 函数类型与箭头闭包（`(number) => number` → `(f64) -> f64`）；变量调用 `f(...)` 等 |
 | `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` JSON number → `f64`，`serde_json`）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
@@ -137,7 +137,7 @@ flowchart LR
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |
 | `console` | `console_stderr.ts`、`void_log.ts` | `compile_console_stderr_writes_eprintln`、`run_void_log_in_branch_prints_branch` |
 | 字面量类型 / 联合 / 交集 | `literal_type_*.ts`、`union_*.ts`、`intersection_type_fail.ts` | `run_literal_type_ok_prints_eight`、`compile_union_heterogeneous_fail_errors` 等 |
-| `interface` / `type` / 泛型子集 | `interface_*.ts`、`type_alias_*.ts`、`generic_function_ok.ts` | `run_interface_generic_ok_prints_zero`、`run_type_alias_generic_ok_prints_zero`、`run_generic_function_ok_prints_three` |
+| `interface` / `type` / 泛型子集 | `interface_*.ts`、`type_alias_*.ts`、`generic_function_ok.ts`、`generic_method_call_infer_ok.ts`、`generic_function_*_fail.ts` | `run_interface_generic_ok_prints_zero`、`run_type_alias_generic_ok_prints_zero`、`run_generic_function_ok_prints_three`、`run_generic_method_call_infer_ok_prints_three`、`compile_generic_function_infer_conflict_fails` 等 |
 | class 子集 | `class_basic_ok.ts`、`class_this_method_ok.ts`、`class_extends_ok.ts`、`class_super_ctor_ok.ts`、`class_*_fail.ts` | `run_class_basic_ok_prints_five`、`run_class_extends_ok_prints_seven`、`compile_class_super_invalid_fails`、`compile_class_override_mismatch_fails` |
 | 嵌套函数 | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | 极简 tsconfig / `--project` | `multi_entry_tsconfig.json` + `multi_entry_*.ts` | `run_project_tsconfig_prints_main`、`run_project_tsconfig_extends_include_ok` |
@@ -152,10 +152,12 @@ flowchart LR
 
 ### 泛型与类型参数（单态化子集）
 
-- 泛型函数声明可通过；在调用处使用显式类型实参时由 `sem` 进行实例化并改写调用。
-- 泛型函数若省略显式类型实参（如 `id(1)`，其中 `id<T>`）会报错。
+- 泛型函数声明可通过；**单态化**在 `sem` 中、逐函数类型检查之前运行。调用可写显式类型实参，也可在能从**实参表达式合成类型**（数字/字符串/布尔/`null`/`undefined` 字面量，或带类型注解的局部/参数）与形参签名对齐时**省略**实参。
+- 无法合成类型、对同一类型参数**推断冲突**、或形参类型尚不支持推断时会报错；一次编译可收集**多条**单态化相关诊断。
+- `obj.m(args)` 脱糖为 `m(obj, ...args)`；若 `m` 为泛型顶层函数，推断规则相同（含 receiver）。
+- 生成的 Rust 函数名为 `原名__` + 16 位十六进制（对规范类型键做 FNV-1a）；IR 上 `mono_origin` 仍保留可读实例说明。
 - 泛型 `interface` / `type` 声明可解析于当前受限类型子集。
-- 复杂推导、约束丰富形态与更完整 TypeScript 泛型语义仍在后续范围内。
+- 完整 TS 式推导、丰富约束与高阶多态等仍在后续范围。
 
 ## 语义与类型路线（§3.3）
 

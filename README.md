@@ -39,7 +39,7 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 | User-visible form | Notes |
 |-------------------|--------|
 | `export` other than `export function` / top-level `function` / relative **`export * from "./x.ts"`** / **`export { … } from "./x.ts"`** | e.g. `export { }` without `from`, `export default`, `export * as`, `export const`, `export class` (**top-level `class` without `export`** is in the matrix and [PROJECT-TODO.md §13.3](PROJECT-TODO.md)) |
-| Advanced generics | Complex inference/constraints and full TS generic semantics are still out of scope; **explicit type arguments at call sites** (monomorphization subset) — see matrix “Generics” and [§13.1](PROJECT-TODO.md) |
+| Advanced generics | Full TS inference/constraints remain out of scope; **simple monomorphization** with optional explicit type args or **local inference** from argument types (literals + `let`/`param` annotations) — see matrix “Generics” and [§13.1](PROJECT-TODO.md) |
 | Optional chaining (rejection boundary) | Restricted **`f?.()`** / **`recv?.m()`** are supported (`optional_call_ok.ts`); other callees / shapes may still be rejected (`optional_chain_fail.ts`) |
 | `interface` `extends`, optional props, imported interface names across files | Single-file nominal table only |
 | Intersection `A & B` | Rejected |
@@ -106,7 +106,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | Union `A \| B` | Partial | Normalization; must map to one Rust type; `number \| string` heterogeneous fails; `A & B` rejected; `union_*`, `intersection_type_fail.ts` |
 | `interface` | Partial | Top-level; `TsType::ObjectNum`; `interface_ok.ts`, negatives |
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
-| Generics / type args | Partial | Monomorphization subset: explicit type args required at generic call sites; generic declarations are allowed; unsupported broad shapes still rejected |
+| Generics / type args | Partial | Monomorphization: explicit `f<number>(x)` or inferred from args where each parameter type is inferable (`id(3)`, `p.m(...)` with generic `m`); conflicting/uninferable calls rejected; mangled Rust symbols use a stable fingerprint; multiple mono diagnostics may be reported in one run |
 | Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` → `(f64) -> f64`); variable-call `f(...)`, function args/returns covered by e2e fixtures |
 | `async` / `await` / `Promise` / `fetch` / `fetchText` | Partial | `async function` with return `Promise<T>` (`T` is `number` \| `string` \| `void`); **`fetchText(url)`** → `Promise<string>` (`__ts2rs_fetch_text`); **`fetch(url, init?)`** → `Promise<Response>` (`reqwest::Response`: `status`, `ok`, `await .text()`, `await .json()` JSON **number** body → `f64` via `serde_json`); **`response.body.getReader()`** + **`await reader.read()`** → `{ done, value }` with **`Uint8Array`** as `Vec<u8>` (`bytes_stream()` + `futures-util` `StreamExt`); optional **`init`** with string-literal `method`, `headers` map (string literal values), optional `body` string; **`Promise.all([...])`** homogeneous `number` / `string` / `fetch` responses (sequential `.await`); **`.then`** rejected; TLS via **rustls**; HTTP/2 when negotiated — **not** byte-parity with a specific Node release; full WHATWG `fetch` (`Headers`, duplex, etc.) still backlog; see `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, and other `compile_async_*` / `promise_*` tests |
 | Class / this / extends / super | Partial | Class subset is lowered to constructor/method functions, with sem checks for extends graph, `super(...)` placement, and baseline `override`; e2e: `class_*` fixtures |
@@ -132,7 +132,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | `switch` | `switch_ok.ts`, `switch_fail.ts` | … |
 | Console | `console_stderr.ts`, `void_log.ts` | … |
 | Literal / union / intersection | `literal_type_*.ts`, `union_*.ts` | … |
-| Interface / type / generic subset | `interface_*.ts`, `type_alias_*.ts`, `generic_function_ok.ts` | `run_interface_generic_ok_prints_zero`, `run_type_alias_generic_ok_prints_zero`, `run_generic_function_ok_prints_three` |
+| Interface / type / generic subset | `interface_*.ts`, `type_alias_*.ts`, `generic_function_ok.ts`, `generic_method_call_infer_ok.ts`, `generic_function_*_fail.ts` | `run_interface_generic_ok_prints_zero`, `run_type_alias_generic_ok_prints_zero`, `run_generic_function_ok_prints_three`, `run_generic_method_call_infer_ok_prints_three`, `compile_generic_function_infer_conflict_fails`, … |
 | Class subset | `class_basic_ok.ts`, `class_this_method_ok.ts`, `class_extends_ok.ts`, `class_super_ctor_ok.ts`, `class_*_fail.ts` | `run_class_basic_ok_prints_five`, `run_class_extends_ok_prints_seven`, `compile_class_super_invalid_fails`, `compile_class_override_mismatch_fails` |
 | Nested function | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main`, `run_project_tsconfig_extends_include_ok` |
@@ -147,10 +147,12 @@ Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJ
 
 ### Generics (monomorphization subset)
 
-- Generic function declarations are accepted and instantiated by `sem` when called with explicit type arguments.
-- Generic calls without explicit type arguments are rejected (e.g. `id(1)` when `id<T>`).
+- Generic function declarations are accepted; **monomorphization** runs in `sem` before per-function typecheck. Calls may use **explicit** type arguments (`id<number>(3)`) or **omit** them when each type parameter can be fixed from the callee signature and **synthesized argument types** (numeric/string/boolean/`null`/`undefined` literals, or locals/parameters with known annotations).
+- Uninferable arguments (e.g. unknown identifier), **conflicting** constraints on the same type parameter, or parameter types that still contain unsupported shapes for inference produce errors; several such errors can be reported in one compile.
+- Method-call sugar `obj.m(args)` lowers to `m(obj, ...args)`; if `m` is generic, the same inference rules apply (receiver plus arguments).
+- Instance Rust names are `name__` + 16 hex digits (FNV-1a over a canonical type key); `mono_origin` on IR still records a readable instantiation label.
 - Generic `interface` / `type` declarations are accepted in the current restricted type subset.
-- Broader TypeScript generic semantics (inference, constraints-rich forms, higher-order generic typing) remain out of scope.
+- Broader TypeScript generic semantics (full inference, rich constraints, higher-order polymorphism) remain out of scope.
 
 ## Semantics roadmap (§3.3)
 
