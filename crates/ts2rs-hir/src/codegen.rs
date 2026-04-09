@@ -220,10 +220,7 @@ fn module_needs_fetch_request_helper(module: &IRModule) -> bool {
 }
 
 fn module_needs_http_stream(module: &IRModule) -> bool {
-    module
-        .fns
-        .iter()
-        .any(|f| stmts_maybe_http_stream(&f.body))
+    module.fns.iter().any(|f| stmts_maybe_http_stream(&f.body))
 }
 
 fn stmts_maybe_http_stream(stmts: &[IRStmt]) -> bool {
@@ -442,15 +439,15 @@ fn expr_maybe_fetch_text_only(e: &IRExpr) -> bool {
             expr_maybe_fetch_text_only(left) || expr_maybe_fetch_text_only(right)
         }
         IRExpr::ArrayLit { elems, .. } => elems.iter().any(expr_maybe_fetch_text_only),
-        IRExpr::ObjectLit { fields, .. } => fields.iter().any(|(_, v)| expr_maybe_fetch_text_only(v)),
+        IRExpr::ObjectLit { fields, .. } => {
+            fields.iter().any(|(_, v)| expr_maybe_fetch_text_only(v))
+        }
         IRExpr::Index { obj, index, .. } => {
             expr_maybe_fetch_text_only(obj) || expr_maybe_fetch_text_only(index)
         }
         IRExpr::ArrowFn { body, .. } => stmts_maybe_fetch_text_only(body),
         IRExpr::PromiseAll { elems, .. } => elems.iter().any(expr_maybe_fetch_text_only),
-        IRExpr::HttpResponseBodyGetReader { response, .. } => {
-            expr_maybe_fetch_text_only(response)
-        }
+        IRExpr::HttpResponseBodyGetReader { response, .. } => expr_maybe_fetch_text_only(response),
         IRExpr::ReaderRead { .. } => false,
         IRExpr::Fetch { .. }
         | IRExpr::HttpResponseMethodBuiltin { .. }
@@ -488,9 +485,7 @@ fn expr_maybe_fetch_request(e: &IRExpr) -> bool {
         IRExpr::StringMethodBuiltin { receiver, args, .. } => {
             expr_maybe_fetch_request(receiver) || args.iter().any(expr_maybe_fetch_request)
         }
-        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => {
-            expr_maybe_fetch_request(receiver)
-        }
+        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => expr_maybe_fetch_request(receiver),
         IRExpr::Conditional {
             test, cons, alt, ..
         } => {
@@ -519,9 +514,7 @@ fn expr_maybe_fetch_request(e: &IRExpr) -> bool {
         }
         IRExpr::ArrowFn { body, .. } => stmts_maybe_fetch_request(body),
         IRExpr::PromiseAll { elems, .. } => elems.iter().any(expr_maybe_fetch_request),
-        IRExpr::HttpResponseBodyGetReader { response, .. } => {
-            expr_maybe_fetch_request(response)
-        }
+        IRExpr::HttpResponseBodyGetReader { response, .. } => expr_maybe_fetch_request(response),
         IRExpr::ReaderRead { .. } => false,
         IRExpr::FetchText { .. }
         | IRExpr::Number(..)
@@ -665,15 +658,11 @@ fn expr_maybe_utf16_stdlib(e: &IRExpr) -> bool {
         IRExpr::FetchText { url, .. } => expr_maybe_utf16_stdlib(url),
         IRExpr::Fetch { url, init, .. } => {
             expr_maybe_utf16_stdlib(url)
-                || init.as_ref().is_some_and(|i| {
-                    i.body
-                        .as_ref()
-                        .is_some_and(|b| expr_maybe_utf16_stdlib(b))
-                })
+                || init
+                    .as_ref()
+                    .is_some_and(|i| i.body.as_ref().is_some_and(|b| expr_maybe_utf16_stdlib(b)))
         }
-        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => {
-            expr_maybe_utf16_stdlib(receiver)
-        }
+        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => expr_maybe_utf16_stdlib(receiver),
         IRExpr::PromiseAll { elems, .. } => elems.iter().any(expr_maybe_utf16_stdlib),
         _ => false,
     }
@@ -737,9 +726,7 @@ fn expr_maybe_json_stringify(e: &IRExpr) -> bool {
                         .is_some_and(|b| expr_maybe_json_stringify(b))
                 })
         }
-        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => {
-            expr_maybe_json_stringify(receiver)
-        }
+        IRExpr::HttpResponseMethodBuiltin { receiver, .. } => expr_maybe_json_stringify(receiver),
         IRExpr::PromiseAll { elems, .. } => elems.iter().any(expr_maybe_json_stringify),
         _ => false,
     }
@@ -1606,9 +1593,8 @@ fn emit_expr(
 }
 
 fn fetch_init_needs_some(init: &Option<FetchInit>) -> bool {
-    init.as_ref().is_some_and(|i| {
-        i.method.is_some() || !i.headers.is_empty() || i.body.is_some()
-    })
+    init.as_ref()
+        .is_some_and(|i| i.method.is_some() || !i.headers.is_empty() || i.body.is_some())
 }
 
 fn emit_fetch_call(
@@ -1623,16 +1609,10 @@ fn emit_fetch_call(
         return Ok(format!("__ts2rs_fetch({u}, std::option::Option::None)"));
     }
     let i = init.as_ref().expect("checked");
-    let method = i
-        .method
-        .clone()
-        .unwrap_or_else(|| "GET".to_string());
+    let method = i.method.clone().unwrap_or_else(|| "GET".to_string());
     let mut header_parts = Vec::with_capacity(i.headers.len());
     for (k, v) in &i.headers {
-        header_parts.push(format!(
-            "({:?}.to_string(), {:?}.to_string())",
-            k, v
-        ));
+        header_parts.push(format!("({:?}.to_string(), {:?}.to_string())", k, v));
     }
     let headers_joined = header_parts.join(", ");
     let body_rust = match &i.body {

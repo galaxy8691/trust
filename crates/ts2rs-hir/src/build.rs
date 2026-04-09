@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
-    AssignOp, AssignTarget, BinaryOp, BindingIdent, Callee, CallExpr, ClassDecl, ClassMember, Decl,
+    AssignOp, AssignTarget, BinaryOp, BindingIdent, CallExpr, Callee, ClassDecl, ClassMember, Decl,
     EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, KeyValueProp, Lit,
     MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, ObjectLit, OptCall, OptChainBase,
     OptChainExpr, Param, ParamOrTsParamProp, Pat, Program, Prop, PropName, PropOrSpread,
@@ -1563,12 +1563,7 @@ fn build_expr(
             Lit::Num(n) => {
                 let v = n.value;
                 if v.is_nan() || v.is_infinite() {
-                    return Err(diag_spanned(
-                        cm,
-                        path,
-                        n,
-                        "numeric literal must be finite",
-                    ));
+                    return Err(diag_spanned(cm, path, n, "numeric literal must be finite"));
                 }
                 Ok(IRExpr::Number(v, n.span))
             }
@@ -2482,7 +2477,12 @@ fn build_fetch_init(
                     match k.as_str() {
                         "method" => {
                             if method.is_some() {
-                                return Err(diag(cm, path, o.span, "duplicate `method` in fetch init"));
+                                return Err(diag(
+                                    cm,
+                                    path,
+                                    o.span,
+                                    "duplicate `method` in fetch init",
+                                ));
                             }
                             let s = match &**value {
                                 Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
@@ -2499,7 +2499,12 @@ fn build_fetch_init(
                         }
                         "headers" => {
                             if saw_headers {
-                                return Err(diag(cm, path, o.span, "duplicate `headers` in fetch init"));
+                                return Err(diag(
+                                    cm,
+                                    path,
+                                    o.span,
+                                    "duplicate `headers` in fetch init",
+                                ));
                             }
                             saw_headers = true;
                             let ho = match &**value {
@@ -2579,7 +2584,12 @@ fn build_fetch_init(
                         }
                         "body" => {
                             if body.is_some() {
-                                return Err(diag(cm, path, o.span, "duplicate `body` in fetch init"));
+                                return Err(diag(
+                                    cm,
+                                    path,
+                                    o.span,
+                                    "duplicate `body` in fetch init",
+                                ));
                             }
                             body = Some(Box::new(build_expr(value, cm, path, iface, in_async)?));
                         }

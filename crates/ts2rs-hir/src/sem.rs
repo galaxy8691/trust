@@ -435,14 +435,12 @@ fn restore_inits(stack: &mut [HashMap<String, Binding>], snap: &[HashMap<String,
     }
 }
 
-fn snapshot_http_body(stack: &[HashMap<String, Binding>]) -> Vec<HashMap<String, Option<HttpBodyUsage>>> {
+fn snapshot_http_body(
+    stack: &[HashMap<String, Binding>],
+) -> Vec<HashMap<String, Option<HttpBodyUsage>>> {
     stack
         .iter()
-        .map(|m| {
-            m.iter()
-                .map(|(k, v)| (k.clone(), v.http_body))
-                .collect()
-        })
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.http_body)).collect())
         .collect()
 }
 
@@ -468,11 +466,7 @@ fn merge_http_body_after_if_else(
     for i in 0..stack.len() {
         let names: Vec<String> = stack[i].keys().cloned().collect();
         for name in names {
-            let p = pre
-                .get(i)
-                .and_then(|m| m.get(&name))
-                .copied()
-                .flatten();
+            let p = pre.get(i).and_then(|m| m.get(&name)).copied().flatten();
             let t = then_snap
                 .get(i)
                 .and_then(|m| m.get(&name))
@@ -505,11 +499,7 @@ fn merge_http_body_if_no_else(
     for i in 0..stack.len() {
         let names: Vec<String> = stack[i].keys().cloned().collect();
         for name in names {
-            let p = pre
-                .get(i)
-                .and_then(|m| m.get(&name))
-                .copied()
-                .flatten();
+            let p = pre.get(i).and_then(|m| m.get(&name)).copied().flatten();
             let t = then_snap
                 .get(i)
                 .and_then(|m| m.get(&name))
@@ -997,7 +987,6 @@ fn reject_readline_in_async_expr(
         | IRExpr::ReaderRead { .. } => Ok(()),
     }
 }
-
 
 /// 当前语句执行后，同一块内后续语句是否均不可达（用于不可达警告）。
 fn stmt_block_diverges(s: &IRStmt, ret_ty: &TsType, loop_depth: usize) -> bool {
@@ -2171,7 +2160,7 @@ fn infer_expr_mut(
                 ));
             }
             Ok(TsType::String)
-        },
+        }
         IRExpr::StringMethodBuiltin {
             kind,
             receiver,

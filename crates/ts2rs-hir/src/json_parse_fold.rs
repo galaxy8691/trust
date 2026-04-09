@@ -86,9 +86,7 @@ fn json_array_to_ir(arr: Vec<Value>, span: Span) -> Result<IRExpr, String> {
             }
             Ok(IRExpr::ArrayLit { elems, span })
         }
-        _ => Err(
-            "`JSON.parse` literal only supports homogeneous number[] or string[]".to_string(),
-        ),
+        _ => Err("`JSON.parse` literal only supports homogeneous number[] or string[]".to_string()),
     }
 }
 
