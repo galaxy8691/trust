@@ -60,8 +60,7 @@ trust run --project tsconfig.json
 - Entry file must define `main`; in multi-file mode, first positional `.ts` is entry.
 - `--project` and positional `.ts` are mutually exclusive.
 - `--link-trust-rt` only matters with `compile --exec` or `run`.
-- `trust add` accepts `crate::Type::new_fn` only (for example `url::Url::parse`).
-- Rust extern method signatures are explicit in `Trust.toml`; there is no API reflection from crate sources.
+- `trust add` supports `crate::Type` (type-only), `crate::Type::new_fn` (constructor `new` in `Trust.toml`), `crate::Type::method --returns … --args …` (append/replace a `method` row), and `crate::*` (nightly `cargo rustdoc` JSON to heuristically fill bindings; not the compiler reflecting crates). Rust extern method signatures remain explicit in `Trust.toml`.
 
 ## Standard Library (trust Surface)
 
@@ -116,7 +115,7 @@ The compiler can link **real crates.io (or path/git) dependencies** and call int
 
 - **Discovery**: walk **up** from the entry `.ts` file’s directory (and parents) for a file named **`Trust.toml`** (see [`discover_trust_toml`](crates/trust-manifest/src/lib.rs)).
 - **`[dependencies]`**: a Cargo-shaped table; lines are **merged** into the generated crate’s `Cargo.toml` [`dependencies`] (see [`crate_writer`](crates/trust-driver/src/crate_writer.rs)). The import string in TS must match the dependency **key** (e.g. `import { Regex } from "regex"` requires a `regex = "…"` entry).
-- **`[[rust_binding]]`**: maps a TS symbol imported from that crate key to a Rust type path, optional `new` (`rust` path + optional `unwrap` on `Result`), and `method` rows (`name`, `args` like `string` \| `number` \| `boolean`, `returns`). **No reflection**: the compiler does **not** scrape Rust sources or rustdoc; bindings are author-maintained.
+- **`[[rust_binding]]`**: maps a TS symbol imported from that crate key to a Rust type path, optional `new` (`rust` path + optional `unwrap` on `Result`), and `method` rows (`name`, `args` like `string` \| `number` \| `boolean`, `returns`). **No reflection in the compiler**: `trust compile` does **not** scrape Rust sources or rustdoc. Bindings are normally author-maintained; the **`trust add crate::*`** CLI can optionally invoke **nightly** `cargo rustdoc` JSON to pre-fill rows (still hand-review).
 - **Codegen**: `new T("…")` lowers to the configured Rust constructor path; methods become **inherent** calls on the Rust type. TS `string` values are `String` in generated Rust; binding specs of `string` for a method argument emit `.as_str()` at the call site so APIs like `regex::Regex::is_match(&self, &str)` type-check.
 
 **Serde-style crates**: listing `serde` under `[dependencies]` only adds a Cargo dependency for future derives or transitive use; you generally **cannot** `import { Serialize } from "serde"` unless you add a binding, and proc-macro-only APIs are not meaningful on the TS surface.
@@ -288,7 +287,7 @@ cargo run -p trust-cli -- add url::Url::parse --dir my-trust-app
 | **`run`** | Same, then temp crate, **`cargo build`** (default **`--release`**) and run |
 | **`check`** | Parse + HIR + **semantics only**; no `.rs`, no `cargo` |
 | **`init`** | Scaffold a trust project template in a directory (`main.ts`, `math.ts`, `strutil.ts`, `Trust.toml`) |
-| **`add`** | Update `Trust.toml` by adding one dependency + `[[rust_binding]]` from `crate::Type::new_fn` |
+| **`add`** | Update `Trust.toml`: dependency + `[[rust_binding]]` (`crate::Type`, `crate::Type::ctor`, `crate::Type::method` with `--returns`, or `crate::*` via nightly rustdoc) |
 
 **Global** (before subcommand, e.g. `trust -q run …`):
 
@@ -308,14 +307,15 @@ cargo run -p trust-cli -- add url::Url::parse --dir my-trust-app
 
 **`add`**:
 
-- positional `RUST_PATH`: must be `crate::Type::new_fn` (for example `url::Url::parse`)
+- positional `RUST_PATH`: `crate::Type` | `crate::Type::ctor` | `crate::Type::method` (with `--returns`) | `crate::*`
+- `--returns` / `--args`: for **method** rows only (`boolean` \| `number` \| `string` \| `void`; comma-separated `args`). If `--returns` is set, the last segment is treated as a **method** name, not a constructor.
 - `--dir <DIR>` where `Trust.toml` lives (default `.`)
 - behavior:
   - ensures `[dependencies]` contains `crate = "*"` if missing
-  - creates or updates matching `[[rust_binding]]` with:
-    - `crate`, `type_name`, `rust_type`
-    - `new = { rust = "...", unwrap = true }`
-    - `method = []` (initialized when absent)
+  - **type-only** (`url::Url`): `rust_type` + empty or preserved `method`; does not add `new`
+  - **constructor** (`url::Url::parse` without `--returns`): `new = { rust = "...", unwrap = true }` as before
+  - **method** (`url::Url::join --returns string --args string`): merges a `[[rust_binding]]` `method` row (by name)
+  - **wildcard** (`url::*`): runs `cargo +nightly rustdoc -p url` with rustdoc JSON, merges inherent `impl` items where argument/return types map to trust binding kinds; requires nightly; skips unmapped or trait impls (see warnings on stderr)
 
 **Exit codes**: **0** success; **1** trust/driver errors; **`run`** propagates child process exit code when the binary fails; warnings do not change exit code.
 

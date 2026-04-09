@@ -210,11 +210,17 @@ export async function main(): Promise<number> {
   let oo: OOChild = new OOChild(3, 4);
   acc = acc + oo.oo_sum();
 
-  // Rust crate 互操作（Trust.toml）
+  // Rust crate 互操作（Trust.toml：`regex::Regex` / `url::Url` 的类型 + `[[rust_binding]].method`）
   let re: Regex = new Regex("\\d+");
   acc = acc + (re.is_match("abc123") ? 1 : 0);
-  let u: Url = new Url("https://example.com/a");
-  acc = acc + u.scheme().length;
+  acc = acc + (re.is_match("no digits here") ? 1 : 0);
+
+  let u: Url = new Url("https://example.com/foo/bar?x=1");
+  let sch: string = u.scheme();
+  let pth: string = u.path();
+  acc = acc + sch.length;
+  acc = acc + pth.length;
+  console.log("rust_url", sch, pth);
 
   // 天气请求（HTTP 走 Rust 生态实现）
   let weather_a: string = await fetchText("https://wttr.in/?format=3");

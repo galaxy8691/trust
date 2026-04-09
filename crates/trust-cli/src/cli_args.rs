@@ -170,9 +170,15 @@ pub(crate) struct InitCmd {
 
 #[derive(Args)]
 pub(crate) struct AddCmd {
-    /// 绑定路径：`crate::Type::new_fn`（例如 `url::Url::parse`）
+    /// 绑定路径：`crate::Type`（仅类型）、`crate::Type::ctor`（构造函数 `new`）、`crate::Type::method`（须配合 `--returns`）、`crate::*`（nightly rustdoc 批量）
     #[arg(value_name = "RUST_PATH")]
     pub(crate) rust_path: String,
+    /// 方法返回类型：`boolean` \| `number` \| `string` \| `void`（与 `--args` 同时出现时视为「添加方法」，而非构造函数）
+    #[arg(long, value_name = "KIND")]
+    pub(crate) returns: Option<String>,
+    /// 方法参数类型，逗号分隔，与 Trust.toml `method.args` 相同（如 `string,string`）
+    #[arg(long, value_name = "LIST")]
+    pub(crate) args: Option<String>,
     /// Trust.toml 所在目录（默认当前目录）
     #[arg(long, value_name = "DIR", default_value = ".")]
     pub(crate) dir: PathBuf,

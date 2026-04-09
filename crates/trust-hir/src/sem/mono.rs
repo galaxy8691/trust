@@ -444,9 +444,7 @@ fn rewrite_expr(
         }
         | IRExpr::ReadFileTextAsync {
             path: file_path, ..
-        } => {
-            rewrite_expr(file_path, templates, queue, cm, path, fn_span, env, errs)
-        }
+        } => rewrite_expr(file_path, templates, queue, cm, path, fn_span, env, errs),
         IRExpr::ArrayLit { elems, .. } => {
             for a in elems.iter_mut() {
                 rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);

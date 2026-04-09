@@ -433,10 +433,7 @@ fn compile_file_read_text_arg_type_fails() {
 
 #[test]
 fn compile_file_read_text_async_without_await_fails() {
-    assert_compile_fails_stderr(
-        "file_read_text_async_no_await_fail.ts",
-        "readFileTextAsync",
-    );
+    assert_compile_fails_stderr("file_read_text_async_no_await_fail.ts", "readFileTextAsync");
 }
 
 #[test]

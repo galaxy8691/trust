@@ -1,3 +1,5 @@
+mod add_rustdoc;
+mod add_spec;
 mod cli_args;
 mod commands;
 mod graph_loader;
@@ -70,7 +72,12 @@ fn run(cli: Cli) -> RunOutcome {
             Ok(()) => RunOutcome::Ok,
             Err(e) => RunOutcome::TrustErr(e),
         },
-        Commands::Add(a) => match cmd_add(&a.rust_path, &a.dir) {
+        Commands::Add(a) => match cmd_add(
+            &a.rust_path,
+            &a.dir,
+            a.returns.as_deref(),
+            a.args.as_deref(),
+        ) {
             Ok(()) => RunOutcome::Ok,
             Err(e) => RunOutcome::TrustErr(e),
         },

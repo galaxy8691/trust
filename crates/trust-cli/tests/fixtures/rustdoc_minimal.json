@@ -1,0 +1,142 @@
+{
+  "format_version": 57,
+  "root": "0:0",
+  "crate_version": null,
+  "includes_private": false,
+  "index": {
+    "0:impl1": {
+      "id": "0:impl1",
+      "crate_id": 0,
+      "name": null,
+      "span": null,
+      "visibility": "public",
+      "docs": null,
+      "links": {},
+      "attrs": [],
+      "deprecation": null,
+      "inner": {
+        "impl": {
+          "is_unsafe": false,
+          "generics": { "params": [], "where_predicates": [] },
+          "provided_trait_methods": [],
+          "trait": null,
+          "for": {
+            "resolved_path": {
+              "path": "demo::Demo",
+              "id": "0:demo",
+              "args": null
+            }
+          },
+          "items": ["0:fn_path", "0:fn_parse"],
+          "is_negative": false,
+          "is_synthetic": false,
+          "blanket_impl": null
+        }
+      }
+    },
+    "0:fn_path": {
+      "id": "0:fn_path",
+      "crate_id": 0,
+      "name": "path",
+      "span": null,
+      "visibility": "public",
+      "docs": null,
+      "links": {},
+      "attrs": [],
+      "deprecation": null,
+      "inner": {
+        "function": {
+          "sig": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "Demo",
+                        "id": "0:demo",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "std::string::String",
+                "id": "0:str",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": { "params": [], "where_predicates": [] },
+          "header": {
+            "is_const": false,
+            "is_unsafe": false,
+            "is_async": false,
+            "abi": "Rust"
+          },
+          "has_body": true
+        }
+      }
+    },
+    "0:fn_parse": {
+      "id": "0:fn_parse",
+      "crate_id": 0,
+      "name": "parse",
+      "span": null,
+      "visibility": "public",
+      "docs": null,
+      "links": {},
+      "attrs": [],
+      "deprecation": null,
+      "inner": {
+        "function": {
+          "sig": {
+            "inputs": [
+              [
+                "s",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "Result",
+                "id": "0:res",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": { "params": [], "where_predicates": [] },
+          "header": {
+            "is_const": false,
+            "is_unsafe": false,
+            "is_async": false,
+            "abi": "Rust"
+          },
+          "has_body": true
+        }
+      }
+    }
+  },
+  "paths": {},
+  "external_crates": {},
+  "target": {
+    "triple": "x86_64-unknown-linux-gnu",
+    "target_features": []
+  }
+}

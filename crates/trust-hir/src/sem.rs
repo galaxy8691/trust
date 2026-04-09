@@ -2468,7 +2468,10 @@ fn infer_expr_mut(
             }
         }
         IRExpr::ReadStdinLine { .. } => Ok(TsType::String),
-        IRExpr::ReadFileText { path: file_path, span } => {
+        IRExpr::ReadFileText {
+            path: file_path,
+            span,
+        } => {
             let t = infer_expr_mut(file_path, stack, globals, cm, path)?;
             if !is_stringish(&t) {
                 return Err(diag(

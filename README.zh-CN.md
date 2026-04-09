@@ -60,8 +60,8 @@ trust run --project tsconfig.json
 - 入口文件必须有 `main`；多文件模式下第一个 `.ts` 参数就是入口。
 - `--project` 与位置参数 `.ts` 互斥。
 - `--link-trust-rt` 只在 `compile --exec` 或 `run` 时有意义。
-- `trust add` 仅接受 `crate::Type::new_fn` 形态（如 `url::Url::parse`）。
-- Rust extern 方法签名必须在 `Trust.toml` 显式声明，不会从 crate 源码自动反射。
+- `trust add` 支持 `crate::Type`（仅类型）、`crate::Type::new_fn`（写入 `new`）、`crate::Type::method --returns … --args …`（写入 `method` 行）、`crate::*`（需 **nightly**，用 `cargo rustdoc` 的 JSON 启发式填绑定；**编译器本身**仍不从 crate 反射 API）。
+- Rust extern 方法签名必须在 `Trust.toml` 显式声明。
 
 ## Standard Lib 清单（trust 语言表面）
 
@@ -116,7 +116,7 @@ flowchart LR
 
 - **发现规则**：自入口 `.ts` 所在目录**向上**查找 **`Trust.toml`**（见 [`discover_trust_toml`](crates/trust-manifest/src/lib.rs)）。
 - **`[dependencies]`**：与 Cargo 子集对齐的表；条目会**合并**进生成 crate 的 `Cargo.toml`（见 [`crate_writer`](crates/trust-driver/src/crate_writer.rs)）。TS 里 `import … from "…"` 的说明符须与依赖**键名**一致（例如 `import { Regex } from "regex"` 需要存在 `regex = "…"`）。
-- **`[[rust_binding]]`**：把从该 crate 键导入的 TS 符号映射到 Rust 类型路径、可选的 `new`（`rust` 路径 + 是否在 `Result` 上 `unwrap`）、以及 `method`（`name`、`args` 如 `string` / `number` / `boolean`、`returns`）。**不做 API 反射**：编译器**不会**扫 Rust 源码或 rustdoc，绑定由作者维护。
+- **`[[rust_binding]]`**：把从该 crate 键导入的 TS 符号映射到 Rust 类型路径、可选的 `new`（`rust` 路径 + 是否在 `Result` 上 `unwrap`）、以及 `method`（`name`、`args` 如 `string` / `number` / `boolean`、`returns`）。**编译器不做反射**：`trust compile` **不会**扫 Rust 源码或 rustdoc；绑定通常手写，也可用 **`trust add crate::*`**（nightly `cargo rustdoc` JSON）预填后再人工核对。
 - **代码生成**：`new T("…")` 降为配置的构造路径；方法降为 Rust **固有方法**调用。TS `string` 在生成代码中为 Rust `String`；绑定里将形参标为 `string` 时，调用点会生成 `.as_str()`，以匹配如 `regex::Regex::is_match(&self, &str)` 等签名。
 
 **serde 类 crate**：仅在 `[dependencies]` 中声明只会增加 Cargo 依赖（供后续 `#[derive]` 或传递依赖）；一般**不能**指望 `import { Serialize } from "serde"`，除非手写绑定，且纯过程宏 API 在 TS 侧通常无意义。
@@ -311,7 +311,7 @@ cargo run -p trust-cli -- add url::Url::parse --dir my-trust-app
 | **`run`** | 同上后写入临时 crate，**`cargo build`**（默认 **`--release`**）并运行生成的可执行文件 |
 | **`check`** | 仅解析 + HIR + **语义检查**，不写 `.rs`、**不**调用 `cargo` |
 | **`init`** | 初始化 trust 项目模板（`main.ts`、`math.ts`、`strutil.ts`、`Trust.toml`） |
-| **`add`** | 根据 `crate::Type::new_fn` 快速写入 `Trust.toml` 的依赖与 `[[rust_binding]]` |
+| **`add`** | 写入 `Trust.toml` 依赖与 `[[rust_binding]]`（`crate::Type`、`crate::Type::ctor`、`crate::Type::method` + `--returns`，或 `crate::*` + nightly rustdoc） |
 
 **全局**（可写在子命令前，如 `trust -q run …`）：
 
@@ -331,14 +331,15 @@ cargo run -p trust-cli -- add url::Url::parse --dir my-trust-app
 
 **`add`**：
 
-- 位置参数 `RUST_PATH`：必须是 `crate::Type::new_fn`（例如 `url::Url::parse`）
+- 位置参数 `RUST_PATH`：`crate::Type` | `crate::Type::ctor` | `crate::Type::method`（配合 `--returns`）| `crate::*`
+- `--returns` / `--args`：仅用于**方法**行（`boolean` \| `number` \| `string` \| `void`；`args` 为逗号分隔）。若给出 `--returns`，最后一段视为**方法名**，而非构造函数。
 - `--dir <DIR>`：`Trust.toml` 所在目录（默认 `.`）
 - 行为：
   - 若 `[dependencies]` 无该 crate，则自动补 `crate = "*"`
-  - 创建或更新匹配的 `[[rust_binding]]`，写入：
-    - `crate`、`type_name`、`rust_type`
-    - `new = { rust = "...", unwrap = true }`
-    - `method = []`（缺失时初始化）
+  - **仅类型**：写入/更新 `rust_type`，不写 `new`（保留已有 `new`）
+  - **构造函数**（无 `--returns` 的 `url::Url::parse`）：`new = { rust = "...", unwrap = true }`
+  - **方法**（`--returns`）：按名称合并 `method` 行
+  - **通配符**（`url::*`）：`cargo +nightly rustdoc -p url` 生成 JSON，合并可映射的固有 `impl`；需 nightly；trait impl、不可映射类型会跳过并打 warning
 
 **退出码**：**`0`** 表示 trust 与子程序均成功；**`trust` 自身失败**（解析、语义、找不到 `cargo` 等）为 **`1`**；**`run`** 在已生成并成功启动子进程后，若子进程非零退出，则 **trust 以该进程的退出码退出**（无 `code()` 时如信号则 **`1`**）。Warning **不**抬高退出码（与上文「诊断」一致）。
 

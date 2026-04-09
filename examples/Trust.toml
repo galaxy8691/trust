@@ -18,4 +18,5 @@ rust_type = "url::Url"
 new = { rust = "url::Url::parse", unwrap = true }
 method = [
   { name = "scheme", args = [], returns = "string" },
+  { name = "path", args = [], returns = "string" },
 ]
