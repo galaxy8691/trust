@@ -1,6 +1,6 @@
 [English](PROJECT-TODO.md)
 
-# ts2rs 项目长期 TODO 清单
+# trust 项目长期 TODO 清单
 
 本文档用于**长期跟进**编译器与工具链的演进，按主题分层列出可验收项。状态建议用 `[ ]` / `[~]` 进行中 / `[x]` 在 PR 或提交中维护。**本清单所列特性均以强类型（strong typing，trust）为前提。**
 
@@ -17,7 +17,7 @@
 
 ## 0. 愿景与「1.0」验收标准（可删减）
 
-- [x] **单文件子集**：对 README 矩阵中声明支持的特性，均有对应 fixture 与集成测试（[`crates/trust-cli/tests/fixtures/`](crates/trust-cli/tests/fixtures/) + [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)）；`ts2rs-lower` 另有 compile 单元测试。
+- [x] **单文件子集**：对 README 矩阵中声明支持的特性，均有对应 fixture 与集成测试（[`crates/trust-cli/tests/fixtures/`](crates/trust-cli/tests/fixtures/) + [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)）；`trust-lower` 另有 compile 单元测试。
 - [x] **诊断**：常见错误带行列号（`path:line:col`）；文案为**英文**（见 README「1.0 范围」）。
 - [x] **可复现**：`cargo test --workspace`、`cargo clippy --workspace --all-targets`；[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 在 push/PR 上执行。
 - [x] **多文件（若纳入范围）**：**不纳入 1.0** 完整工程图；**相对路径** `import { x } from "./dep.ts"` 由 [`parse_module_graph`](crates/trust-parser/src/module_graph.rs) 构建模块图（不合并 AST），CLI 与 [`compile_entrypoint_to_executable`](crates/trust-driver/src/lib.rs) 走 `validate_imports` → `lower_module_graph`；见 §6.2。
@@ -121,7 +121,7 @@
 
 ### 3.3 类型系统加深
 
-- [x] **与 §1.4 的衔接**：字面量类型、联合类型与 `??` / `?.` **静态**收窄应与 §1.4 子项一致（避免与受限 `TsType` 冲突）。联合类型已入 HIR。**已实现（sem）**：在 `Union` 上去除 `null`/`undefined` 后，若与 `??` 右侧为**同族**（`number`/`string`/`boolean` 或**结构一致**的 `Fn`），则 [`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `IRExpr::NullishCoalesce` 路径会调用 `unify_ternary_branches` 得到单一结果类型。**仍为后续**：依赖 **discriminant** 的 discriminated union 收窄（大范围，非本子项一次完成）。验收：README §3.3；`nullish_ok.ts` / `optional_ok.ts`；`??` 与函数类型联合的 sem 见 `nullish_fn_ok.ts`（`ts2rs check`）。
+- [x] **与 §1.4 的衔接**：字面量类型、联合类型与 `??` / `?.` **静态**收窄应与 §1.4 子项一致（避免与受限 `TsType` 冲突）。联合类型已入 HIR。**已实现（sem）**：在 `Union` 上去除 `null`/`undefined` 后，若与 `??` 右侧为**同族**（`number`/`string`/`boolean` 或**结构一致**的 `Fn`），则 [`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `IRExpr::NullishCoalesce` 路径会调用 `unify_ternary_branches` 得到单一结果类型。**仍为后续**：依赖 **discriminant** 的 discriminated union 收窄（大范围，非本子项一次完成）。验收：README §3.3；`nullish_ok.ts` / `optional_ok.ts`；`??` 与函数类型联合的 sem 见 `nullish_fn_ok.ts`（`trust check`）。
 - [x] **`null` / `undefined`**：[`TsType`](crates/trust-hir/src/ir.rs) 已含 `Null` / `Undefined` 等变体；检查以 **当前 sem 静态规则**为准，**不设** tsc 默认「万物可空」式软语义。验收：README §3.3；**未**实现 `strictNullChecks` 式开关。若将来增加模式，应为**显式编译选项**（如 strict 空值），**非**隐式放宽或兼容 JS 动态性。
 - [x] **结构类型 vs 名义类型**：**trust 以名义表 + 静态形状检查为界**；与 Rust 后端映射策略（当前以基础类型为主）。验收：README §3.3 已说明具名表/语义检查与 Rust 生成侧边界；**未**实现 TS 结构子类型全集，**不**将其列为路线目标。
 - [x] **函数类型与高阶函数**：与 [§13.2](PROJECT-TODO.zh-CN.md) 及 README 一致——已实现**受限**静态函数类型、箭头值、`f(...)`、传参/返回函数等；codegen 闭包仍为 `(number) => number` 的严格子集。**勿**再写「无一等函数值 / 未做 HOF」；应区分「已支持的 HOF 子集」与「仍为后续的泛化 / codegen 扩展」。
@@ -138,20 +138,20 @@
 
 ### 4.1 当前行为改进
 
-- [x] **`console.log` 多参数格式**：[`emit_builtin_log`](crates/trust-hir/src/codegen.rs) 多参数已改为 `"{}"` 空格分隔；验收：`ts2rs-lower` 单测 `console_log_multi_arg_uses_spaced_format`。
+- [x] **`console.log` 多参数格式**：[`emit_builtin_log`](crates/trust-hir/src/codegen.rs) 多参数已改为 `"{}"` 空格分隔；验收：`trust-lower` 单测 `console_log_multi_arg_uses_spaced_format`。
 - [x] **算术与 `/`**：TS `number` → 生成 Rust **`f64`**；**`/`** 为 IEEE-754 双精度除法（与旧版 `i32` 向零截断不同）；验收：README「算术、`/` 与溢出」与矩阵算术 / `Math.*` 行。
 - [x] **NaN / ∞ 与溢出**：可能出现；与 V8 `number` 边界情况未必逐位一致；**未**加运行时溢出检查 Cargo feature（留待后续）。
 
 ### 4.2 新特性映射
 
-- [x] **赋值**：`let mut` 与块作用域对齐 Rust。（验收：`ts2rs-lower` `codegen_42_let_mut_block_and_assign`；[`emit_stmt`](crates/trust-hir/src/codegen.rs) `Let` / `Assign` / `Block`；`cargo test --workspace`。）
-- [x] **字符串**：继续 `String` + `format!`；大字符串与性能另议。（验收：`ts2rs-lower` `codegen_42_string_concat_uses_format`；[`emit_expr`](crates/trust-hir/src/codegen.rs) `StrConcat` / `Tpl`；`cargo test --workspace`。）
-- [x] **堆对象 / GC**：当前对象为值型 `HashMap::from`，**未**引入 `Rc`/`Arc`；若将来引用类型再定策略。（验收：`ts2rs-lower` `codegen_42_object_literal_hashmap_without_rc`；[`emit_expr`](crates/trust-hir/src/codegen.rs) `ObjectLit`；`cargo test --workspace`。）
+- [x] **赋值**：`let mut` 与块作用域对齐 Rust。（验收：`trust-lower` `codegen_42_let_mut_block_and_assign`；[`emit_stmt`](crates/trust-hir/src/codegen.rs) `Let` / `Assign` / `Block`；`cargo test --workspace`。）
+- [x] **字符串**：继续 `String` + `format!`；大字符串与性能另议。（验收：`trust-lower` `codegen_42_string_concat_uses_format`；[`emit_expr`](crates/trust-hir/src/codegen.rs) `StrConcat` / `Tpl`；`cargo test --workspace`。）
+- [x] **堆对象 / GC**：当前对象为值型 `HashMap::from`，**未**引入 `Rc`/`Arc`；若将来引用类型再定策略。（验收：`trust-lower` `codegen_42_object_literal_hashmap_without_rc`；[`emit_expr`](crates/trust-hir/src/codegen.rs) `ObjectLit`；`cargo test --workspace`。）
 
 ### 4.3 生成代码可读性
 
-- [x] **缩进与换行**：逗号表达式（`Seq`）块内行与闭合 `})` 与外层语句层级对齐，便于 rustfmt。（验收：`ts2rs-lower` `codegen_43_comma_seq_indented`；[`emit_seq_expr`](crates/trust-hir/src/codegen.rs) / `emit_expr` 的 `stmt_level`；`cargo test --workspace`。）
-- [x] **注释**：可选在每条语句前注入 `// ts: path:line:col`（与诊断同源 `lookup_char_pos`）。（验收：`ts2rs-lower` `codegen_43_span_comments_emits_ts_anchors`；`ts2rs-cli` `compile_span_comments_writes_ts_anchors`；[`emit_stmt`](crates/trust-hir/src/codegen.rs) 与 `CodegenOptions`；`ts2rs compile --span-comments`；`cargo test --workspace`。）另可选将 TS **leading** 注释正文写成 Rust `//` 行（`emit_ts_source_comments_writes_frozen_leading`；`compile_ts_source_comments_writes_ts_text`；`CodegenOptions::emit_ts_source_comments`；`ts2rs compile --ts-source-comments`。）
+- [x] **缩进与换行**：逗号表达式（`Seq`）块内行与闭合 `})` 与外层语句层级对齐，便于 rustfmt。（验收：`trust-lower` `codegen_43_comma_seq_indented`；[`emit_seq_expr`](crates/trust-hir/src/codegen.rs) / `emit_expr` 的 `stmt_level`；`cargo test --workspace`。）
+- [x] **注释**：可选在每条语句前注入 `// ts: path:line:col`（与诊断同源 `lookup_char_pos`）。（验收：`trust-lower` `codegen_43_span_comments_emits_ts_anchors`；`trust-cli` `compile_span_comments_writes_ts_anchors`；[`emit_stmt`](crates/trust-hir/src/codegen.rs) 与 `CodegenOptions`；`trust compile --span-comments`；`cargo test --workspace`。）另可选将 TS **leading** 注释正文写成 Rust `//` 行（`emit_ts_source_comments_writes_frozen_leading`；`compile_ts_source_comments_writes_ts_text`；`CodegenOptions::emit_ts_source_comments`；`trust compile --ts-source-comments`。）
 
 ---
 
@@ -159,19 +159,19 @@
 
 ### 5.1 `console`
 
-- [x] **`console.log` / `console.error` / `console.debug`**：`log` → `println!`，`error` / `debug` → `eprintln!`。（验收：`ts2rs-lower` `console_error_and_debug_use_eprintln`；`ts2rs-cli` `compile_console_stderr_writes_eprintln`；[`build.rs`](crates/trust-hir/src/build.rs) `console` 成员；[`emit_builtin_log`](crates/trust-hir/src/codegen.rs)；`cargo test --workspace`。）
+- [x] **`console.log` / `console.error` / `console.debug`**：`log` → `println!`，`error` / `debug` → `eprintln!`。（验收：`trust-lower` `console_error_and_debug_use_eprintln`；`trust-cli` `compile_console_stderr_writes_eprintln`；[`build.rs`](crates/trust-hir/src/build.rs) `console` 成员；[`emit_builtin_log`](crates/trust-hir/src/codegen.rs)；`cargo test --workspace`。）
 - [x] **格式化语义**：与 §4.1 相同，多参 `"{}"` 空格分隔；`log` 与 `error`/`debug` 共用 [`emit_builtin_log`](crates/trust-hir/src/codegen.rs) 格式构造。（验收：同上 + 已有 `console_log_multi_arg_uses_spaced_format`；`cargo test --workspace`。）
 
-### 5.2 最小运行时（[`ts2rs_rt`](crates/trust_rt)）
+### 5.2 最小运行时（[`trust_rt`](crates/trust_rt)）
 
-- [x] **字符串操作**：`string.length` 为 **UTF-16 码元数**（`encode_utf16().count()`）；`number[].length` → `Vec::len`；对象数字字段名为 `length` 时走 `HashMap::get`（见 [`MemberLengthDispatch`](crates/trust-hir/src/ir.rs)）。（验收：`ts2rs-lower` `codegen_52_string_length_utf16`、`codegen_52_object_length_field_uses_get`；`ts2rs-cli` 等；`cargo test --workspace`。）**`string` 下标 `s[i]`**：UTF-16 索引 → 单码元 `string`（[`IndexKind::StringUtf16`](crates/trust-hir/src/ir.rs)；`stdlib_hir_ok.ts`）。
-- [x] **数学**：`Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` 等在 codegen 上对 **`f64`** 运算（[`MathBuiltinKind`](crates/trust-hir/src/ir.rs)；[`build.rs`](crates/trust-hir/src/build.rs)；[`emit_expr`](crates/trust-hir/src/codegen.rs)；与 README 矩阵「`Math.*` builtins」一致）。（验收：`ts2rs-lower` `codegen_52_math_builtins`；`ts2rs-cli` `run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`；`cargo test --workspace`。）
-- [x] **HIR 标准库（可不链 `ts2rs_rt`）**：`Number.parseInt` / `parseFloat`；**`JSON.stringify` / `JSON.parse`**：**字符串字面量**实参在构建期用 **`serde_json`** 折叠为 trust 闭合 IR；**动态**字符串与 `await response.json()` 等同，经 **`serde_json::from_str`** 解析为 `f64` 等 trust 子集（见 §14「HIR stdlib / JSON」）；`String` 方法 `charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`；全局 `readLine()` 内联 `std::io`（`async` 函数体中拒绝）。（验收：`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`；`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`。）
-- [x] **I/O**：[`ts2rs_rt::read_stdin_line`](crates/trust_rt/src/lib.rs) 仍为可选占位；**同步** `readLine()` 已在生成 Rust 中实现且**无需**链接 `ts2rs_rt`；driver 临时 crate 默认仍不依赖 `ts2rs_rt`（除非 `--link-ts2rs-rt`）。
+- [x] **字符串操作**：`string.length` 为 **UTF-16 码元数**（`encode_utf16().count()`）；`number[].length` → `Vec::len`；对象数字字段名为 `length` 时走 `HashMap::get`（见 [`MemberLengthDispatch`](crates/trust-hir/src/ir.rs)）。（验收：`trust-lower` `codegen_52_string_length_utf16`、`codegen_52_object_length_field_uses_get`；`trust-cli` 等；`cargo test --workspace`。）**`string` 下标 `s[i]`**：UTF-16 索引 → 单码元 `string`（[`IndexKind::StringUtf16`](crates/trust-hir/src/ir.rs)；`stdlib_hir_ok.ts`）。
+- [x] **数学**：`Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` 等在 codegen 上对 **`f64`** 运算（[`MathBuiltinKind`](crates/trust-hir/src/ir.rs)；[`build.rs`](crates/trust-hir/src/build.rs)；[`emit_expr`](crates/trust-hir/src/codegen.rs)；与 README 矩阵「`Math.*` builtins」一致）。（验收：`trust-lower` `codegen_52_math_builtins`；`trust-cli` `run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`；`cargo test --workspace`。）
+- [x] **HIR 标准库（可不链 `trust_rt`）**：`Number.parseInt` / `parseFloat`；**`JSON.stringify` / `JSON.parse`**：**字符串字面量**实参在构建期用 **`serde_json`** 折叠为 trust 闭合 IR；**动态**字符串与 `await response.json()` 等同，经 **`serde_json::from_str`** 解析为 `f64` 等 trust 子集（见 §14「HIR stdlib / JSON」）；`String` 方法 `charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`；全局 `readLine()` 内联 `std::io`（`async` 函数体中拒绝）。（验收：`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`；`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`。）
+- [x] **I/O**：[`trust_rt::read_stdin_line`](crates/trust_rt/src/lib.rs) 仍为可选占位；**同步** `readLine()` 已在生成 Rust 中实现且**无需**链接 `trust_rt`；driver 临时 crate 默认仍不依赖 `trust_rt`（除非 `--link-trust-rt`）。
 
 ---
 
-## 6. Driver 与构建（[`ts2rs-driver`](crates/trust-driver)）
+## 6. Driver 与构建（[`trust-driver`](crates/trust-driver)）
 
 ### 6.1 单文件路径
 
@@ -180,18 +180,18 @@
 
 ### 6.2 多文件与模块（[`compile_entrypoint_to_executable`](crates/trust-driver/src/lib.rs)）
 
-- [x] **解析多入口**：[`parse_module_graph_with_extra_roots`](crates/trust-parser/src/module_graph.rs)；CLI 多 `.ts` 位置参数或 `--project` + 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude`**，见 [`tsconfig_resolve`](crates/trust-cli/src/tsconfig_resolve.rs)）（[`ts2rs-cli`](crates/trust-cli/src/main.rs)）。（验收：`module_graph::tests::extra_root_includes_unreachable_file`；`cli_e2e` `run_multi_entry_extra_roots_prints_main`、`run_project_tsconfig_prints_main`、`run_project_tsconfig_extends_include_ok`。）
+- [x] **解析多入口**：[`parse_module_graph_with_extra_roots`](crates/trust-parser/src/module_graph.rs)；CLI 多 `.ts` 位置参数或 `--project` + 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude`**，见 [`tsconfig_resolve`](crates/trust-cli/src/tsconfig_resolve.rs)）（[`trust-cli`](crates/trust-cli/src/main.rs)）。（验收：`module_graph::tests::extra_root_includes_unreachable_file`；`cli_e2e` `run_multi_entry_extra_roots_prints_main`、`run_project_tsconfig_prints_main`、`run_project_tsconfig_extends_include_ok`。）
 - [x] **依赖图（子集）**：入口文件 + 相对 `import` → [`parse_module_graph`](crates/trust-parser/src/module_graph.rs)（保留各模块 AST）→ `validate_imports` → [`lower_module_graph`](crates/trust-lower/src/lib.rs) → 单 Rust crate。
-- [x] **`Cargo.toml` 生成**：[`RustBuildOptions`](crates/trust-driver/src/lib.rs) / [`build_rust_to_executable_with_options`](crates/trust-driver/src/lib.rs)；可选 path 依赖 `ts2rs_rt` + feature `ts2rs_rt`；CLI `--link-ts2rs-rt`。（验收：`write_minimal_crate_with_link_ts2rs_rt_contains_optional_path_dep`；`cli_e2e` `run_with_link_ts2rs_rt_prints_main`；`cargo test --workspace`。）
+- [x] **`Cargo.toml` 生成**：[`RustBuildOptions`](crates/trust-driver/src/lib.rs) / [`build_rust_to_executable_with_options`](crates/trust-driver/src/lib.rs)；可选 path 依赖 `trust_rt` + feature `trust_rt`；CLI `--link-trust-rt`。（验收：`write_minimal_crate_with_link_trust_rt_contains_optional_path_dep`；`cli_e2e` `run_with_link_trust_rt_prints_main`；`cargo test --workspace`。）
 - [x] **循环依赖**：[`parse_module_graph`](crates/trust-parser/src/module_graph.rs) 检测并报错（见 `circular_*.ts`）。
 
 ---
 
-## 7. CLI（[`ts2rs-cli`](crates/trust-cli)）
+## 7. CLI（[`trust-cli`](crates/trust-cli)）
 
-- [x] **子命令**：`compile` / `run` / `check`；README「CLI」表与 `ts2rs --help`；`check` 仅 HIR+语义（[`check_module_graph`](crates/trust-lower/src/lib.rs)）。（验收：`cli_e2e` `check_sample_ok`、`check_switch_fail_stderr`。）
+- [x] **子命令**：`compile` / `run` / `check`；README「CLI」表与 `trust --help`；`check` 仅 HIR+语义（[`check_module_graph`](crates/trust-lower/src/lib.rs)）。（验收：`cli_e2e` `check_sample_ok`、`check_switch_fail_stderr`。）
 - [x] **选项**：`compile -o`；`run` 的 `-O`/`--release` 与 `--debug`（[`RustBuildOptions::release`](crates/trust-driver/src/lib.rs)）；全局 `-q`/`--quiet`、`--color`、`--emit-ir`。（验收：`compile_emit_ir_stderr_contains_ir_module`、`driver` `debug_build_writes_binary_under_target_debug`。）
-- [x] **退出码**：README 约定；`run` 传播子进程 `ExitStatus::code`（无则 `1`）；`ts2rs` 错误统一 `1`。（验收：[`main.rs`](crates/trust-cli/src/main.rs) `exit_code_for_failed_child` 单元测试。）
+- [x] **退出码**：README 约定；`run` 传播子进程 `ExitStatus::code`（无则 `1`）；`trust` 错误统一 `1`。（验收：[`main.rs`](crates/trust-cli/src/main.rs) `exit_code_for_failed_child` 单元测试。）
 
 ---
 
@@ -204,7 +204,7 @@
 
 ### 8.2 单元测试
 
-- [x] **`ts2rs-hir`**：`build`/`sem`/`codegen` 分模块 `#[cfg(test)]`。（验收：`build_module_records_main`、`check_module_accepts_simple_main` / `check_module_rejects_missing_return`、`emit_rust_contains_ts_main_and_println`；`dev-dependencies`：`ts2rs-parser`。）
+- [x] **`trust-hir`**：`build`/`sem`/`codegen` 分模块 `#[cfg(test)]`。（验收：`build_module_records_main`、`check_module_accepts_simple_main` / `check_module_rejects_missing_return`、`emit_rust_contains_ts_main_and_println`；`dev-dependencies`：`trust-parser`。）
 - [x] **parser**：swc 封装层快照或最小片段。（验收：[`lib.rs`](crates/trust-parser/src/lib.rs) `parse_rejects_unclosed_function_body`、`parses_module_with_import_and_export_main`。）
 
 ### 8.3 工具链
@@ -217,7 +217,7 @@
 ## 9. 文档与开发者体验
 
 - [x] **README**：与实现同步更新矩阵；「不支持的 TS 特性」简表（**兼作 trust 强类型拒斥边界说明**）。**验收**：[`README.md`](README.md)（英文默认）与 [`README.zh-CN.md`](README.zh-CN.md) 中 **Unsupported TypeScript (trust rejection boundary)** / **不支持的 TypeScript 特性（trust 强类型拒斥边界）** 小节及语言矩阵。
-- [x] **架构图**：解析 → HIR → sem → codegen → driver（可 Mermaid）。**验收**：两 README 中 **Architecture** / **架构** 下的 Mermaid `flowchart LR`（`ts2rs_parser` → HIR → sem → codegen → `ts2rs_lower` → `ts2rs_cli` / `ts2rs_driver`）。
+- [x] **架构图**：解析 → HIR → sem → codegen → driver（可 Mermaid）。**验收**：两 README 中 **Architecture** / **架构** 下的 Mermaid `flowchart LR`（`trust_parser` → HIR → sem → codegen → `trust_lower` → `trust_cli` / `trust_driver`）。
 - [x] **贡献指南**：`CONTRIBUTING.md`（分支、测试命令、MSRV）。**验收**：[`CONTRIBUTING.md`](CONTRIBUTING.md) / [`CONTRIBUTING.zh-CN.md`](CONTRIBUTING.zh-CN.md)；根 [`Cargo.toml`](Cargo.toml) `[workspace.package] rust-version = "1.74"` 与各 crate `rust-version.workspace = true`。
 - [x] **变更日志**：`CHANGELOG.md`（若对外发布）。**验收**：[`CHANGELOG.md`](CHANGELOG.md) / [`CHANGELOG.zh-CN.md`](CHANGELOG.zh-CN.md)，Keep a Changelog 风格含 `[Unreleased]` 与 `[0.1.0]`。
 - [x] **本路线图双语**：默认英文 [`PROJECT-TODO.md`](PROJECT-TODO.md)，中文版 [`PROJECT-TODO.zh-CN.md`](PROJECT-TODO.zh-CN.md)，文首互相链接。**验收**：两文件存在且首行交叉链接。
@@ -228,7 +228,7 @@
 
 多文件 **语义检查并行** 已实现（`rayon`），详见下文 **§14「性能与安全」**；本节仅保留仍为 backlog 的项。
 
-- [x] **增量编译**：多文件时只重编译变更模块（`compile` / `run` 可选 `--incremental`，HIR 片段缓存目录默认可为 `.ts2rs-cache`；变更模块的 **importers** 一并重编）。实现：[`incremental.rs`](crates/trust-cli/src/incremental.rs)、[`ir_cache`](crates/trust-hir/src/ir_cache/mod.rs)、[`forward_deps`](crates/trust-parser/src/module_graph.rs)。验收：`compile_incremental_rebuilds_only_changed_module`、`module_fragment_round_trip_bincode`。
+- [x] **增量编译**：多文件时只重编译变更模块（`compile` / `run` 可选 `--incremental`，HIR 片段缓存目录默认可为 `.trust-cache`；变更模块的 **importers** 一并重编）。实现：[`incremental.rs`](crates/trust-cli/src/incremental.rs)、[`ir_cache`](crates/trust-hir/src/ir_cache/mod.rs)、[`forward_deps`](crates/trust-parser/src/module_graph.rs)。验收：`compile_incremental_rebuilds_only_changed_module`、`module_fragment_round_trip_bincode`。
 
 ---
 
@@ -330,8 +330,8 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 **注释与生成 Rust**（见 [README.zh-CN.md](README.zh-CN.md) §1.1「注释」）
 
-- [x] **位置锚点（已支持）**：`ts2rs compile --span-comments` 设置 [`CodegenOptions::span_comments`](crates/trust-hir/src/codegen.rs)，在每条语句前生成 `// ts: path:line:col`（§4.3；映射 TS **位置**，非 TS 注释正文；用法见 README「Usage」中 `compile`）。
-- [x] **TS 源码注释**进入生成 Rust（可选）：解析器将 swc leading 注释写入 [`ParsedSource::comments`](crates/trust-parser/src/lib.rs)；[`build_module`](crates/trust-hir/src/build.rs) / [`build_program_multi`](crates/trust-hir/src/build.rs) 冻结为 [`IRModule::ts_comments_by_path`](crates/trust-hir/src/ir.rs)；[`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs) 在语句与顶层函数前输出 Rust `//` 行。**局限**：仅 leading（无 trailing / 表达式级）；大粒度 lowering（如 `switch`）可能导致位置偏移或丢失；[`compile_with_options`](crates/trust-hir/src/lib.rs) 仍传 `None` 注释（单文件 API 不带来 TS 正文，除非自行 `build_module` 并传入解析结果）。CLI：`ts2rs compile --ts-source-comments`。验收：`emit_ts_source_comments_writes_frozen_leading`、`compile_ts_source_comments_writes_ts_text`。
+- [x] **位置锚点（已支持）**：`trust compile --span-comments` 设置 [`CodegenOptions::span_comments`](crates/trust-hir/src/codegen.rs)，在每条语句前生成 `// ts: path:line:col`（§4.3；映射 TS **位置**，非 TS 注释正文；用法见 README「Usage」中 `compile`）。
+- [x] **TS 源码注释**进入生成 Rust（可选）：解析器将 swc leading 注释写入 [`ParsedSource::comments`](crates/trust-parser/src/lib.rs)；[`build_module`](crates/trust-hir/src/build.rs) / [`build_program_multi`](crates/trust-hir/src/build.rs) 冻结为 [`IRModule::ts_comments_by_path`](crates/trust-hir/src/ir.rs)；[`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs) 在语句与顶层函数前输出 Rust `//` 行。**局限**：仅 leading（无 trailing / 表达式级）；大粒度 lowering（如 `switch`）可能导致位置偏移或丢失；[`compile_with_options`](crates/trust-hir/src/lib.rs) 仍传 `None` 注释（单文件 API 不带来 TS 正文，除非自行 `build_module` 并传入解析结果）。CLI：`trust compile --ts-source-comments`。验收：`emit_ts_source_comments_writes_frozen_leading`、`compile_ts_source_comments_writes_ts_text`。
 
 **工程级工具链**（见 [README.zh-CN.md](README.zh-CN.md)「非 1.0」与「不支持」边界）
 
@@ -351,7 +351,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 - [x] **任意控制流中的 `await`**（不限于当前 async MVP 体约束）。（已移除 [`check_async_mvp_stmts`](crates/trust-hir/src/sem.rs)；[`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `Await` 接受任意推断为 `Promise<T>` 的操作数；[`async_control_flow_ok.ts`](crates/trust-cli/tests/fixtures/async_control_flow_ok.ts)、`compile_async_control_flow_if_while_await_ok`。）
 - [x] **`Promise.all([...])`**（仅数组字面量；同质 `Promise<number>` / `Promise<string>` / `fetch` 的 `Promise<Response>`）。见 [`IRExpr::PromiseAll`](crates/trust-hir/src/ir.rs)、[`promise_all_fetch_ok.ts`](crates/trust-cli/tests/fixtures/promise_all_fetch_ok.ts)、`compile_promise_all_fetch_alias_ok`。
-- [x] **`fetchText`** → `__ts2rs_fetch_text`；**`fetch`** → `__ts2rs_fetch`（见上 §1.3）。
+- [x] **`fetchText`** → `__trust_fetch_text`；**`fetch`** → `__trust_fetch`（见上 §1.3）。
 - [x] **流式响应 body（M3）**：`response.body.getReader()` / `await reader.read()` → `StreamReadResult`；与 `.text()` / `.json()` 互斥；[`fetch_stream_ok.ts`](crates/trust-cli/tests/fixtures/fetch_stream_ok.ts)、`compile_fetch_stream_ok`。
 - [x] **拒绝 `.then`**（明确诊断，建议用 `async`/`await`）。见 [`promise_then_fail.ts`](crates/trust-cli/tests/fixtures/promise_then_fail.ts)、`compile_promise_then_fails`。
 - [x] **TLS / HTTP 说明（非「与 Node 完全一致」）**：临时 crate 使用 **reqwest** + **rustls-tls**；**TLS 1.2+** 与 **HTTP/2**（ALPN 协商成功时）由该栈提供；**根证书、cipher、HTTP/2 细节不保证与某一 Node 或浏览器版本逐字节一致**。**仍为 backlog**：完整 **WHATWG `fetch`**（浏览器级 `ReadableStream`、`Request`/`Headers` 对象、duplex、在非浏览器宿主下的 CORS 等）；trust 子集已支持 **`getReader`/`read` 分块读 body**（见上条）。
@@ -365,7 +365,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 ### Trust.toml / Rust extern（crates.io）
 
-- [x] **清单**：解析 `Trust.toml`；将 `[dependencies]` 合并进生成 crate 的 `Cargo.toml`；自入口 `.ts` 向上发现（[`ts2rs-trust-manifest`](crates/trust-manifest)、[`crate_writer`](crates/trust-driver/src/crate_writer.rs)、[`graph_loader`](crates/trust-cli/src/graph_loader.rs) / [`pipeline`](crates/trust-driver/src/pipeline.rs)）。
+- [x] **清单**：解析 `Trust.toml`；将 `[dependencies]` 合并进生成 crate 的 `Cargo.toml`；自入口 `.ts` 向上发现（[`trust-manifest`](crates/trust-manifest)、[`crate_writer`](crates/trust-driver/src/crate_writer.rs)、[`graph_loader`](crates/trust-cli/src/graph_loader.rs) / [`pipeline`](crates/trust-driver/src/pipeline.rs)）。
 - [x] **模块图**：`import … from "crate_key"` 且键在清单中；`validate_imports` 校验 `[[rust_binding]]`；不对虚构的 Rust 模块做文件系统 DFS。
 - [x] **HIR / sem / codegen**：`TsType::RustExtern`、`IRExpr::RustNew`、带 `inherent_rust_str_ref` 的固有 `MethodCall`（`string` 实参生成 `.as_str()` 以匹配 `&str`）。
 - [x] **E2E**：[`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate`。

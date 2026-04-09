@@ -1,0 +1,21 @@
+[dependencies]
+regex = "1.12"
+url = "2.5"
+
+[[rust_binding]]
+crate = "regex"
+type_name = "Regex"
+rust_type = "regex::Regex"
+new = { rust = "regex::Regex::new", unwrap = true }
+method = [
+  { name = "is_match", args = ["string"], returns = "boolean" },
+]
+
+[[rust_binding]]
+crate = "url"
+type_name = "Url"
+rust_type = "url::Url"
+new = { rust = "url::Url::parse", unwrap = true }
+method = [
+  { name = "scheme", args = [], returns = "string" },
+]

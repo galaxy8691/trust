@@ -1,7 +1,7 @@
-//! ts2rs 生成代码**可选**运行时：内建与后续扩展入口。
+//! trust 生成代码**可选**运行时：内建与后续扩展入口。
 //!
-//! **当前状态**：`ts2rs` 生成的 Rust 默认**不**依赖本 crate（`ts2rs-driver` 临时 crate 无 `[dependencies]`）。
-//! 此处 API 供将来接入或手工在生成代码中引用；字符串长度、`Math` 等已在 `ts2rs-hir` codegen 中内联实现。
+//! **当前状态**：`trust` 生成的 Rust 默认**不**依赖本 crate（`trust-driver` 临时 crate 无 `[dependencies]`）。
+//! 此处 API 供将来接入或手工在生成代码中引用；字符串长度、`Math` 等已在 `trust-hir` codegen 中内联实现。
 
 use std::io::{self, BufRead};
 

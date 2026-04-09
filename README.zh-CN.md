@@ -6,31 +6,107 @@
 
 另见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)、[CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)，以及长期路线图 [PROJECT-TODO.zh-CN.md](PROJECT-TODO.zh-CN.md)（[English](PROJECT-TODO.md)）。
 
+## 快速上手（先看这里）
+
+### 1）初始化项目
+
+```bash
+trust init --dir my-trust-app
+cd my-trust-app
+trust run main.ts
+```
+
+### 2）快速添加 Rust extern
+
+```bash
+trust add url::Url::parse
+```
+
+该命令会自动更新 `Trust.toml`：
+
+- `[dependencies]`（缺失时自动补 `url = "*"`）
+- `[[rust_binding]]`（自动写入 `crate`、`type_name`、`rust_type`、`new`）
+
+### 3）CLI 常用命令
+
+```bash
+# 仅检查（解析 + HIR + 语义）
+trust check main.ts
+
+# 输出 Rust 源码
+trust compile main.ts -o out.rs
+
+# 生成可执行文件（自行运行）
+trust compile main.ts --exec -o ./app
+
+# 一步编译并运行
+trust run main.ts
+
+# 项目模式
+trust run --project tsconfig.json
+```
+
+## Trust 与 TypeScript 的差异
+
+- 仅强类型：不支持隐式 `any`，也没有“先写后放宽”的软类型模式。
+- 子集编译器：目标是静态可判定/可 codegen 的子集，不追求与完整 `tsc` 全等。
+- 运行时模型有差异：`number` 在 Rust 侧是 `f64`，部分 JS 边界行为可能不同。
+- 模块/依赖模型不同：不做 npm/node_modules 解析；Rust 依赖统一走 `Trust.toml`。
+- 导入导出受限：仅支持文档列出的形态，超出即编译报错。
+
+## 开发注意事项（高频坑）
+
+- 函数参数与返回值请明确注解；`let/const` 的类型信息要清晰。
+- 入口文件必须有 `main`；多文件模式下第一个 `.ts` 参数就是入口。
+- `--project` 与位置参数 `.ts` 互斥。
+- `--link-trust-rt` 只在 `compile --exec` 或 `run` 时有意义。
+- `trust add` 仅接受 `crate::Type::new_fn` 形态（如 `url::Url::parse`）。
+- Rust extern 方法签名必须在 `Trust.toml` 显式声明，不会从 crate 源码自动反射。
+
+## Standard Lib 清单（trust 语言表面）
+
+当前内建/标准化可用 API：
+
+- Console：`console.log`、`console.error`、`console.debug`
+- String：`.length`、`charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`、UTF-16 下标
+- Number/Math：`Number.parseInt`、`Number.parseFloat`、`Math.abs/min/max/floor/ceil/sign/trunc/round/pow`
+- JSON/URI：`JSON.parse`、`JSON.stringify`、`encodeURIComponent`、`decodeURIComponent`
+- IO/网络：
+  - `readLine()`（同步；在 async 函数体内会被拒绝）
+  - `fetchText(url)`
+  - `fetch(url, init?)`、`await response.text()`、`await response.json()`
+  - `response.body.getReader()` + `await reader.read()`（流式子集）
+- Promise 子集：`await`、`Promise.all([...])`（同质子集）；`.then` 拒绝
+
+---
+
+以下内容为详细技术参考（架构、矩阵、诊断与实现细节）。
+
 ## 类型立场：强类型（strong typing，trust）
 
 **trust 采用强类型（strong typing）：** 与隐式 `any`、运行期随意改型等宽松语义相对，受支持的程序必须在编译期内具备**静态、确定**的类型信息：参数与返回值须注解（或本子集内等价地可判定）；`let` / `const` 须带类型注解（或明确初始化且类型可推断）；**不**提供隐式 `any`、运行期随意改型、或「先写后推断全局放宽」等软类型语义。路线与验收以**静态类型检查**为准，与完整 TypeScript / `tsc` 的渐进式宽松模式**不一致**。
 
 ## 架构
 
-解析（swc）→ **HIR**（[`ts2rs-hir`](crates/trust-hir)）→ **语义检查**（符号、类型、简化 return 路径）→ **Rust 代码生成** → **cargo** 链接。
+解析（swc）→ **HIR**（[`trust-hir`](crates/trust-hir)）→ **语义检查**（符号、类型、简化 return 路径）→ **Rust 代码生成** → **cargo** 链接。
 
-可选运行时 [`ts2rs_rt`](crates/trust_rt)：当前**生成代码不依赖**本 crate；提供 `read_stdin_line` 等占位 API。控制台：`console.log` → `println!`，`console.error` / `console.debug` → `eprintln!`。
+可选运行时 [`trust_rt`](crates/trust_rt)：当前**生成代码不依赖**本 crate；提供 `read_stdin_line` 等占位 API。控制台：`console.log` → `println!`，`console.error` / `console.debug` → `eprintln!`。
 
 ```mermaid
 flowchart LR
   TS[TypeScript_source]
-  PR[ts2rs_parser_swc]
+  PR[trust_parser_swc]
   HB[HIR_build]
   SE[Semantic_check]
   CG[Codegen_Rust]
-  LO[ts2rs_lower]
-  CLI[ts2rs_cli]
-  DRV[ts2rs_driver]
+  LO[trust_lower]
+  CLI[trust_cli]
+  DRV[trust_driver]
   TS --> PR --> HB --> SE --> CG --> LO --> CLI
   CLI --> DRV
 ```
 
-[`ts2rs-lower`](crates/trust-lower) 串联 HIR 构建、语义与代码生成。[`ts2rs-driver`](crates/trust-driver) 负责临时 crate 与 `cargo`（`ts2rs run` 使用）。
+[`trust-lower`](crates/trust-lower) 串联 HIR 构建、语义与代码生成。[`trust-driver`](crates/trust-driver) 负责临时 crate 与 `cargo`（`trust run` 使用）。
 
 ## Rust 生态：`Trust.toml`（非 npm）
 
@@ -64,13 +140,13 @@ flowchart LR
 - **矩阵覆盖**：下表「支持」或「部分支持」行均有代表性 **fixture**（[`fixtures/`](crates/trust-cli/tests/fixtures/)）与 **[`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)** 测试对应，详见下文 **[矩阵与集成测试对照](#矩阵与集成测试对照)**。手工大样例另见 [`test-ts/main.ts`](test-ts/main.ts)、[`test-ts/math.ts`](test-ts/math.ts)。**回归**用例目录见 [`tests/regression/`](crates/trust-cli/tests/regression/)。
 - **诊断**：编译**错误**为**英文**，格式为 `path:line:col: message`（[`CompileError`](crates/trust-hir/src/error.rs)）。**警告**（如不可达代码）同为该格式，经 [`CompileWarning`](crates/trust-hir/src/error.rs) 收集；成功编译时 CLI / driver 将警告打印到 **stderr**，不抬高退出码。
 - **CI**：推送与 PR 在 GitHub Actions 上运行 `cargo fmt --all --check`、`cargo test --workspace` 与 `cargo clippy --workspace --all-targets`（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）。
-- **非 1.0**：与完整 `tsc` 的 `tsconfig` 行为对齐、任意 `export default` 表达式、`export * as` 等；**不计划支持 npm / `node_modules` / 包管理器式模块解析。** Rust crate 仅通过 **`Trust.toml`** 接入（见上文 **Rust 生态：`Trust.toml`**）。**相对路径** `import { x } from "./dep.ts"`、**`import main from "./dep.ts"`**（绑定名**必须**为 `main`，对应依赖的默认导出 `main`）与相对 **`export *` / `export { … } from`**（桶文件重导出）已支持；CLI 支持**多根**（位置参数 `.ts`）或 **`--project`** 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude` glob**，见 [`tsconfig_resolve`](crates/trust-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/trust-cli/src/graph_loader.rs)）+ [`parse_module_graph_with_extra_roots`](crates/trust-parser/src/module_graph.rs) + [`validate_imports`](crates/trust-parser/src/module_graph.rs)，HIR [`compile_graph`](crates/trust-hir/src/lib.rs)；入口须含 `main`，全局函数名唯一。**可选增量**：`compile` / `run` 的 **`--incremental [DIR]`** 将各模块 HIR 片段写入磁盘缓存（无参时默认 `.ts2rs-cache`）；每次仍会解析全部 `.ts`，节省主要在 HIR 构建与 I/O；见 [`incremental.rs`](crates/trust-cli/src/incremental.rs)。
+- **非 1.0**：与完整 `tsc` 的 `tsconfig` 行为对齐、任意 `export default` 表达式、`export * as` 等；**不计划支持 npm / `node_modules` / 包管理器式模块解析。** Rust crate 仅通过 **`Trust.toml`** 接入（见上文 **Rust 生态：`Trust.toml`**）。**相对路径** `import { x } from "./dep.ts"`、**`import main from "./dep.ts"`**（绑定名**必须**为 `main`，对应依赖的默认导出 `main`）与相对 **`export *` / `export { … } from`**（桶文件重导出）已支持；CLI 支持**多根**（位置参数 `.ts`）或 **`--project`** 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude` glob**，见 [`tsconfig_resolve`](crates/trust-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/trust-cli/src/graph_loader.rs)）+ [`parse_module_graph_with_extra_roots`](crates/trust-parser/src/module_graph.rs) + [`validate_imports`](crates/trust-parser/src/module_graph.rs)，HIR [`compile_graph`](crates/trust-hir/src/lib.rs)；入口须含 `main`，全局函数名唯一。**可选增量**：`compile` / `run` 的 **`--incremental [DIR]`** 将各模块 HIR 片段写入磁盘缓存（无参时默认 `.trust-cache`）；每次仍会解析全部 `.ts`，节省主要在 HIR 构建与 I/O；见 [`incremental.rs`](crates/trust-cli/src/incremental.rs)。
 
 ## 诊断与前端健壮性（§1.1）
 
-- **多条编译错误**：build 与语义阶段可在**一次失败**中收集多条诊断（[`CompileError::Many`](crates/trust-hir/src/error.rs)），按行输出多条 `path:line:col: message`（已排序）。解析器 [`parse_typescript_file`](crates/trust-parser/src/lib.rs) 会输出 swc **`take_errors()` 的全部**诊断。**单态化**与 **codegen** 仍可能在首条内部错误处停止。**成功时**可附带多条 [`CompileWarning`](crates/trust-hir/src/error.rs)（[`ts2rs_lower`](crates/trust-lower/src/lib.rs) 同形）。
+- **多条编译错误**：build 与语义阶段可在**一次失败**中收集多条诊断（[`CompileError::Many`](crates/trust-hir/src/error.rs)），按行输出多条 `path:line:col: message`（已排序）。解析器 [`parse_typescript_file`](crates/trust-parser/src/lib.rs) 会输出 swc **`take_errors()` 的全部**诊断。**单态化**与 **codegen** 仍可能在首条内部错误处停止。**成功时**可附带多条 [`CompileWarning`](crates/trust-hir/src/error.rs)（[`trust_lower`](crates/trust-lower/src/lib.rs) 同形）。
 - **`export` 形态**：`export function …`、顶层 `function …`、**`export default function main`**、**`export default main`**（同模块须有 `function main`）、相对 **`export * from "./…"`**、**`export { a as b } from "./…"`**（**函数**导出，见 [`build.rs`](crates/trust-hir/src/build.rs)、[`module_graph`](crates/trust-parser/src/module_graph.rs)）；`export class` / `export const` / 其它 `export default` / 无 `from` 的 `export { x }` 等仍**报错**；**顶层、无 `export` 的 `class`** 见矩阵。正例 `export_default_*_ok.ts`，负例 `export_*_fail.ts` 与 [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)。
-- **注释**：swc 的 `Program` **仍无**注释节点；[`ParsedSource`](crates/trust-parser/src/lib.rs) 含 `source_map` 与解析器收集的 `comments`（swc 注释表）。**将 TS leading 注释写入生成 Rust** 为可选：[`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs)，CLI `ts2rs compile --ts-source-comments`，在语句与顶层函数前输出 `//` 行；trailing 与大粒度 lowering 后的位置不保证（见 [PROJECT-TODO.zh-CN.md §14](PROJECT-TODO.zh-CN.md)）。
+- **注释**：swc 的 `Program` **仍无**注释节点；[`ParsedSource`](crates/trust-parser/src/lib.rs) 含 `source_map` 与解析器收集的 `comments`（swc 注释表）。**将 TS leading 注释写入生成 Rust** 为可选：[`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs)，CLI `trust compile --ts-source-comments`，在语句与顶层函数前输出 `//` 行；trailing 与大粒度 lowering 后的位置不保证（见 [PROJECT-TODO.zh-CN.md §14](PROJECT-TODO.zh-CN.md)）。
 - **后续与 backlog**（更细粒度注释映射、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
 
 ## 控制流与 return（简化语义 + §3.4）
@@ -162,7 +238,7 @@ flowchart LR
 
 ## 类型层路线（§1.4）
 
-**字面量类型**、**联合类型**、**受限 `interface`**、**受限 `type` 别名**与**泛型边界文档**子项已勾选（见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)）。与已实现子集（如注解中的 `number[]`、仅 `number` 字段的对象类型）的边界与拆分里程碑见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)。空值与收窄与下文「语义与类型路线（§3.3）」及 [PROJECT-TODO.zh-CN.md §3.3](PROJECT-TODO.zh-CN.md) 交叉：**sem 已实现** `Union` 上去除空值后与 `??` 右侧在 primitive 同族或 **兼容 `Fn` 类型**时的结果类型合并；**完整** discriminated 收窄仍待后续。`nullish_ok.ts` 等覆盖基础子集；`null`/`undefined` 与**异质**成员（如 `null | Fn`）的联合若在具名绑定上无法映射到单一 Rust 类型，**compile** 仍可能在 codegen 拒绝——与「heterogeneous union」诊断一致；`nullish_fn_ok.ts` 以 `ts2rs check` 验证 sem。
+**字面量类型**、**联合类型**、**受限 `interface`**、**受限 `type` 别名**与**泛型边界文档**子项已勾选（见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)）。与已实现子集（如注解中的 `number[]`、仅 `number` 字段的对象类型）的边界与拆分里程碑见 [PROJECT-TODO.zh-CN.md §1.4](PROJECT-TODO.zh-CN.md)。空值与收窄与下文「语义与类型路线（§3.3）」及 [PROJECT-TODO.zh-CN.md §3.3](PROJECT-TODO.zh-CN.md) 交叉：**sem 已实现** `Union` 上去除空值后与 `??` 右侧在 primitive 同族或 **兼容 `Fn` 类型**时的结果类型合并；**完整** discriminated 收窄仍待后续。`nullish_ok.ts` 等覆盖基础子集；`null`/`undefined` 与**异质**成员（如 `null | Fn`）的联合若在具名绑定上无法映射到单一 Rust 类型，**compile** 仍可能在 codegen 拒绝——与「heterogeneous union」诊断一致；`nullish_fn_ok.ts` 以 `trust check` 验证 sem。
 
 ### 泛型与类型参数（单态化子集）
 
@@ -212,15 +288,17 @@ cargo test
 ## 用法
 
 ```bash
-cargo run -p ts2rs-cli -- compile path/to/app.ts -o out.rs
-cargo run -p ts2rs-cli -- compile path/to/app.ts -o ./my-app --exec
+cargo run -p trust-cli -- compile path/to/app.ts -o out.rs
+cargo run -p trust-cli -- compile path/to/app.ts -o ./my-app --exec
 # --exec 时可省略 -o：在当前工作目录生成与入口文件主文件名相同的可执行文件
-cargo run -p ts2rs-cli -- compile --exec path/to/app.ts
-cargo run -p ts2rs-cli -- compile path/to/entry.ts path/to/extra.ts -o out.rs
-cargo run -p ts2rs-cli -- run path/to/app.ts
-cargo run -p ts2rs-cli -- run --project path/to/tsconfig.json
-cargo run -p ts2rs-cli -- compile path/to/entry.ts -o out.rs --incremental .ts2rs-cache
-cargo run -p ts2rs-cli -- check path/to/app.ts
+cargo run -p trust-cli -- compile --exec path/to/app.ts
+cargo run -p trust-cli -- compile path/to/entry.ts path/to/extra.ts -o out.rs
+cargo run -p trust-cli -- run path/to/app.ts
+cargo run -p trust-cli -- run --project path/to/tsconfig.json
+cargo run -p trust-cli -- compile path/to/entry.ts -o out.rs --incremental .trust-cache
+cargo run -p trust-cli -- check path/to/app.ts
+cargo run -p trust-cli -- init --dir my-trust-app
+cargo run -p trust-cli -- add url::Url::parse --dir my-trust-app
 ```
 
 ### CLI（子命令与选项）
@@ -230,24 +308,66 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | **`compile`** | 解析 → HIR → 语义 → 非 **`--exec`** 时 **`-o` 必填**（`.rs`）；**`--exec`** 时经临时 crate + **`cargo build`** 写可执行文件：可显式 **`-o`**，或省略 **`-o`** 则在**当前工作目录**生成与**入口文件主文件名**同名的文件 |
 | **`run`** | 同上后写入临时 crate，**`cargo build`**（默认 **`--release`**）并运行生成的可执行文件 |
 | **`check`** | 仅解析 + HIR + **语义检查**，不写 `.rs`、**不**调用 `cargo` |
+| **`init`** | 初始化 trust 项目模板（`main.ts`、`math.ts`、`strutil.ts`、`Trust.toml`） |
+| **`add`** | 根据 `crate::Type::new_fn` 快速写入 `Trust.toml` 的依赖与 `[[rust_binding]]` |
 
-**全局**（可写在子命令前，如 `ts2rs -q run …`）：
+**全局**（可写在子命令前，如 `trust -q run …`）：
 
 | 选项 | 说明 |
 |------|------|
 | **`-q` / `--quiet`** | 成功时不打印 **warning**（错误仍输出） |
 | **`--color`** | `auto` / `always` / `never`，帮助文本等着色；`never` / `always` 在解析前会同步 `NO_COLOR`（亦可直接设 `NO_COLOR=1`） |
 
-**`compile`**：`--span-comments`、`--ts-source-comments`（将 TS leading 注释写成 Rust `//` 行）、`--emit-ir`（将 [`IRModule`](crates/trust-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、**`--exec`**（见上表：**`-o`** 为可执行文件路径，或省略则用入口主文件名写到 **cwd**；**Windows** 上默认名会加 **`.exe`**；与 `run` 的 `cargo build` 一致）、**`--incremental` / `--incremental DIR`**（多文件 HIR 片段缓存；单独写 `--incremental` 时默认目录 `.ts2rs-cache`）。**仅在 `--exec` 时**：**`--link-ts2rs-rt`**、**`--debug`**、**`-O` / `--release`**（含义与互斥关系同 `run`）。
+**`compile`**：`--span-comments`、`--ts-source-comments`（将 TS leading 注释写成 Rust `//` 行）、`--emit-ir`（将 [`IRModule`](crates/trust-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、**`--exec`**（见上表：**`-o`** 为可执行文件路径，或省略则用入口主文件名写到 **cwd**；**Windows** 上默认名会加 **`.exe`**；与 `run` 的 `cargo build` 一致）、**`--incremental` / `--incremental DIR`**（多文件 HIR 片段缓存；单独写 `--incremental` 时默认目录 `.trust-cache`）。**仅在 `--exec` 时**：**`--link-trust-rt`**、**`--debug`**、**`-O` / `--release`**（含义与互斥关系同 `run`）。
 
-**`run`**：`--link-ts2rs-rt`；**`--debug`** 使用非 release 的 `cargo build`（`target/debug/`）；**`-O` / `--release`** 显式要求 release 构建（与默认一致，与 `--debug` 互斥）；**`--incremental`** 与 `compile` 相同。
+**`run`**：`--link-trust-rt`；**`--debug`** 使用非 release 的 `cargo build`（`target/debug/`）；**`-O` / `--release`** 显式要求 release 构建（与默认一致，与 `--debug` 互斥）；**`--incremental`** 与 `compile` 相同。
 
-**退出码**：**`0`** 表示 ts2rs 与子程序均成功；**`ts2rs` 自身失败**（解析、语义、找不到 `cargo` 等）为 **`1`**；**`run`** 在已生成并成功启动子进程后，若子进程非零退出，则 **ts2rs 以该进程的退出码退出**（无 `code()` 时如信号则 **`1`**）。Warning **不**抬高退出码（与上文「诊断」一致）。
+**`init`**：
+
+- `--dir <DIR>` 初始化目录（默认 `.`）
+- `--force` 覆盖同名已有文件
+
+**`add`**：
+
+- 位置参数 `RUST_PATH`：必须是 `crate::Type::new_fn`（例如 `url::Url::parse`）
+- `--dir <DIR>`：`Trust.toml` 所在目录（默认 `.`）
+- 行为：
+  - 若 `[dependencies]` 无该 crate，则自动补 `crate = "*"`
+  - 创建或更新匹配的 `[[rust_binding]]`，写入：
+    - `crate`、`type_name`、`rust_type`
+    - `new = { rust = "...", unwrap = true }`
+    - `method = []`（缺失时初始化）
+
+**退出码**：**`0`** 表示 trust 与子程序均成功；**`trust` 自身失败**（解析、语义、找不到 `cargo` 等）为 **`1`**；**`run`** 在已生成并成功启动子进程后，若子进程非零退出，则 **trust 以该进程的退出码退出**（无 `code()` 时如信号则 **`1`**）。Warning **不**抬高退出码（与上文「诊断」一致）。
 
 - **多文件**：第一个位置参数为**入口**（须含 `export function main`），其余为**额外根**（入口 DFS 未覆盖的 `.ts` 仍会加入模块图）。
 - **`--project` tsconfig**（简化 JSON）：可选 **`extends`**、**`files`**、**`include`**、**`exclude`**（glob）；路径相对**书写该字段的配置文件**所在目录；**`exclude`** 在 `extends` 链上**累积**。若合并后 **`files` 非空**则只用 `files`；否则展开 **`include`**（仅 `.ts`）。**仅 `include`** 时匹配文件会排序，**入口**为字典序第一个——需固定顺序时用显式 **`files`**。与多个 `.ts` 位置参数**互斥**。
-- **`run --link-ts2rs-rt`**：在临时 crate 的 `Cargo.toml` 中加入可选 path 依赖 **`ts2rs_rt`**（须在本仓库源码树内构建；仅从 crates.io 安装时通常会失败）。生成代码默认仍不 `use ts2rs_rt`。
-- **`compile --link-ts2rs-rt`**：不加 **`--exec`** 时不生成 `Cargo.toml`，无效果；与 **`--exec`** 联用时与 **`run --link-ts2rs-rt`** 相同。
+- **`run --link-trust-rt`**：在临时 crate 的 `Cargo.toml` 中加入可选 path 依赖 **`trust_rt`**（须在本仓库源码树内构建；仅从 crates.io 安装时通常会失败）。生成代码默认仍不 `use trust_rt`。
+- **`compile --link-trust-rt`**：不加 **`--exec`** 时不生成 `Cargo.toml`，无效果；与 **`--exec`** 联用时与 **`run --link-trust-rt`** 相同。
+
+#### 常见工作流
+
+**1）初始化并直接运行**
+
+```bash
+trust init --dir my-trust-app
+trust run my-trust-app/main.ts
+```
+
+**2）快速添加 Rust 绑定**
+
+```bash
+trust add url::Url::parse --dir my-trust-app
+# 然后在 TS 中：
+# import { Url } from "url";
+# const u: Url = new Url("https://example.com");
+```
+
+**3）生成可执行文件**
+
+```bash
+trust compile my-trust-app/main.ts --exec -o ./my-trust-app-bin
+```
 
 `compile` 可加 `--span-comments`，在生成的 Rust 中为每条语句前置 `// ts: path:line:col`（对照 TS **位置**）。另可加 `--ts-source-comments`，写入 TS **注释正文**（leading，转为 `//` 行；与 `--span-comments` 独立）。
 
@@ -255,12 +375,12 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 
 | Crate | 说明 |
 |-------|------|
-| `ts2rs-parser` | swc 封装；`ParsedSource`（`program`、`source_map`、`comments`）；[`module_graph`](crates/trust-parser/src/module_graph.rs) 多文件入口；共享 import 解析见 [`import_utils`](crates/trust-parser/src/import_utils.rs) |
-| `ts2rs-hir` | IR、构建、语义、`emit_rust`；[`compile_graph`](crates/trust-hir/src/lib.rs) 多模块；[`ir_cache`](crates/trust-hir/src/ir_cache/mod.rs)（增量磁盘快照）；诊断与 codegen 共用节点 `Span` + 函数级 `ir_id`（见 [`ir.rs`](crates/trust-hir/src/ir.rs)）；拆分辅助模块：[`build/build_types.rs`](crates/trust-hir/src/build/build_types.rs)、[`sem/helpers.rs`](crates/trust-hir/src/sem/helpers.rs)、[`codegen/helpers.rs`](crates/trust-hir/src/codegen/helpers.rs) |
-| `ts2rs-lower` | `lower_program` / [`lower_module_graph`](crates/trust-lower/src/lib.rs) |
-| `ts2rs-driver` | 临时 crate + `cargo build`（需本机 `cargo` 在 `PATH`）；[`compile_entrypoint_to_executable`](crates/trust-driver/src/lib.rs)；未找到 `cargo` 时 [`DriverError::CargoNotFound`](crates/trust-driver/src/lib.rs)；流水线拆分：[`pipeline.rs`](crates/trust-driver/src/pipeline.rs)、[`cargo_runner.rs`](crates/trust-driver/src/cargo_runner.rs)、[`crate_writer.rs`](crates/trust-driver/src/crate_writer.rs) |
-| `ts2rs_rt` | 可选运行时（预留） |
-| `ts2rs-cli` | 命令行 `ts2rs`；[`cli_args.rs`](crates/trust-cli/src/cli_args.rs)、[`commands.rs`](crates/trust-cli/src/commands.rs)、[`graph_loader.rs`](crates/trust-cli/src/graph_loader.rs)、[`tsconfig_resolve.rs`](crates/trust-cli/src/tsconfig_resolve.rs)、[`incremental.rs`](crates/trust-cli/src/incremental.rs) |
+| `trust-parser` | swc 封装；`ParsedSource`（`program`、`source_map`、`comments`）；[`module_graph`](crates/trust-parser/src/module_graph.rs) 多文件入口；共享 import 解析见 [`import_utils`](crates/trust-parser/src/import_utils.rs) |
+| `trust-hir` | IR、构建、语义、`emit_rust`；[`compile_graph`](crates/trust-hir/src/lib.rs) 多模块；[`ir_cache`](crates/trust-hir/src/ir_cache/mod.rs)（增量磁盘快照）；诊断与 codegen 共用节点 `Span` + 函数级 `ir_id`（见 [`ir.rs`](crates/trust-hir/src/ir.rs)）；拆分辅助模块：[`build/build_types.rs`](crates/trust-hir/src/build/build_types.rs)、[`sem/helpers.rs`](crates/trust-hir/src/sem/helpers.rs)、[`codegen/helpers.rs`](crates/trust-hir/src/codegen/helpers.rs) |
+| `trust-lower` | `lower_program` / [`lower_module_graph`](crates/trust-lower/src/lib.rs) |
+| `trust-driver` | 临时 crate + `cargo build`（需本机 `cargo` 在 `PATH`）；[`compile_entrypoint_to_executable`](crates/trust-driver/src/lib.rs)；未找到 `cargo` 时 [`DriverError::CargoNotFound`](crates/trust-driver/src/lib.rs)；流水线拆分：[`pipeline.rs`](crates/trust-driver/src/pipeline.rs)、[`cargo_runner.rs`](crates/trust-driver/src/cargo_runner.rs)、[`crate_writer.rs`](crates/trust-driver/src/crate_writer.rs) |
+| `trust_rt` | 可选运行时（预留） |
+| `trust-cli` | 命令行 `trust`；[`cli_args.rs`](crates/trust-cli/src/cli_args.rs)、[`commands.rs`](crates/trust-cli/src/commands.rs)、[`graph_loader.rs`](crates/trust-cli/src/graph_loader.rs)、[`tsconfig_resolve.rs`](crates/trust-cli/src/tsconfig_resolve.rs)、[`incremental.rs`](crates/trust-cli/src/incremental.rs) |
 
 ## 许可
 

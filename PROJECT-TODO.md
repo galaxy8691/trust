@@ -1,6 +1,6 @@
 [中文](PROJECT-TODO.zh-CN.md)
 
-# ts2rs long-term project TODO
+# trust long-term project TODO
 
 This document tracks compiler and toolchain work over time, grouped by theme. Use `[ ]` / `[~]` / `[x]` in PRs or commits as appropriate. **Every item assumes the strong-typing (trust) model.**
 
@@ -19,7 +19,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ## 0. Vision and “1.0” acceptance (editable)
 
-- [x] **Single-file subset**: every feature the README matrix marks as supported has fixtures and integration tests ([`crates/trust-cli/tests/fixtures/`](crates/trust-cli/tests/fixtures/) + [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)); `ts2rs-lower` also has compile unit tests.
+- [x] **Single-file subset**: every feature the README matrix marks as supported has fixtures and integration tests ([`crates/trust-cli/tests/fixtures/`](crates/trust-cli/tests/fixtures/) + [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)); `trust-lower` also has compile unit tests.
 - [x] **Diagnostics**: common errors include line/column (`path:line:col`); messages are **English** (see README “Scope (1.0)”).
 - [x] **Reproducible**: `cargo test --workspace`, `cargo clippy --workspace --all-targets`; [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on push/PR.
 - [x] **Multi-file (if in scope)**: **not** full project graphs for 1.0; **relative** `import { x } from "./dep.ts"` uses [`parse_module_graph`](crates/trust-parser/src/module_graph.rs) (no merged AST), CLI and [`compile_entrypoint_to_executable`](crates/trust-driver/src/lib.rs) via `validate_imports` → `lower_module_graph`; see §6.2.
@@ -123,7 +123,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 3.3 Deeper type system
 
-- [x] **Tie-in with §1.4**: literal and union types and **static** `??` / `?.` narrowing must stay consistent with §1.4 (avoid conflict with limited `TsType`). Unions are in HIR. **Implemented (sem)**: when `Union` minus `null`/`undefined` matches the right-hand side of `??` as the same “family” (`number` / `string` / `boolean`, or **structurally matching** `Fn`), [`infer_expr_mut`](crates/trust-hir/src/sem.rs) on `IRExpr::NullishCoalesce` calls `unify_ternary_branches` for a single result type. **Still future**: discriminated-union narrowing that relies on a **discriminant** (large scope). Done: README §3.3; `nullish_ok` / `optional_ok`; sem + `Fn` unions covered by `nullish_fn_ok.ts` (`ts2rs check`).
+- [x] **Tie-in with §1.4**: literal and union types and **static** `??` / `?.` narrowing must stay consistent with §1.4 (avoid conflict with limited `TsType`). Unions are in HIR. **Implemented (sem)**: when `Union` minus `null`/`undefined` matches the right-hand side of `??` as the same “family” (`number` / `string` / `boolean`, or **structurally matching** `Fn`), [`infer_expr_mut`](crates/trust-hir/src/sem.rs) on `IRExpr::NullishCoalesce` calls `unify_ternary_branches` for a single result type. **Still future**: discriminated-union narrowing that relies on a **discriminant** (large scope). Done: README §3.3; `nullish_ok` / `optional_ok`; sem + `Fn` unions covered by `nullish_fn_ok.ts` (`trust check`).
 - [x] **`null` / `undefined`**: [`TsType`](crates/trust-hir/src/ir.rs) has `Null`/`Undefined` variants; checks follow **current sem static rules**, not tsc’s default “everything nullable”. Done: README §3.3; **no** `strictNullChecks`-style switch. If added later, make it an **explicit** compiler mode, not implicit JS looseness.
 - [x] **Structural vs nominal**: **trust** uses nominal table + static shape checks; Rust mapping strategy (mostly primitives today). Done: README §3.3; **not** implementing full TS structural subtyping as a goal.
 - [x] **Function types and HOF**: Align with [§13.2](PROJECT-TODO.md) and README — a **restricted** subset is implemented (function types, arrow values, calls, passing/returning functions); closure codegen remains the strict `(number) => number` subset. **Do not** claim “no first-class functions / no HOF”; distinguish “supported HOF subset” vs “further generalization / codegen work”.
@@ -153,7 +153,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ### 4.3 Readability of emitted Rust
 
 - [x] **Indent / line breaks**: comma (`Seq`) block lines and closing `})` align for rustfmt (`codegen_43_comma_seq_indented`; [`emit_seq_expr`](crates/trust-hir/src/codegen.rs) / `emit_expr` `stmt_level`).
-- [x] **Comments**: optional `// ts: path:line:col` per statement (`codegen_43_span_comments_emits_ts_anchors`; `ts2rs-cli` `compile_span_comments_writes_ts_anchors`; [`emit_stmt`](crates/trust-hir/src/codegen.rs), `CodegenOptions`; `ts2rs compile --span-comments`). Optional TS leading comment text as Rust `//` lines (`emit_ts_source_comments_writes_frozen_leading`; `compile_ts_source_comments_writes_ts_text`; `CodegenOptions::emit_ts_source_comments`; `ts2rs compile --ts-source-comments`).
+- [x] **Comments**: optional `// ts: path:line:col` per statement (`codegen_43_span_comments_emits_ts_anchors`; `trust-cli` `compile_span_comments_writes_ts_anchors`; [`emit_stmt`](crates/trust-hir/src/codegen.rs), `CodegenOptions`; `trust compile --span-comments`). Optional TS leading comment text as Rust `//` lines (`emit_ts_source_comments_writes_frozen_leading`; `compile_ts_source_comments_writes_ts_text`; `CodegenOptions::emit_ts_source_comments`; `trust compile --ts-source-comments`).
 
 ---
 
@@ -164,16 +164,16 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 - [x] **`console.log` / `console.error` / `console.debug`**: `log` → `println!`, `error`/`debug` → `eprintln!` (`console_error_and_debug_use_eprintln`; `compile_console_stderr_writes_eprintln`; [`build.rs`](crates/trust-hir/src/build.rs); [`emit_builtin_log`](crates/trust-hir/src/codegen.rs)).
 - [x] **Formatting**: same as §4.1, spaced `"{}"`; shared [`emit_builtin_log`](crates/trust-hir/src/codegen.rs).
 
-### 5.2 Minimal runtime ([`ts2rs_rt`](crates/trust_rt))
+### 5.2 Minimal runtime ([`trust_rt`](crates/trust_rt))
 
 - [x] **Strings**: `string.length` is **UTF-16 code units** (`encode_utf16().count()`); `number[].length` → `Vec::len`; object field `length` via `HashMap::get` ([`MemberLengthDispatch`](crates/trust-hir/src/ir.rs)) (`codegen_52_string_length_utf16`, `codegen_52_object_length_field_uses_get`; CLI tests). **`string` subscript `s[i]`**: UTF-16 index → single-code-unit `string` ([`IndexKind::StringUtf16`](crates/trust-hir/src/ir.rs); `stdlib_hir_ok.ts`).
 - [x] **Math**: `Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` etc. lower to **`f64`** operations in codegen ([`MathBuiltinKind`](crates/trust-hir/src/ir.rs); [`build.rs`](crates/trust-hir/src/build.rs); [`emit_expr`](crates/trust-hir/src/codegen.rs); matches README matrix `Math.*` row).
-- [x] **HIR stdlib (no `ts2rs_rt` required)**: `Number.parseInt` / `parseFloat`; **`JSON.stringify` / `JSON.parse`**: **string literal** args folded at build time with **`serde_json`** into trust-closed IR; **dynamic** strings match `await response.json()` via **`serde_json::from_str`** into `f64` and the trust subset (see §14 “HIR stdlib / JSON / strings”); `String` methods `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes`; global `readLine()` via inlined `std::io` (rejected in `async` bodies); [`stdlib_hir_ok.ts`](crates/trust-cli/tests/fixtures/stdlib_hir_ok.ts), [`json_uri_trust_ok.ts`](crates/trust-cli/tests/fixtures/json_uri_trust_ok.ts).
-- [x] **I/O**: [`ts2rs_rt::read_stdin_line`](crates/trust_rt/src/lib.rs) placeholder (`std::io`); **optional** — sync `readLine()` is emitted in generated Rust **without** linking `ts2rs_rt`; driver temp crate still does not depend on `ts2rs_rt` unless `--link-ts2rs-rt`.
+- [x] **HIR stdlib (no `trust_rt` required)**: `Number.parseInt` / `parseFloat`; **`JSON.stringify` / `JSON.parse`**: **string literal** args folded at build time with **`serde_json`** into trust-closed IR; **dynamic** strings match `await response.json()` via **`serde_json::from_str`** into `f64` and the trust subset (see §14 “HIR stdlib / JSON / strings”); `String` methods `charAt`, `charCodeAt`, `slice`, `substring`, `indexOf`, `includes`; global `readLine()` via inlined `std::io` (rejected in `async` bodies); [`stdlib_hir_ok.ts`](crates/trust-cli/tests/fixtures/stdlib_hir_ok.ts), [`json_uri_trust_ok.ts`](crates/trust-cli/tests/fixtures/json_uri_trust_ok.ts).
+- [x] **I/O**: [`trust_rt::read_stdin_line`](crates/trust_rt/src/lib.rs) placeholder (`std::io`); **optional** — sync `readLine()` is emitted in generated Rust **without** linking `trust_rt`; driver temp crate still does not depend on `trust_rt` unless `--link-trust-rt`.
 
 ---
 
-## 6. Driver and build ([`ts2rs-driver`](crates/trust-driver))
+## 6. Driver and build ([`trust-driver`](crates/trust-driver))
 
 ### 6.1 Single-file path
 
@@ -182,18 +182,18 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 6.2 Multi-file and modules ([`compile_entrypoint_to_executable`](crates/trust-driver/src/lib.rs))
 
-- [x] **Multi-root parsing**: [`parse_module_graph_with_extra_roots`](crates/trust-parser/src/module_graph.rs); CLI multiple `.ts` or `--project` + simplified JSON (`extends`, `files`, `include` / `exclude`) via [`tsconfig_resolve`](crates/trust-cli/src/tsconfig_resolve.rs) ([`ts2rs-cli`](crates/trust-cli/src/main.rs)) (`extra_root_includes_unreachable_file`; `run_multi_entry_extra_roots_prints_main`, `run_project_tsconfig_prints_main`, `run_project_tsconfig_extends_include_ok`).
+- [x] **Multi-root parsing**: [`parse_module_graph_with_extra_roots`](crates/trust-parser/src/module_graph.rs); CLI multiple `.ts` or `--project` + simplified JSON (`extends`, `files`, `include` / `exclude`) via [`tsconfig_resolve`](crates/trust-cli/src/tsconfig_resolve.rs) ([`trust-cli`](crates/trust-cli/src/main.rs)) (`extra_root_includes_unreachable_file`; `run_multi_entry_extra_roots_prints_main`, `run_project_tsconfig_prints_main`, `run_project_tsconfig_extends_include_ok`).
 - [x] **Dependency graph (subset)**: entry + relative `import` → [`parse_module_graph`](crates/trust-parser/src/module_graph.rs) (per-module AST) → `validate_imports` → [`lower_module_graph`](crates/trust-lower/src/lib.rs) → one Rust crate.
-- [x] **Generating `Cargo.toml`**: [`RustBuildOptions`](crates/trust-driver/src/lib.rs) / [`build_rust_to_executable_with_options`](crates/trust-driver/src/lib.rs); optional path dep `ts2rs_rt` + feature; CLI `--link-ts2rs-rt` (`write_minimal_crate_with_link_ts2rs_rt_contains_optional_path_dep`; `run_with_link_ts2rs_rt_prints_main`).
+- [x] **Generating `Cargo.toml`**: [`RustBuildOptions`](crates/trust-driver/src/lib.rs) / [`build_rust_to_executable_with_options`](crates/trust-driver/src/lib.rs); optional path dep `trust_rt` + feature; CLI `--link-trust-rt` (`write_minimal_crate_with_link_trust_rt_contains_optional_path_dep`; `run_with_link_trust_rt_prints_main`).
 - [x] **Cycles**: [`parse_module_graph`](crates/trust-parser/src/module_graph.rs) detects and errors (`circular_*.ts`).
 
 ---
 
-## 7. CLI ([`ts2rs-cli`](crates/trust-cli))
+## 7. CLI ([`trust-cli`](crates/trust-cli))
 
-- [x] **Subcommands**: `compile` / `run` / `check`; README CLI table and `ts2rs --help`; `check` is HIR+sem only ([`check_module_graph`](crates/trust-lower/src/lib.rs)) (`check_sample_ok`, `check_switch_fail_stderr`).
+- [x] **Subcommands**: `compile` / `run` / `check`; README CLI table and `trust --help`; `check` is HIR+sem only ([`check_module_graph`](crates/trust-lower/src/lib.rs)) (`check_sample_ok`, `check_switch_fail_stderr`).
 - [x] **Flags**: `compile -o`; `run` `-O`/`--release` and `--debug` ([`RustBuildOptions::release`](crates/trust-driver/src/lib.rs)); global `-q`/`--quiet`, `--color`, `--emit-ir` (`compile_emit_ir_stderr_contains_ir_module`, `debug_build_writes_binary_under_target_debug`).
-- [x] **Exit codes**: as README; `run` forwards child `ExitStatus::code` (else `1`); ts2rs errors `1` ([`main.rs`](crates/trust-cli/src/main.rs) `exit_code_for_failed_child`).
+- [x] **Exit codes**: as README; `run` forwards child `ExitStatus::code` (else `1`); trust errors `1` ([`main.rs`](crates/trust-cli/src/main.rs) `exit_code_for_failed_child`).
 
 ---
 
@@ -206,7 +206,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 8.2 Unit tests
 
-- [x] **`ts2rs-hir`**: `build`/`sem`/`codegen` `#[cfg(test)]` (`build_module_records_main`, `check_module_accepts_simple_main` / `check_module_rejects_missing_return`, `emit_rust_contains_ts_main_and_println`; dev-dep `ts2rs-parser`).
+- [x] **`trust-hir`**: `build`/`sem`/`codegen` `#[cfg(test)]` (`build_module_records_main`, `check_module_accepts_simple_main` / `check_module_rejects_missing_return`, `emit_rust_contains_ts_main_and_println`; dev-dep `trust-parser`).
 - [x] **parser**: swc wrapper snapshots/minimal cases ([`lib.rs`](crates/trust-parser/src/lib.rs) `parse_rejects_unclosed_function_body`, `parses_module_with_import_and_export_main`).
 
 ### 8.3 Tooling
@@ -219,7 +219,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 ## 9. Documentation and developer experience
 
 - [x] **README**: matrix synced with implementation; “unsupported TS” summary (**also describes trust strong-type rejection**). **Done**: [`README.md`](README.md) (English default) and [`README.zh-CN.md`](README.zh-CN.md) — **Unsupported TypeScript (trust rejection boundary)** / **不支持的 TypeScript 特性（trust 强类型拒斥边界）** and language matrix.
-- [x] **Architecture diagram**: parse → HIR → sem → codegen → driver (Mermaid). **Done**: Mermaid `flowchart LR` under **Architecture** / **架构** in both READMEs (`ts2rs_parser` → HIR → sem → codegen → `ts2rs_lower` → `ts2rs_cli` / `ts2rs_driver`).
+- [x] **Architecture diagram**: parse → HIR → sem → codegen → driver (Mermaid). **Done**: Mermaid `flowchart LR` under **Architecture** / **架构** in both READMEs (`trust_parser` → HIR → sem → codegen → `trust_lower` → `trust_cli` / `trust_driver`).
 - [x] **Contributing**: `CONTRIBUTING.md` (branch, test commands, MSRV). **Done**: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`CONTRIBUTING.zh-CN.md`](CONTRIBUTING.zh-CN.md); root [`Cargo.toml`](Cargo.toml) `rust-version = "1.74"` and per-crate `rust-version.workspace = true`.
 - [x] **Changelog**: `CHANGELOG.md` for releases. **Done**: [`CHANGELOG.md`](CHANGELOG.md) / [`CHANGELOG.zh-CN.md`](CHANGELOG.zh-CN.md), Keep a Changelog with `[Unreleased]` and `[0.1.0]`.
 - [x] **This roadmap**: English default [`PROJECT-TODO.md`](PROJECT-TODO.md), Chinese [`PROJECT-TODO.zh-CN.md`](PROJECT-TODO.zh-CN.md), cross-linked at the top of each file.
@@ -230,7 +230,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 Multi-file **parallel semantic checking** is implemented (`rayon`; details under **§14 — Performance and security**). This section keeps only what is still open.
 
-- [x] **Incremental compile**: multi-file, recompile only changed modules (opt-in `--incremental` on `compile` / `run`; HIR fragment cache under configurable dir, default `.ts2rs-cache`; importers of changed files rebuilt). Implementation: [`incremental.rs`](crates/trust-cli/src/incremental.rs), [`ir_cache`](crates/trust-hir/src/ir_cache/mod.rs), [`forward_deps`](crates/trust-parser/src/module_graph.rs). Tests: `compile_incremental_rebuilds_only_changed_module`, `module_fragment_round_trip_bincode`.
+- [x] **Incremental compile**: multi-file, recompile only changed modules (opt-in `--incremental` on `compile` / `run`; HIR fragment cache under configurable dir, default `.trust-cache`; importers of changed files rebuilt). Implementation: [`incremental.rs`](crates/trust-cli/src/incremental.rs), [`ir_cache`](crates/trust-hir/src/ir_cache/mod.rs), [`forward_deps`](crates/trust-parser/src/module_graph.rs). Tests: `compile_incremental_rebuilds_only_changed_module`, `module_fragment_round_trip_bincode`.
 
 ---
 
@@ -332,8 +332,8 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 **Comments vs generated Rust** (see [README §1.1 — Comments](README.md))
 
-- [x] **Span anchors (supported)**: `ts2rs compile --span-comments` sets [`CodegenOptions::span_comments`](crates/trust-hir/src/codegen.rs) to emit `// ts: path:line:col` before statements (§4.3; maps TS **positions**, not TS comment text).
-- [x] **TS source comments** in generated Rust (opt-in): parser collects swc leading comments into [`ParsedSource::comments`](crates/trust-parser/src/lib.rs); [`build_module`](crates/trust-hir/src/build.rs) / [`build_program_multi`](crates/trust-hir/src/build.rs) freeze them into [`IRModule::ts_comments_by_path`](crates/trust-hir/src/ir.rs); [`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs) emits Rust `//` lines before each statement and each top-level function. **Limitations**: leading only (no trailing / per-expression); lowered AST (e.g. large `switch` desugar) may shift or drop placement; [`compile_with_options`](crates/trust-hir/src/lib.rs) passes `None` for comments (no TS text unless using `build_module` / graph with parser output). CLI: `ts2rs compile --ts-source-comments`. Tests: `emit_ts_source_comments_writes_frozen_leading`, `compile_ts_source_comments_writes_ts_text`.
+- [x] **Span anchors (supported)**: `trust compile --span-comments` sets [`CodegenOptions::span_comments`](crates/trust-hir/src/codegen.rs) to emit `// ts: path:line:col` before statements (§4.3; maps TS **positions**, not TS comment text).
+- [x] **TS source comments** in generated Rust (opt-in): parser collects swc leading comments into [`ParsedSource::comments`](crates/trust-parser/src/lib.rs); [`build_module`](crates/trust-hir/src/build.rs) / [`build_program_multi`](crates/trust-hir/src/build.rs) freeze them into [`IRModule::ts_comments_by_path`](crates/trust-hir/src/ir.rs); [`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs) emits Rust `//` lines before each statement and each top-level function. **Limitations**: leading only (no trailing / per-expression); lowered AST (e.g. large `switch` desugar) may shift or drop placement; [`compile_with_options`](crates/trust-hir/src/lib.rs) passes `None` for comments (no TS text unless using `build_module` / graph with parser output). CLI: `trust compile --ts-source-comments`. Tests: `emit_ts_source_comments_writes_frozen_leading`, `compile_ts_source_comments_writes_ts_text`.
 
 **Project-scale tooling** (see [README — Scope (1.0)](README.md) “Not 1.0” and [Unsupported TypeScript](README.md))
 
@@ -353,8 +353,8 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 - [x] **`await` in arbitrary control flow** (not limited to current async MVP body rules). (Removed [`check_async_mvp_stmts`](crates/trust-hir/src/sem.rs); [`infer_expr_mut`](crates/trust-hir/src/sem.rs) `Await` accepts any `Promise<T>` operand; [`async_control_flow_ok.ts`](crates/trust-cli/tests/fixtures/async_control_flow_ok.ts), `compile_async_control_flow_if_while_await_ok`.)
 - [x] **`Promise.all([...])`** (array literal only; homogeneous `Promise<number>` / `Promise<string>` / `Promise<Response>` from `fetch`). ([`IRExpr::PromiseAll`](crates/trust-hir/src/ir.rs), [`promise_all_fetch_ok.ts`](crates/trust-cli/tests/fixtures/promise_all_fetch_ok.ts), `compile_promise_all_fetch_alias_ok`.)
-- [x] **`fetchText(url)`** — `Promise<string>` via [`IRExpr::FetchText`](crates/trust-hir/src/ir.rs) / `__ts2rs_fetch_text`.
-- [x] **`fetch(url, init?)`** — `Promise<Response>` via [`IRExpr::Fetch`](crates/trust-hir/src/ir.rs) / `__ts2rs_fetch` + [`__Ts2rsFetchInit`](crates/trust-hir/src/codegen.rs); Response members and `text`/`json` as above; fixtures [`fetch_response_ok.ts`](crates/trust-cli/tests/fixtures/fetch_response_ok.ts), [`fetch_post_init_ok.ts`](crates/trust-cli/tests/fixtures/fetch_post_init_ok.ts).
+- [x] **`fetchText(url)`** — `Promise<string>` via [`IRExpr::FetchText`](crates/trust-hir/src/ir.rs) / `__trust_fetch_text`.
+- [x] **`fetch(url, init?)`** — `Promise<Response>` via [`IRExpr::Fetch`](crates/trust-hir/src/ir.rs) / `__trust_fetch` + [`__TrustFetchInit`](crates/trust-hir/src/codegen.rs); Response members and `text`/`json` as above; fixtures [`fetch_response_ok.ts`](crates/trust-cli/tests/fixtures/fetch_response_ok.ts), [`fetch_post_init_ok.ts`](crates/trust-cli/tests/fixtures/fetch_post_init_ok.ts).
 - [x] **Streaming response body (M3)** — `response.body.getReader()` / `await reader.read()` → `StreamReadResult` (`done`, `value` as `Uint8Array`); `reqwest::Response::bytes_stream()`; semantic mutex with `.text()` / `.json()`; built-in type names `HttpResponse`, `ReadableStreamDefaultReader`, `StreamReadResult`, `Uint8Array`; fixture [`fetch_stream_ok.ts`](crates/trust-cli/tests/fixtures/fetch_stream_ok.ts), test `compile_fetch_stream_ok`.
 - [x] **Reject `.then`** calls with a clear diagnostic (`Promise.prototype.then` is not supported). ([`build.rs`](crates/trust-hir/src/build.rs) call lowering, [`promise_then_fail.ts`](crates/trust-cli/tests/fixtures/promise_then_fail.ts), `compile_promise_then_fails`.)
 - [x] **TLS / HTTP stack (documented, not “Node parity”)**: generated crates use **reqwest** with **`rustls-tls`** ([`crate_writer.rs`](crates/trust-driver/src/crate_writer.rs)). **TLS 1.2+** and **HTTP/2** (when the server and stack negotiate ALPN) are provided by that stack; **root stores, cipher suites, and HTTP/2 prioritization are not guaranteed to match any specific Node or browser version**. **Still backlog**: full **WHATWG** `fetch` (browser `ReadableStream` / `Request`/`Headers` objects, duplex, CORS in non-browser hosts, etc.); trust subset already supports **chunked body** via `getReader`/`read` (see streaming item above).
@@ -368,7 +368,7 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 ### Trust.toml / Rust extern (crates.io)
 
-- [x] **Manifest**: parse `Trust.toml`; merge `[dependencies]` into the generated crate `Cargo.toml`; discover walking up from the entry `.ts` ([`ts2rs-trust-manifest`](crates/trust-manifest), [`crate_writer`](crates/trust-driver/src/crate_writer.rs), [`graph_loader`](crates/trust-cli/src/graph_loader.rs) / [`pipeline`](crates/trust-driver/src/pipeline.rs)).
+- [x] **Manifest**: parse `Trust.toml`; merge `[dependencies]` into the generated crate `Cargo.toml`; discover walking up from the entry `.ts` ([`trust-manifest`](crates/trust-manifest), [`crate_writer`](crates/trust-driver/src/crate_writer.rs), [`graph_loader`](crates/trust-cli/src/graph_loader.rs) / [`pipeline`](crates/trust-driver/src/pipeline.rs)).
 - [x] **Module graph**: `import … from "crate_key"` when the key is in the manifest; `validate_imports` checks `[[rust_binding]]`; no filesystem DFS into a fake Rust module tree.
 - [x] **HIR / sem / codegen**: `TsType::RustExtern`, `IRExpr::RustNew`, inherent `MethodCall` with `inherent_rust_str_ref` for `string` → `&str` (`.as_str()` at call sites).
 - [x] **E2E**: [`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate`.

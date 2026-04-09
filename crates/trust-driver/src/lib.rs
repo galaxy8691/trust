@@ -60,15 +60,15 @@ pub enum DriverError {
     #[error(transparent)]
     TrustManifest(#[from] trust_manifest::TrustManifestError),
 
-    #[error("cannot resolve trust_rt path dependency; build from the trust source tree or omit --link-ts2rs-rt (looked for {0})")]
-    Ts2rsRtPathResolveFailed(String),
+    #[error("cannot resolve trust_rt path dependency; build from the trust source tree or omit --link-trust-rt (looked for {0})")]
+    TrustRtPathResolveFailed(String),
 }
 
-/// Options for generated temporary crate / `cargo build` (e.g. optional `ts2rs_rt` path dependency).
+/// Options for generated temporary crate / `cargo build` (e.g. optional `trust_rt` path dependency).
 #[derive(Debug, Clone)]
 pub struct RustBuildOptions {
     /// When true, `Cargo.toml` includes an optional path dependency on `trust_rt` and a matching feature.
-    pub link_ts2rs_rt: bool,
+    pub link_trust_rt: bool,
     /// When true (default), runs `cargo build --release` and uses `target/release/`; when false, `cargo build` and `target/debug/`.
     pub release: bool,
     /// When set, `cargo build` is killed after this duration. When `None`, wait until the process exits (same as before these options existed).
@@ -82,7 +82,7 @@ pub struct RustBuildOptions {
 impl Default for RustBuildOptions {
     fn default() -> Self {
         Self {
-            link_ts2rs_rt: false,
+            link_trust_rt: false,
             release: true,
             cargo_timeout: None,
             max_cargo_output_bytes: None,
@@ -129,7 +129,7 @@ pub fn build_rust_and_copy(rust_source: &str, output: &Path) -> Result<(), Drive
     build_rust_and_copy_with_options(rust_source, output, &RustBuildOptions::default())
 }
 
-/// 同 [`build_rust_and_copy`]，但使用 [`RustBuildOptions`]（如 `release`、`link_ts2rs_rt`）。
+/// 同 [`build_rust_and_copy`]，但使用 [`RustBuildOptions`]（如 `release`、`link_trust_rt`）。
 pub fn build_rust_and_copy_with_options(
     rust_source: &str,
     output: &Path,
@@ -149,10 +149,10 @@ mod tests {
     use std::process::Command;
 
     #[test]
-    fn write_minimal_crate_with_link_ts2rs_rt_contains_optional_path_dep() {
+    fn write_minimal_crate_with_link_trust_rt_contains_optional_path_dep() {
         let dir = tempfile::tempdir().expect("tempdir");
         let opts = RustBuildOptions {
-            link_ts2rs_rt: true,
+            link_trust_rt: true,
             ..Default::default()
         };
         crate_writer::write_minimal_crate(dir.path(), "fn main() {}", &opts).expect("write crate");

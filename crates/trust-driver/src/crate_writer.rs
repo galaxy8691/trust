@@ -40,11 +40,11 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
         format!("{trust_deps}\n")
     };
 
-    let cargo_toml = if opts.link_ts2rs_rt {
+    let cargo_toml = if opts.link_trust_rt {
         let rt_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../trust_rt");
         let rt_canon = rt_path
             .canonicalize()
-            .map_err(|_| DriverError::Ts2rsRtPathResolveFailed(rt_path.display().to_string()))?;
+            .map_err(|_| DriverError::TrustRtPathResolveFailed(rt_path.display().to_string()))?;
         let path_toml = rt_canon.to_string_lossy().replace('\\', "/");
         format!(
             r#"[package]

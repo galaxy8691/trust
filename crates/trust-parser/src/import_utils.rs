@@ -62,7 +62,7 @@ pub(crate) fn resolve_supported_import_path(
     match resolve_module_specifier(file, imp, None)? {
         ModuleSpecifierResolution::Relative(p) => Ok(p),
         ModuleSpecifierResolution::RustCrate(name) => Err(ParseError::Message(format!(
-            "Rust crate import `{name}` requires a Trust.toml next to the project; use `ts2rs` driver path that loads Trust.toml"
+            "Rust crate import `{name}` requires a Trust.toml next to the project; use `trust` driver path that loads Trust.toml"
         ))),
     }
 }

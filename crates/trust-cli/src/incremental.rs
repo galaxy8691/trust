@@ -182,8 +182,8 @@ pub fn compile_graph_incremental(
     let enc = bincode::serialize(&manifest).map_err(|e| e.to_string())?;
     fs::write(&man_path, enc).map_err(|e| e.to_string())?;
 
-    if std::env::var_os("TS2RS_TEST_FRAGMENT_STATS").is_some() {
-        eprintln!("ts2rs_fragment_rebuilds={fragment_rebuilds}");
+    if std::env::var_os("TRUST_TEST_FRAGMENT_STATS").is_some() {
+        eprintln!("trust_fragment_rebuilds={fragment_rebuilds}");
     }
 
     Ok(out)

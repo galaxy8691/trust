@@ -63,6 +63,10 @@ pub(crate) enum Commands {
     Run(RunCmd),
     /// 仅解析 + HIR + 语义检查，不写文件、不调用 cargo
     Check(CheckCmd),
+    /// 初始化 trust 项目模板（main.ts / math.ts / strutil.ts / Trust.toml）
+    Init(InitCmd),
+    /// 向 Trust.toml 添加 Rust 依赖和 rust_binding（例如 `url::Url::parse`）
+    Add(AddCmd),
 }
 
 #[derive(Args)]
@@ -93,7 +97,7 @@ pub(crate) struct CompileCmd {
     pub(crate) ts_source_comments: bool,
     /// 仅在 `--exec` 时生效：临时 crate 的 Cargo.toml 中加入可选 path 依赖 `trust_rt`
     #[arg(long)]
-    pub(crate) link_ts2rs_rt: bool,
+    pub(crate) link_trust_rt: bool,
     /// 仅在 `--exec` 时生效：`cargo build` 不用 `--release`
     #[arg(long, conflicts_with = "release_flag")]
     pub(crate) debug: bool,
@@ -108,12 +112,12 @@ pub(crate) struct CompileCmd {
     /// 将 [`trust_hir::IRModule`] 的 `Debug` 打到 stderr（调试用，输出可能很大）
     #[arg(long)]
     pub(crate) emit_ir: bool,
-    /// 多文件时缓存各模块 HIR 片段；仅重编变更文件及其 importers。目录默认 `.ts2rs-cache`（相对当前工作目录）
+    /// 多文件时缓存各模块 HIR 片段；仅重编变更文件及其 importers。目录默认 `.trust-cache`（相对当前工作目录）
     #[arg(
         long,
         value_name = "DIR",
         num_args = 0..=1,
-        default_missing_value = ".ts2rs-cache"
+        default_missing_value = ".trust-cache"
     )]
     pub(crate) incremental: Option<PathBuf>,
 }
@@ -124,7 +128,7 @@ pub(crate) struct RunCmd {
     pub(crate) graph: GraphInput,
     /// 临时 crate 的 Cargo.toml 中加入可选 path 依赖 `trust_rt`（须在仓库源码树内构建）
     #[arg(long)]
-    pub(crate) link_ts2rs_rt: bool,
+    pub(crate) link_trust_rt: bool,
     /// `cargo build` 不用 `--release`（更快，未优化）
     #[arg(long, conflicts_with = "release_flag")]
     pub(crate) debug: bool,
@@ -141,7 +145,7 @@ pub(crate) struct RunCmd {
         long,
         value_name = "DIR",
         num_args = 0..=1,
-        default_missing_value = ".ts2rs-cache"
+        default_missing_value = ".trust-cache"
     )]
     pub(crate) incremental: Option<PathBuf>,
 }
@@ -152,4 +156,24 @@ pub(crate) struct CheckCmd {
     pub(crate) graph: GraphInput,
     #[arg(long)]
     pub(crate) emit_ir: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct InitCmd {
+    /// 初始化目录（默认当前目录）
+    #[arg(long, value_name = "DIR", default_value = ".")]
+    pub(crate) dir: PathBuf,
+    /// 已存在同名文件时覆盖写入
+    #[arg(long)]
+    pub(crate) force: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct AddCmd {
+    /// 绑定路径：`crate::Type::new_fn`（例如 `url::Url::parse`）
+    #[arg(value_name = "RUST_PATH")]
+    pub(crate) rust_path: String,
+    /// Trust.toml 所在目录（默认当前目录）
+    #[arg(long, value_name = "DIR", default_value = ".")]
+    pub(crate) dir: PathBuf,
 }

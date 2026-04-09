@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use toml::Value;
 
 use trust_driver::{
     build_rust_and_copy_with_options, build_rust_to_executable_with_options, RustBuildOptions,
@@ -11,6 +12,11 @@ use trust_parser::validate_imports;
 
 use crate::graph_loader::{ensure_entry_nonempty, load_module_graph};
 use crate::incremental::{compile_graph_incremental, resolve_incremental_cache_root};
+
+const INIT_MAIN_TS: &str = include_str!("../../../examples/main.ts");
+const INIT_MATH_TS: &str = include_str!("../../../examples/math.ts");
+const INIT_STRUTIL_TS: &str = include_str!("../../../examples/strutil.ts");
+const INIT_TRUST_TOML: &str = include_str!("../../../examples/Trust.toml");
 
 fn default_exec_output_path(entry: &Path) -> Result<PathBuf, String> {
     let stem = entry.file_stem().filter(|s| !s.is_empty()).ok_or_else(|| {
@@ -31,6 +37,139 @@ fn default_exec_output_path(entry: &Path) -> Result<PathBuf, String> {
     }
 }
 
+pub(crate) fn cmd_init(dir: &Path, force: bool) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let files: [(&str, &str); 4] = [
+        ("main.ts", INIT_MAIN_TS),
+        ("math.ts", INIT_MATH_TS),
+        ("strutil.ts", INIT_STRUTIL_TS),
+        ("Trust.toml", INIT_TRUST_TOML),
+    ];
+    for (name, content) in files {
+        let p = dir.join(name);
+        if p.exists() && !force {
+            return Err(format!(
+                "init aborted: `{}` already exists (use --force to overwrite)",
+                p.display()
+            ));
+        }
+        fs::write(&p, content).map_err(|e| e.to_string())?;
+    }
+    eprintln!(
+        "initialized trust project at `{}` (files: main.ts, math.ts, strutil.ts, Trust.toml)",
+        dir.display()
+    );
+    Ok(())
+}
+
+fn parse_add_spec(spec: &str) -> Result<(String, String, String), String> {
+    let parts: Vec<&str> = spec.split("::").filter(|s| !s.is_empty()).collect();
+    if parts.len() < 3 {
+        return Err(format!(
+            "invalid rust path `{spec}`: expected `crate::Type::new_fn`"
+        ));
+    }
+    let crate_name = parts[0].to_string();
+    let ctor = parts
+        .last()
+        .expect("len >= 3")
+        .to_string();
+    let rust_type = parts[..parts.len() - 1].join("::");
+    let type_name = parts[parts.len() - 2].to_string();
+    Ok((crate_name, type_name, format!("{rust_type}::{ctor}")))
+}
+
+pub(crate) fn cmd_add(spec: &str, dir: &Path) -> Result<(), String> {
+    let (crate_name, type_name, rust_ctor) = parse_add_spec(spec)?;
+    let trust_path = dir.join("Trust.toml");
+    let raw = if trust_path.exists() {
+        fs::read_to_string(&trust_path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+    let mut doc: Value = if raw.trim().is_empty() {
+        Value::Table(toml::map::Map::new())
+    } else {
+        toml::from_str(&raw).map_err(|e| format!("parse `{}` failed: {e}", trust_path.display()))?
+    };
+
+    let table = doc
+        .as_table_mut()
+        .ok_or_else(|| format!("`{}` must be a TOML table", trust_path.display()))?;
+    let deps_val = table
+        .entry("dependencies".to_string())
+        .or_insert_with(|| Value::Table(toml::map::Map::new()));
+    let deps = deps_val
+        .as_table_mut()
+        .ok_or_else(|| "`dependencies` must be a table".to_string())?;
+    deps.entry(crate_name.clone())
+        .or_insert_with(|| Value::String("*".to_string()));
+
+    let rb_val = table
+        .entry("rust_binding".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let rb = rb_val
+        .as_array_mut()
+        .ok_or_else(|| "`rust_binding` must be an array".to_string())?;
+
+    let mut found = false;
+    for item in rb.iter_mut() {
+        let Some(m) = item.as_table_mut() else {
+            continue;
+        };
+        let same_crate = m
+            .get("crate")
+            .and_then(Value::as_str)
+            .map(|s| s == crate_name)
+            .unwrap_or(false);
+        let same_type = m
+            .get("type_name")
+            .and_then(Value::as_str)
+            .map(|s| s == type_name)
+            .unwrap_or(false);
+        if same_crate && same_type {
+            m.insert(
+                "rust_type".to_string(),
+                Value::String(format!("{crate_name}::{type_name}")),
+            );
+            let mut new_tbl = toml::map::Map::new();
+            new_tbl.insert("rust".to_string(), Value::String(rust_ctor.clone()));
+            new_tbl.insert("unwrap".to_string(), Value::Boolean(true));
+            m.insert("new".to_string(), Value::Table(new_tbl));
+            if !m.contains_key("method") {
+                m.insert("method".to_string(), Value::Array(Vec::new()));
+            }
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        let mut m = toml::map::Map::new();
+        m.insert("crate".to_string(), Value::String(crate_name.clone()));
+        m.insert("type_name".to_string(), Value::String(type_name.clone()));
+        m.insert(
+            "rust_type".to_string(),
+            Value::String(format!("{crate_name}::{type_name}")),
+        );
+        let mut new_tbl = toml::map::Map::new();
+        new_tbl.insert("rust".to_string(), Value::String(rust_ctor));
+        new_tbl.insert("unwrap".to_string(), Value::Boolean(true));
+        m.insert("new".to_string(), Value::Table(new_tbl));
+        m.insert("method".to_string(), Value::Array(Vec::new()));
+        rb.push(Value::Table(m));
+    }
+
+    let out = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    fs::write(&trust_path, out).map_err(|e| e.to_string())?;
+    eprintln!(
+        "updated `{}` with dependency `{}` and rust_binding `{}`",
+        trust_path.display(),
+        crate_name,
+        type_name
+    );
+    Ok(())
+}
+
 #[derive(Debug)]
 pub(crate) enum RunOutcome {
     Ok,
@@ -46,7 +185,7 @@ pub(crate) fn cmd_compile(
     exec: bool,
     span_comments: bool,
     ts_source_comments: bool,
-    link_ts2rs_rt: bool,
+    link_trust_rt: bool,
     release: bool,
     emit_ir: bool,
     incremental: Option<&PathBuf>,
@@ -101,7 +240,7 @@ pub(crate) fn cmd_compile(
 
     if exec {
         let mut opts = RustBuildOptions {
-            link_ts2rs_rt,
+            link_trust_rt,
             release,
             ..Default::default()
         };
@@ -121,7 +260,7 @@ pub(crate) fn cmd_compile(
 pub(crate) fn cmd_run(
     inputs: &[PathBuf],
     project: Option<&Path>,
-    link_ts2rs_rt: bool,
+    link_trust_rt: bool,
     release: bool,
     incremental: Option<&PathBuf>,
     quiet: bool,
@@ -163,7 +302,7 @@ pub(crate) fn cmd_run(
     }
 
     let mut opts = RustBuildOptions {
-        link_ts2rs_rt,
+        link_trust_rt,
         release,
         ..Default::default()
     };
@@ -253,5 +392,34 @@ mod tests {
         let st = Command::new("false").status().expect("false");
         assert!(!st.success());
         assert_eq!(exit_code_for_failed_child(&st), 1);
+    }
+
+    #[test]
+    fn init_writes_template_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        cmd_init(dir.path(), false).expect("init");
+        for name in ["main.ts", "math.ts", "strutil.ts", "Trust.toml"] {
+            assert!(dir.path().join(name).is_file(), "missing {name}");
+        }
+    }
+
+    #[test]
+    fn init_refuses_overwrite_without_force() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        cmd_init(dir.path(), false).expect("init");
+        let err = cmd_init(dir.path(), false).expect_err("should fail");
+        assert!(err.contains("use --force"), "{err}");
+    }
+
+    #[test]
+    fn add_updates_trust_toml() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        cmd_add("url::Url::parse", dir.path()).expect("add");
+        let body = fs::read_to_string(dir.path().join("Trust.toml")).expect("read");
+        assert!(body.contains("[dependencies]"), "{body}");
+        assert!(body.contains("url = \"*\""), "{body}");
+        assert!(body.contains("crate = \"url\""), "{body}");
+        assert!(body.contains("type_name = \"Url\""), "{body}");
+        assert!(body.contains("rust = \"url::Url::parse\""), "{body}");
     }
 }

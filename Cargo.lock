@@ -1233,6 +1233,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "toml",
  "trust-driver",
  "trust-hir",
  "trust-lower",

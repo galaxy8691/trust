@@ -93,7 +93,7 @@ function main(): number {
         assert!(rs.contains("println!(\"{}\", ts_main())"));
     }
 
-    /// §4.2：`let mut`、块、`Assign` 与 `ts2rs-hir` codegen `emit_stmt` 对齐。
+    /// §4.2：`let mut`、块、`Assign` 与 `trust-hir` codegen `emit_stmt` 对齐。
     #[test]
     fn codegen_42_let_mut_block_and_assign() {
         let src = r#"

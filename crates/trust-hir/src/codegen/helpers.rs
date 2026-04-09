@@ -65,7 +65,7 @@ pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
         TsType::HttpResponse => "reqwest::Response",
         TsType::ReadableStream => "()",
         TsType::ReadableStreamDefaultReader => "()",
-        TsType::StreamReadResult => "__Ts2rsStreamReadResult",
+        TsType::StreamReadResult => "__TrustStreamReadResult",
         TsType::Uint8Array => "Vec<u8>",
         TsType::ObjectNum(_) => "serde_json::Value",
         TsType::TypeParam(_) => unreachable!("type params must be monomorphized before codegen"),

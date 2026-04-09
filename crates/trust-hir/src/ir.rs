@@ -1,4 +1,4 @@
-//! ts2rs 高层 IR（与 swc AST 解耦，便于语义检查与代码生成）。
+//! trust 高层 IR（与 swc AST 解耦，便于语义检查与代码生成）。
 //!
 //! **Span**：`IRExpr` / `IRStmt` / `IRFunction` 上的 [`Span`] 来自 swc；诊断与代码生成错误应使用
 //! 所属函数的 [`IRFunction::cm`]、[`IRFunction::source_path`] 与**具体节点**的 `span`（见 [`crate::error::diag`]）。

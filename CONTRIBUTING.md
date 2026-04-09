@@ -30,9 +30,9 @@ cargo clippy --workspace --all-targets
 ## Module layout convention
 
 - Prefer splitting large files by stage-oriented modules:
-  - `ts2rs-hir`: `build/*`, `sem/*`, `codegen/*` helpers
-  - `ts2rs-cli`: `cli_args.rs`, `commands.rs`, `graph_loader.rs`
-  - `ts2rs-driver`: `pipeline.rs`, `cargo_runner.rs`, `crate_writer.rs`
+  - `trust-hir`: `build/*`, `sem/*`, `codegen/*` helpers
+  - `trust-cli`: `cli_args.rs`, `commands.rs`, `graph_loader.rs`
+  - `trust-driver`: `pipeline.rs`, `cargo_runner.rs`, `crate_writer.rs`
 - Keep behavior-preserving move-only refactors separate from semantic changes when possible.
 
 ## Rust toolchain

@@ -27,7 +27,7 @@ fn assert_run_stdout(name: &str, expected: &str) {
     let out = Command::new(exe)
         .args(["run", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -38,12 +38,12 @@ fn assert_run_stdout(name: &str, expected: &str) {
 
 #[test]
 fn run_prints_main_result() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("sample.ts");
     let out = Command::new(exe)
         .args(["run", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
 
     assert!(
         out.status.success(),
@@ -55,7 +55,7 @@ fn run_prints_main_result() {
 
 #[test]
 fn compile_exec_writes_binary_and_runs() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("sample.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let bin = dir
@@ -70,7 +70,7 @@ fn compile_exec_writes_binary_and_runs() {
             bin.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile --exec");
+        .expect("spawn trust compile --exec");
     assert!(status.success(), "compile --exec should succeed");
     let out = Command::new(&bin).output().expect("spawn compiled binary");
     assert!(
@@ -83,7 +83,7 @@ fn compile_exec_writes_binary_and_runs() {
 
 #[test]
 fn compile_exec_without_o_defaults_to_entry_stem_in_cwd() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("sample.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let bin = dir.path().join(if cfg!(windows) {
@@ -95,7 +95,7 @@ fn compile_exec_without_o_defaults_to_entry_stem_in_cwd() {
         .current_dir(dir.path())
         .args(["compile", "--exec", ts.to_str().unwrap()])
         .status()
-        .expect("spawn ts2rs compile --exec without -o");
+        .expect("spawn trust compile --exec without -o");
     assert!(status.success(), "compile --exec without -o should succeed");
     let out = Command::new(&bin)
         .output()
@@ -110,7 +110,7 @@ fn compile_exec_without_o_defaults_to_entry_stem_in_cwd() {
 
 #[test]
 fn compile_writes_rust() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("sample.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -122,7 +122,7 @@ fn compile_writes_rust() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("fn ts_main"));
@@ -131,7 +131,7 @@ fn compile_writes_rust() {
 
 #[test]
 fn compile_ts_source_comments_writes_ts_text() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("ts_source_comment_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -144,22 +144,22 @@ fn compile_ts_source_comments_writes_ts_text() {
             "--ts-source-comments",
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
-        body.contains("// __TS2RS_SOURCE_COMMENT_TOP__"),
+        body.contains("// __TRUST_SOURCE_COMMENT_TOP__"),
         "expected TS top comment in Rust: {body}"
     );
     assert!(
-        body.contains("// __TS2RS_SOURCE_COMMENT_BODY__"),
+        body.contains("// __TRUST_SOURCE_COMMENT_BODY__"),
         "expected TS body comment in Rust: {body}"
     );
 }
 
 #[test]
 fn compile_span_comments_writes_ts_anchors() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("sample.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -172,7 +172,7 @@ fn compile_span_comments_writes_ts_anchors() {
             "--span-comments",
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
@@ -183,7 +183,7 @@ fn compile_span_comments_writes_ts_anchors() {
 
 #[test]
 fn compile_console_stderr_writes_eprintln() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("console_stderr.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -195,7 +195,7 @@ fn compile_console_stderr_writes_eprintln() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
@@ -206,12 +206,12 @@ fn compile_console_stderr_writes_eprintln() {
 
 #[test]
 fn run_let_if_prints_ten() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("let_if.ts");
     let out = Command::new(exe)
         .args(["run", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "{}",
@@ -222,7 +222,7 @@ fn run_let_if_prints_ten() {
 
 #[test]
 fn compile_void_main_has_no_println_value() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("void_log.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -234,7 +234,7 @@ fn compile_void_main_has_no_println_value() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("fn ts_main() -> ()"));
@@ -244,7 +244,7 @@ fn compile_void_main_has_no_println_value() {
 
 #[test]
 fn compile_async_mvp_writes_tokio_and_await() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("async_mvp_compile_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -256,18 +256,18 @@ fn compile_async_mvp_writes_tokio_and_await() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("#[tokio::main]"), "{body}");
     assert!(body.contains("async fn ts_main"), "{body}");
     assert!(body.contains(".await"), "{body}");
-    assert!(body.contains("__ts2rs_fetch_text"), "{body}");
+    assert!(body.contains("__trust_fetch_text"), "{body}");
 }
 
 #[test]
 fn compile_async_control_flow_if_while_await_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("async_control_flow_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -279,7 +279,7 @@ fn compile_async_control_flow_if_while_await_ok() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("#[tokio::main]"), "{body}");
@@ -287,12 +287,12 @@ fn compile_async_control_flow_if_while_await_ok() {
     assert!(body.contains(".await"), "{body}");
     assert!(body.contains("if ("), "{body}");
     assert!(body.contains("while "), "{body}");
-    assert!(body.contains("__ts2rs_fetch_text"), "{body}");
+    assert!(body.contains("__trust_fetch_text"), "{body}");
 }
 
 #[test]
 fn compile_promise_all_fetch_alias_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("promise_all_fetch_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -304,11 +304,11 @@ fn compile_promise_all_fetch_alias_ok() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("vec!["), "{body}");
-    assert!(body.contains("__ts2rs_fetch("), "{body}");
+    assert!(body.contains("__trust_fetch("), "{body}");
     assert!(body.contains(".await"), "{body}");
 }
 
@@ -319,7 +319,7 @@ fn compile_promise_then_fails() {
 
 #[test]
 fn compile_fetch_response_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("fetch_response_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -331,17 +331,17 @@ fn compile_fetch_response_ok() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("__ts2rs_fetch("), "{body}");
+    assert!(body.contains("__trust_fetch("), "{body}");
     assert!(body.contains(".status()"), "{body}");
     assert!(body.contains(".text()"), "{body}");
 }
 
 #[test]
 fn compile_fetch_stream_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("fetch_stream_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -353,17 +353,17 @@ fn compile_fetch_stream_ok() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("bytes_stream()"), "{body}");
-    assert!(body.contains("__Ts2rsStreamReadResult"), "{body}");
+    assert!(body.contains("__TrustStreamReadResult"), "{body}");
     assert!(body.contains("futures_util"), "{body}");
 }
 
 #[test]
 fn compile_fetch_post_init_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("fetch_post_init_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -375,10 +375,10 @@ fn compile_fetch_post_init_ok() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("__Ts2rsFetchInit"), "{body}");
+    assert!(body.contains("__TrustFetchInit"), "{body}");
     assert!(body.contains("\"POST\""), "{body}");
 }
 
@@ -401,7 +401,7 @@ fn compile_param_let_duplicate_fails() {
 
 #[test]
 fn compile_void_log_in_branch_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("void_log_in_branch.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -413,7 +413,7 @@ fn compile_void_log_in_branch_ok() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("println!"));
@@ -508,7 +508,7 @@ fn compile_generic_function_infer_conflict_fails() {
 
 #[test]
 fn compile_generic_function_multi_infer_fail_reports_multiple_errors() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("generic_function_multi_infer_fail.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -520,7 +520,7 @@ fn compile_generic_function_multi_infer_fail_reports_multiple_errors() {
             rs_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     let n = stderr
@@ -539,7 +539,7 @@ fn run_generic_method_call_infer_ok_prints_three() {
 
 #[test]
 fn compile_generic_method_call_infer_ok_writes_rust() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("generic_method_call_infer_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -551,7 +551,7 @@ fn compile_generic_method_call_infer_ok_writes_rust() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
@@ -587,7 +587,7 @@ fn compile_type_alias_dup_fails() {
 
 #[test]
 fn compile_multi_fn_sem_errors_reports_two_diagnostic_lines() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("multi_diag_two_fn_return_fail.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -599,7 +599,7 @@ fn compile_multi_fn_sem_errors_reports_two_diagnostic_lines() {
             rs_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(
         !out.status.success(),
         "expected compile to fail for multi_diag_two_fn_return_fail.ts"
@@ -625,7 +625,7 @@ fn run_export_main_prints_one() {
 
 #[test]
 fn compile_export_main_writes_ts_main() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("export_main.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -637,7 +637,7 @@ fn compile_export_main_writes_ts_main() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("fn ts_main"));
@@ -651,7 +651,7 @@ fn run_while_early_prints_three() {
 
 #[test]
 fn compile_while_early_writes_loop() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("while_early.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -663,7 +663,7 @@ fn compile_while_early_writes_loop() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("while "));
@@ -681,7 +681,7 @@ fn run_string_concat_prints_99() {
 
 #[test]
 fn compile_string_concat_uses_strings() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("string_concat.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -693,7 +693,7 @@ fn compile_string_concat_uses_strings() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("to_string()") || body.contains("format!"));
@@ -706,7 +706,7 @@ fn run_ops_prints_six() {
 
 #[test]
 fn compile_import_fails_with_message() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("import_fail.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -718,7 +718,7 @@ fn compile_import_fails_with_message() {
             rs_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(
         !out.status.success(),
         "expected compile to fail:\nstdout={}\nstderr={}",
@@ -734,12 +734,12 @@ fn compile_import_fails_with_message() {
 
 #[test]
 fn run_import_fails() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("import_fail.ts");
     let out = Command::new(exe)
         .args(["run", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -749,7 +749,7 @@ fn run_import_fails() {
 }
 
 fn assert_compile_fails_stderr(fixture_name: &str, needle: &str) {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture(fixture_name);
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -761,7 +761,7 @@ fn assert_compile_fails_stderr(fixture_name: &str, needle: &str) {
             rs_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(
         !out.status.success(),
         "expected compile to fail for {fixture_name}"
@@ -795,7 +795,7 @@ fn run_export_default_main_ref_prints_7() {
 
 #[test]
 fn compile_export_default_async_main_writes_tokio() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("export_default_async_main_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -807,7 +807,7 @@ fn compile_export_default_async_main_writes_tokio() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("#[tokio::main]"), "{body}");
@@ -947,12 +947,12 @@ fn compile_switch_fallthrough_fails() {
 
 #[test]
 fn check_sample_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("sample.ts");
     let out = Command::new(exe)
         .args(["check", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs check");
+        .expect("spawn trust check");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -962,12 +962,12 @@ fn check_sample_ok() {
 
 #[test]
 fn check_nullish_fn_union_ok() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("nullish_fn_ok.ts");
     let out = Command::new(exe)
         .args(["check", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs check nullish_fn_ok");
+        .expect("spawn trust check nullish_fn_ok");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -977,12 +977,12 @@ fn check_nullish_fn_union_ok() {
 
 #[test]
 fn check_switch_fail_stderr() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("switch_fail.ts");
     let out = Command::new(exe)
         .args(["check", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs check");
+        .expect("spawn trust check");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -993,12 +993,12 @@ fn check_switch_fail_stderr() {
 
 #[test]
 fn regression_switch_fallthrough_check_fails() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = regression_case("switch_fallthrough_regression.ts");
     let out = Command::new(exe)
         .args(["check", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs check regression");
+        .expect("spawn trust check regression");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -1029,7 +1029,7 @@ fn compile_object_literal_non_number_field_fails() {
 
 #[test]
 fn compile_emit_ir_stderr_contains_ir_module() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("sample.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -1042,7 +1042,7 @@ fn compile_emit_ir_stderr_contains_ir_module() {
             "--emit-ir",
         ])
         .output()
-        .expect("spawn ts2rs compile --emit-ir");
+        .expect("spawn trust compile --emit-ir");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1062,7 +1062,7 @@ fn run_switch_ok_prints_seven() {
 
 #[test]
 fn compile_switch_ok_writes_rust() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("switch_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -1074,7 +1074,7 @@ fn compile_switch_ok_writes_rust() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
@@ -1137,7 +1137,7 @@ fn run_stdlib_hir_ok_prints_expected() {
 
 #[test]
 fn compile_stdlib_hir_ok_writes_utf16_and_json_helpers() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("stdlib_hir_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -1149,12 +1149,12 @@ fn compile_stdlib_hir_ok_writes_utf16_and_json_helpers() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("__ts2rs_utf16_slice"));
-    assert!(body.contains("__ts2rs_utf16_index_of"));
-    assert!(body.contains("__ts2rs_json_escape_string"));
+    assert!(body.contains("__trust_utf16_slice"));
+    assert!(body.contains("__trust_utf16_index_of"));
+    assert!(body.contains("__trust_json_escape_string"));
 }
 
 #[test]
@@ -1164,12 +1164,12 @@ fn run_json_uri_trust_ok_prints_expected() {
 
 #[test]
 fn run_trust_regex_ok_prints_one() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture_subpath("trust_regex/main.ts");
     let out = Command::new(&exe)
         .args(["run", ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1180,7 +1180,7 @@ fn run_trust_regex_ok_prints_one() {
 
 #[test]
 fn compile_trust_regex_ok_emits_regex_crate() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture_subpath("trust_regex/main.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -1192,7 +1192,7 @@ fn compile_trust_regex_ok_emits_regex_crate() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
@@ -1207,7 +1207,7 @@ fn compile_trust_regex_ok_emits_regex_crate() {
 
 #[test]
 fn compile_json_uri_trust_ok_emits_serde_json_and_urlencoding() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("json_uri_trust_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -1219,7 +1219,7 @@ fn compile_json_uri_trust_ok_emits_serde_json_and_urlencoding() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
@@ -1265,7 +1265,7 @@ fn run_object_ok_prints_three() {
 // --- §3.4 不可达警告、明确赋值、提前 return ---
 
 fn assert_compile_ok_stderr_contains(name: &str, needle: &str) {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture(name);
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -1277,7 +1277,7 @@ fn assert_compile_ok_stderr_contains(name: &str, needle: &str) {
             rs_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1332,13 +1332,13 @@ fn compile_definite_assign_fail_errors() {
 
 #[test]
 fn run_multi_entry_extra_roots_prints_main() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let main_ts = fixture("multi_entry_main.ts");
     let side_ts = fixture("multi_entry_side.ts");
     let out = Command::new(exe)
         .args(["run", main_ts.to_str().unwrap(), side_ts.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1349,12 +1349,12 @@ fn run_multi_entry_extra_roots_prints_main() {
 
 #[test]
 fn run_project_tsconfig_prints_main() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let tsconfig = fixture("multi_entry_tsconfig.json");
     let out = Command::new(exe)
         .args(["run", "--project", tsconfig.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1380,11 +1380,11 @@ fn run_reexport_export_star_ok() {
         "import { add } from \"./barrel.ts\";\nexport function main(): number { return add(1, 2); }\n",
     )
     .unwrap();
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let out = Command::new(exe)
         .args(["run", app.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1408,11 +1408,11 @@ fn run_project_tsconfig_extends_include_ok() {
         r#"{"extends": "./base.json", "files": ["main.ts", "side.ts"]}"#,
     )
     .unwrap();
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let out = Command::new(exe)
         .args(["run", "--project", cfg.to_str().unwrap()])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1438,7 +1438,7 @@ fn run_optional_call_ok_prints_five() {
 
 #[test]
 fn compile_method_call_ok_desugars_to_global_fn() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("method_call_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
@@ -1450,7 +1450,7 @@ fn compile_method_call_ok_desugars_to_global_fn() {
             rs_path.to_str().unwrap(),
         ])
         .status()
-        .expect("spawn ts2rs compile");
+        .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
@@ -1501,19 +1501,19 @@ fn compile_class_this_scope_fails() {
 }
 
 #[test]
-fn run_with_link_ts2rs_rt_prints_main() {
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+fn run_with_link_trust_rt_prints_main() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let main_ts = fixture("multi_entry_main.ts");
     let side_ts = fixture("multi_entry_side.ts");
     let out = Command::new(exe)
         .args([
             "run",
-            "--link-ts2rs-rt",
+            "--link-trust-rt",
             main_ts.to_str().unwrap(),
             side_ts.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs run");
+        .expect("spawn trust run");
     assert!(
         out.status.success(),
         "stderr:\n{}",
@@ -1524,11 +1524,11 @@ fn run_with_link_ts2rs_rt_prints_main() {
 
 fn parse_fragment_rebuilds(stderr: &str) -> u32 {
     for line in stderr.lines() {
-        if let Some(rest) = line.strip_prefix("ts2rs_fragment_rebuilds=") {
+        if let Some(rest) = line.strip_prefix("trust_fragment_rebuilds=") {
             return rest.trim().parse().expect("parse fragment rebuild count");
         }
     }
-    panic!("missing ts2rs_fragment_rebuilds in stderr:\n{stderr}");
+    panic!("missing trust_fragment_rebuilds in stderr:\n{stderr}");
 }
 
 #[test]
@@ -1548,9 +1548,9 @@ fn compile_incremental_rebuilds_only_changed_module() {
     .unwrap();
     let cache = dir.path().join("incr-cache");
     let out_rs = dir.path().join("out.rs");
-    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let o1 = Command::new(&exe)
-        .env("TS2RS_TEST_FRAGMENT_STATS", "1")
+        .env("TRUST_TEST_FRAGMENT_STATS", "1")
         .args([
             "compile",
             app.to_str().unwrap(),
@@ -1560,7 +1560,7 @@ fn compile_incremental_rebuilds_only_changed_module() {
             cache.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs compile incremental");
+        .expect("spawn trust compile incremental");
     assert!(
         o1.status.success(),
         "stderr:\n{}",
@@ -1579,7 +1579,7 @@ fn compile_incremental_rebuilds_only_changed_module() {
     )
     .unwrap();
     let o2 = Command::new(&exe)
-        .env("TS2RS_TEST_FRAGMENT_STATS", "1")
+        .env("TRUST_TEST_FRAGMENT_STATS", "1")
         .args([
             "compile",
             app.to_str().unwrap(),
@@ -1589,7 +1589,7 @@ fn compile_incremental_rebuilds_only_changed_module() {
             cache.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn ts2rs compile incremental 2");
+        .expect("spawn trust compile incremental 2");
     assert!(
         o2.status.success(),
         "stderr:\n{}",

@@ -7,7 +7,7 @@ mod tsconfig_resolve;
 use clap::Parser;
 
 use cli_args::{preapply_color_from_argv, Cli, Commands};
-use commands::{cmd_check, cmd_compile, cmd_run, RunOutcome};
+use commands::{cmd_add, cmd_check, cmd_compile, cmd_init, cmd_run, RunOutcome};
 
 fn main() {
     preapply_color_from_argv();
@@ -36,7 +36,7 @@ fn run(cli: Cli) -> RunOutcome {
                 c.exec,
                 c.span_comments,
                 c.ts_source_comments,
-                c.link_ts2rs_rt,
+                c.link_trust_rt,
                 release,
                 c.emit_ir,
                 c.incremental.as_ref(),
@@ -51,7 +51,7 @@ fn run(cli: Cli) -> RunOutcome {
             cmd_run(
                 &r.graph.inputs,
                 r.graph.project.as_deref(),
-                r.link_ts2rs_rt,
+                r.link_trust_rt,
                 release,
                 r.incremental.as_ref(),
                 quiet,
@@ -63,6 +63,14 @@ fn run(cli: Cli) -> RunOutcome {
             c.emit_ir,
             quiet,
         ) {
+            Ok(()) => RunOutcome::Ok,
+            Err(e) => RunOutcome::TrustErr(e),
+        },
+        Commands::Init(i) => match cmd_init(&i.dir, i.force) {
+            Ok(()) => RunOutcome::Ok,
+            Err(e) => RunOutcome::TrustErr(e),
+        },
+        Commands::Add(a) => match cmd_add(&a.rust_path, &a.dir) {
             Ok(()) => RunOutcome::Ok,
             Err(e) => RunOutcome::TrustErr(e),
         },
