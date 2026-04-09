@@ -3,7 +3,30 @@ use std::path::Path;
 use swc_common::Span;
 
 use crate::error::{diag, CompileError};
-use crate::ir::{SendSourceMap, TsType};
+use crate::ir::{ObjectProp, SendSourceMap, TsType};
+
+/// 宽度子类型：`got` 的每个字段须出现在 `expected` 中且类型可赋；**不**要求 `expected` 的必填字段在 `got` 中均出现（与完整 TS 赋值检查不同，见 README）。
+fn object_shape_assignable(expected: &[ObjectProp], got: &[ObjectProp]) -> bool {
+    for g in got {
+        let Some(e) = expected.iter().find(|x| x.name == g.name) else {
+            return false;
+        };
+        if !type_assignable(&e.ty, &g.ty) {
+            return false;
+        }
+    }
+    for e in expected {
+        if !e.optional {
+            continue;
+        }
+        if let Some(g) = got.iter().find(|x| x.name == e.name) {
+            if !type_assignable(&e.ty, &g.ty) {
+                return false;
+            }
+        }
+    }
+    true
+}
 
 pub(super) fn is_numberish(t: &TsType) -> bool {
     match t {
@@ -77,8 +100,8 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
     if let (TsType::ClassInstance(a), TsType::ClassInstance(b)) = (expected, got) {
         return a == b;
     }
-    if let (TsType::ObjectNum(exp), TsType::ObjectNum(got_keys)) = (expected, got) {
-        return got_keys.iter().all(|k| exp.iter().any(|e| e == k));
+    if let (TsType::ObjectNum(exp), TsType::ObjectNum(got)) = (expected, got) {
+        return object_shape_assignable(exp, got);
     }
     matches!(
         (expected, got),

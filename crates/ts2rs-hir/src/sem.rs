@@ -77,6 +77,28 @@ fn paths_equal_file(a: &str, b: &str) -> bool {
     helpers::paths_equal_file(a, b)
 }
 
+fn object_prop_by_name<'a>(props: &'a [ObjectProp], name: &str) -> Option<&'a ObjectProp> {
+    props.iter().find(|p| p.name == name)
+}
+
+/// [`TsType::ObjectNum`] 上 `prop` 字段的类型，并写入 [`ObjectMemberAccessKind`]。
+fn object_num_member_ty(
+    ot: &TsType,
+    prop: &str,
+    object_member_access: &mut Option<ObjectMemberAccessKind>,
+) -> Option<TsType> {
+    let TsType::ObjectNum(props) = ot else {
+        return None;
+    };
+    let p = object_prop_by_name(props, prop)?;
+    *object_member_access = Some(if matches!(&*p.ty, TsType::Number) {
+        ObjectMemberAccessKind::NumberLeaf
+    } else {
+        ObjectMemberAccessKind::NestedObject
+    });
+    Some((*p.ty).clone())
+}
+
 fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
     match t {
         TsType::TypeParam(n) => subst.get(n).cloned().unwrap_or_else(|| t.clone()),
@@ -86,6 +108,16 @@ fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
             ret: Box::new(subst_type_local(ret, subst)),
         },
         TsType::Promise(inner) => TsType::Promise(Box::new(subst_type_local(inner, subst))),
+        TsType::ObjectNum(props) => TsType::ObjectNum(
+            props
+                .iter()
+                .map(|p| ObjectProp {
+                    name: p.name.clone(),
+                    optional: p.optional,
+                    ty: Box::new(subst_type_local(&p.ty, subst)),
+                })
+                .collect(),
+        ),
         _ => t.clone(),
     }
 }
@@ -1953,6 +1985,7 @@ fn infer_expr_mut(
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         } => {
             let ot = infer_expr_mut(obj, stack, globals, cm, path)?;
             if prop == "length" {
@@ -1968,8 +2001,8 @@ fn infer_expr_mut(
                     *length_dispatch = Some(MemberLengthDispatch::Uint8ArrayLen);
                     return Ok(TsType::Number);
                 }
-                if let TsType::ObjectNum(keys) = &ot {
-                    if keys.iter().any(|k| k == prop) {
+                if let Some(t) = object_num_member_ty(&ot, prop, object_member_access) {
+                    if matches!(t, TsType::Number) {
                         *length_dispatch = None;
                         return Ok(TsType::Number);
                     }
@@ -1996,10 +2029,8 @@ fn infer_expr_mut(
                     *stream_read_member = Some(crate::ir::StreamReadResultMember::Value);
                     return Ok(TsType::Uint8Array);
                 }
-            } else if let TsType::ObjectNum(keys) = &ot {
-                if keys.iter().any(|k| k == prop) {
-                    return Ok(TsType::Number);
-                }
+            } else if let Some(t) = object_num_member_ty(&ot, prop, object_member_access) {
+                return Ok(t);
             }
             Err(diag(
                 cm,
@@ -2015,6 +2046,7 @@ fn infer_expr_mut(
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         } => {
             match &**obj {
                 IRExpr::Null(_) | IRExpr::Undefined(_) => return Ok(TsType::Undefined),
@@ -2037,8 +2069,8 @@ fn infer_expr_mut(
                     *length_dispatch = Some(MemberLengthDispatch::Uint8ArrayLen);
                     return Ok(TsType::Number);
                 }
-                if let TsType::ObjectNum(keys) = &ot {
-                    if keys.iter().any(|k| k == prop) {
+                if let Some(t) = object_num_member_ty(&ot, prop, object_member_access) {
+                    if matches!(t, TsType::Number) {
                         *length_dispatch = None;
                         return Ok(TsType::Number);
                     }
@@ -2065,10 +2097,8 @@ fn infer_expr_mut(
                     *stream_read_member = Some(crate::ir::StreamReadResultMember::Value);
                     return Ok(TsType::Uint8Array);
                 }
-            } else if let TsType::ObjectNum(keys) = &ot {
-                if keys.iter().any(|k| k == prop) {
-                    return Ok(TsType::Number);
-                }
+            } else if let Some(t) = object_num_member_ty(&ot, prop, object_member_access) {
+                return Ok(t);
             }
             Err(diag(cm, path, *span, "unsupported optional member access"))
         }
@@ -2158,12 +2188,16 @@ fn infer_expr_mut(
         } => match kind {
             JsonBuiltinKind::Stringify => {
                 let t = infer_expr_mut(&mut args[0], stack, globals, cm, path)?;
-                if !is_stringish(&t) && !is_numberish(&t) && !is_booleanish(&t) {
+                if !is_stringish(&t)
+                    && !is_numberish(&t)
+                    && !is_booleanish(&t)
+                    && !matches!(t, TsType::ObjectNum(_))
+                {
                     return Err(diag(
                         cm,
                         path,
                         *span,
-                        "`JSON.stringify` supports only `string`, `number`, or `boolean`",
+                        "`JSON.stringify` supports only `string`, `number`, `boolean`, or object shapes",
                     ));
                 }
                 *stringify_inferred_ty = Some(t.clone());
@@ -2344,31 +2378,35 @@ fn infer_expr_mut(
             }
         }
         IRExpr::ObjectLit { fields, span } => {
-            let mut keys = Vec::with_capacity(fields.len());
+            let mut props: Vec<ObjectProp> = Vec::with_capacity(fields.len());
             for (k, v) in fields {
                 let t = infer_expr_mut(v, stack, globals, cm, path)?;
-                if !is_numberish(&t) {
+                if !is_numberish(&t) && !matches!(t, TsType::ObjectNum(_)) {
                     return Err(diag(
                         cm,
                         path,
                         *span,
-                        "object literal currently supports only `number` field values",
+                        "object literal field values must be `number` or nested object literals",
                     ));
                 }
-                keys.push(k.clone());
+                props.push(ObjectProp {
+                    name: k.clone(),
+                    optional: false,
+                    ty: Box::new(t),
+                });
             }
-            keys.sort();
-            for w in keys.windows(2) {
-                if w[0] == w[1] {
+            props.sort_by(|a, b| a.name.cmp(&b.name));
+            for w in props.windows(2) {
+                if w[0].name == w[1].name {
                     return Err(diag(
                         cm,
                         path,
                         *span,
-                        format!("duplicate object field `{}`", w[0]),
+                        format!("duplicate object field `{}`", w[0].name),
                     ));
                 }
             }
-            Ok(TsType::ObjectNum(keys))
+            Ok(TsType::ObjectNum(props))
         }
         IRExpr::ArrowFn {
             params,

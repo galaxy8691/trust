@@ -778,6 +778,50 @@ fn compile_export_default_fails() {
 }
 
 #[test]
+fn run_export_default_function_main_prints_42() {
+    assert_run_stdout("export_default_function_main_ok.ts", "42\n");
+}
+
+#[test]
+fn run_export_default_main_ref_prints_7() {
+    assert_run_stdout("export_default_main_ref_ok.ts", "7\n");
+}
+
+#[test]
+fn compile_export_default_async_main_writes_tokio() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("export_default_async_main_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn ts2rs compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("#[tokio::main]"), "{body}");
+    assert!(body.contains("async fn ts_main"), "{body}");
+}
+
+#[test]
+fn run_nested_object_ok_prints_three() {
+    assert_run_stdout("nested_object_ok.ts", "3\n");
+}
+
+#[test]
+fn compile_import_default_wrong_binding_fails() {
+    assert_compile_fails_stderr(
+        "import_default_wrong_binding_fail.ts",
+        "binding name `main`",
+    );
+}
+
+#[test]
 fn compile_export_from_fails() {
     assert_compile_fails_stderr("export_from_fail.ts", "relative");
 }
@@ -974,7 +1018,7 @@ fn compile_nullish_operands_mismatch_fails() {
 
 #[test]
 fn compile_object_literal_non_number_field_fails() {
-    assert_compile_fails_stderr("object_fail.ts", "object literal currently supports only");
+    assert_compile_fails_stderr("object_fail.ts", "object literal field values must be");
 }
 
 #[test]

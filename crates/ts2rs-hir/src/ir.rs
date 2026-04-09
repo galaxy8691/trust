@@ -35,6 +35,15 @@ impl AsRef<SourceMap> for SendSourceMap {
     }
 }
 
+/// 对象类型中的单个属性（`interface` / 对象字面量类型）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectProp {
+    pub name: String,
+    pub optional: bool,
+    /// 仅支持 `number` 或嵌套的 [`TsType::ObjectNum`]。
+    pub ty: Box<TsType>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TsType {
     Number,
@@ -66,8 +75,8 @@ pub enum TsType {
     StreamReadResult,
     /// 流式字节块（`Vec<u8>`）
     Uint8Array,
-    /// 受限对象：`{ k: number, ... }`（字段名排序、唯一）
-    ObjectNum(Vec<String>),
+    /// 受限对象形状：`{ k: number, n?: number, inner: { x: number } }`（字段名排序、唯一；与完整 TS 结构子类型不等价）。
+    ObjectNum(Vec<ObjectProp>),
     /// 联合类型 `A | B`（成员已规范化：扁平化、去重、按 [`cmp_ts_type`] 排序）。
     Union(Vec<TsType>),
     /// 类型参数（泛型）
@@ -83,6 +92,43 @@ pub enum TsType {
     Promise(Box<TsType>),
 }
 
+fn cmp_object_props(a: &[ObjectProp], b: &[ObjectProp]) -> Ordering {
+    use Ordering::*;
+    let c = a.len().cmp(&b.len());
+    if c != Equal {
+        return c;
+    }
+    for (x, y) in a.iter().zip(b.iter()) {
+        let c = x.name.cmp(&y.name);
+        if c != Equal {
+            return c;
+        }
+        let c = x.optional.cmp(&y.optional);
+        if c != Equal {
+            return c;
+        }
+        let c = cmp_ts_type(&x.ty, &y.ty);
+        if c != Equal {
+            return c;
+        }
+    }
+    Equal
+}
+
+/// 将扁平 `number` 字段名列表转为 [`TsType::ObjectNum`]（兼容旧 IR）。
+pub fn object_num_from_field_names(mut keys: Vec<String>) -> TsType {
+    keys.sort();
+    TsType::ObjectNum(
+        keys.into_iter()
+            .map(|name| ObjectProp {
+                name,
+                optional: false,
+                ty: Box::new(TsType::Number),
+            })
+            .collect(),
+    )
+}
+
 /// 稳定全序，用于联合类型规范化与 `B | A` 与 `A | B` 相等。
 pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
     use Ordering::*;
@@ -96,7 +142,7 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
         (BoolLit(x), BoolLit(y)) => x.cmp(y),
         (NumberLit(x), NumberLit(y)) => x.cmp(y),
         (StringLit(x), StringLit(y)) => x.cmp(y),
-        (ObjectNum(x), ObjectNum(y)) => x.cmp(y),
+        (ObjectNum(x), ObjectNum(y)) => cmp_object_props(x, y),
         (TypeParam(x), TypeParam(y)) => x.cmp(y),
         (ClassInstance(x), ClassInstance(y)) => x.cmp(y),
         (ArrayString, ArrayString) => Equal,
@@ -430,6 +476,8 @@ pub enum IRExpr {
         http_response_member: Option<HttpResponseMember>,
         /// `StreamReadResult.done` / `value` 时由 `sem` 填入
         stream_read_member: Option<StreamReadResultMember>,
+        /// `ObjectNum` 上一般字段访问时由 `sem` 填入
+        object_member_access: Option<ObjectMemberAccessKind>,
     },
     /// 字面量 `null`
     Null(Span),
@@ -449,6 +497,7 @@ pub enum IRExpr {
         length_dispatch: Option<MemberLengthDispatch>,
         http_response_member: Option<HttpResponseMember>,
         stream_read_member: Option<StreamReadResultMember>,
+        object_member_access: Option<ObjectMemberAccessKind>,
     },
     /// `Math.abs` / `Math.min` / …（受限子集）
     MathBuiltin {
@@ -554,6 +603,13 @@ pub enum IRExpr {
         elems: Vec<IRExpr>,
         span: Span,
     },
+}
+
+/// `obj.prop` 在 `obj` 为 [`TsType::ObjectNum`] 时的取值类别（供 codegen 区分 `as_f64` 与嵌套 `Value`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ObjectMemberAccessKind {
+    NumberLeaf,
+    NestedObject,
 }
 
 /// 模板字面量片段

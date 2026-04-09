@@ -9,7 +9,31 @@ use swc_ecma_ast::{
 };
 
 use crate::error::{diag, CompileError};
-use crate::ir::{normalize_union, TsType};
+use crate::ir::{normalize_union, ObjectProp, TsType};
+
+/// `interface` / 对象字面量类型中允许的字段类型：`number` 或嵌套 `ObjectNum`。
+fn validate_object_field_ty(
+    ty: &TsType,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    span: Span,
+) -> Result<(), CompileError> {
+    match ty {
+        TsType::Number => Ok(()),
+        TsType::ObjectNum(inner) => {
+            for p in inner {
+                validate_object_field_ty(&p.ty, cm, path, span)?;
+            }
+            Ok(())
+        }
+        _ => Err(diag(
+            cm,
+            path,
+            span,
+            "object/interface field type must be `number` or a nested object of numbers",
+        )),
+    }
+}
 
 pub(super) fn ts_type_from_pat_ann(
     pat: &Pat,
@@ -397,7 +421,7 @@ fn collect_one_class(
             format!("duplicate type name `{name}`"),
         ));
     }
-    let mut keys = Vec::new();
+    let mut props: Vec<ObjectProp> = Vec::new();
     for m in &c.class.body {
         if let ClassMember::ClassProp(p) = m {
             let PropName::Ident(id) = &p.key else {
@@ -408,23 +432,38 @@ fn collect_one_class(
                     "only identifier class fields are supported",
                 ));
             };
-            keys.push(id.sym.to_string());
+            let ty = ts_type_from_ann(&p.type_ann, cm, path, p.span, map, None)?;
+            validate_object_field_ty(&ty, cm, path, p.span)?;
+            props.push(ObjectProp {
+                name: id.sym.to_string(),
+                optional: false,
+                ty: Box::new(ty),
+            });
         }
     }
     if let Some(sup) = &c.class.super_class {
         if let Expr::Ident(id) = &**sup {
-            if let Some(TsType::ObjectNum(parent_keys)) = map.get(id.sym.as_ref()) {
-                for k in parent_keys {
-                    if !keys.iter().any(|x| x == k) {
-                        keys.push(k.clone());
+            if let Some(TsType::ObjectNum(parent_props)) = map.get(id.sym.as_ref()) {
+                for q in parent_props {
+                    if !props.iter().any(|x| x.name == q.name) {
+                        props.push(q.clone());
                     }
                 }
             }
         }
     }
-    keys.sort();
-    keys.dedup();
-    map.insert(name, TsType::ObjectNum(keys));
+    props.sort_by(|a, b| a.name.cmp(&b.name));
+    for w in props.windows(2) {
+        if w[0].name == w[1].name {
+            return Err(diag(
+                cm,
+                path,
+                c.class.span,
+                format!("duplicate class field `{}`", w[0].name),
+            ));
+        }
+    }
+    map.insert(name, TsType::ObjectNum(props));
     Ok(())
 }
 
@@ -496,7 +535,7 @@ fn object_num_from_type_elements(
     iface: &HashMap<String, TsType>,
     type_params: Option<&HashSet<String>>,
 ) -> Result<TsType, CompileError> {
-    let mut keys: Vec<String> = Vec::new();
+    let mut props: Vec<ObjectProp> = Vec::new();
     for m in members {
         let TsTypeElement::TsPropertySignature(p) = m else {
             return Err(diag(
@@ -506,14 +545,6 @@ fn object_num_from_type_elements(
                 "only property signatures are supported in object type literal",
             ));
         };
-        if p.optional {
-            return Err(diag(
-                cm,
-                path,
-                p.span,
-                "optional object fields are not supported",
-            ));
-        }
         let key = match &*p.key {
             Expr::Ident(i) => i.sym.to_string(),
             Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
@@ -535,26 +566,23 @@ fn object_num_from_type_elements(
             ));
         };
         let ft = ts_type_from_ast(&type_ann.type_ann, cm, path, iface, type_params)?;
-        if ft != TsType::Number {
-            return Err(diag(
-                cm,
-                path,
-                p.span,
-                "only `number` object fields are supported",
-            ));
-        }
-        keys.push(key);
+        validate_object_field_ty(&ft, cm, path, p.span)?;
+        props.push(ObjectProp {
+            name: key,
+            optional: p.optional,
+            ty: Box::new(ft),
+        });
     }
-    keys.sort();
-    for w in keys.windows(2) {
-        if w[0] == w[1] {
+    props.sort_by(|a, b| a.name.cmp(&b.name));
+    for w in props.windows(2) {
+        if w[0].name == w[1].name {
             return Err(diag(
                 cm,
                 path,
                 dup_span,
-                format!("duplicate object type field `{}`", w[0]),
+                format!("duplicate object type field `{}`", w[0].name),
             ));
         }
     }
-    Ok(TsType::ObjectNum(keys))
+    Ok(TsType::ObjectNum(props))
 }

@@ -67,7 +67,7 @@ pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
         TsType::ReadableStreamDefaultReader => "()",
         TsType::StreamReadResult => "__Ts2rsStreamReadResult",
         TsType::Uint8Array => "Vec<u8>",
-        TsType::ObjectNum(_) => "std::collections::HashMap<String, f64>",
+        TsType::ObjectNum(_) => "serde_json::Value",
         TsType::TypeParam(_) => unreachable!("type params must be monomorphized before codegen"),
         TsType::Fn { .. } => "std::rc::Rc<dyn Fn(f64) -> f64>",
         TsType::ClassInstance(_) => "std::collections::HashMap<String, f64>",

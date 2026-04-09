@@ -959,6 +959,16 @@ fn subst_type(t: &TsType, subst: &BTreeMap<String, TsType>) -> TsType {
             ret: Box::new(subst_type(ret, subst)),
         },
         TsType::Promise(inner) => TsType::Promise(Box::new(subst_type(inner, subst))),
+        TsType::ObjectNum(props) => TsType::ObjectNum(
+            props
+                .iter()
+                .map(|p| ObjectProp {
+                    name: p.name.clone(),
+                    optional: p.optional,
+                    ty: Box::new(subst_type(&p.ty, subst)),
+                })
+                .collect(),
+        ),
         TsType::ClassInstance(_) => t.clone(),
         _ => t.clone(),
     }
@@ -1005,7 +1015,18 @@ fn type_key(t: &TsType) -> String {
         TsType::ReadableStreamDefaultReader => "rsreader".to_string(),
         TsType::StreamReadResult => "sreadres".to_string(),
         TsType::Uint8Array => "u8arr".to_string(),
-        TsType::ObjectNum(fields) => format!("obj{}", fields.join("_")),
+        TsType::ObjectNum(props) => {
+            let mut s = String::from("obj");
+            for p in props {
+                s.push('_');
+                s.push_str(&p.name);
+                s.push('_');
+                s.push(if p.optional { '1' } else { '0' });
+                s.push('_');
+                s.push_str(&type_key(&p.ty));
+            }
+            s
+        }
         TsType::Union(m) => format!("u{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
         TsType::TypeParam(n) => format!("tp{n}"),
         TsType::ClassInstance(n) => format!("cls{n}"),

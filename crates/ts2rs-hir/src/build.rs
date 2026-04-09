@@ -6,11 +6,11 @@ use swc_common::comments::{Comment, CommentKind, SingleThreadedComments};
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, CallExpr, Callee, ClassDecl, ClassMember, Decl,
-    EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, KeyValueProp, Lit,
-    MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, ObjectLit, OptCall, OptChainBase,
-    OptChainExpr, Param, ParamOrTsParamProp, Pat, Program, Prop, PropName, PropOrSpread,
-    SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl, VarDeclKind,
-    VarDeclOrExpr,
+    DefaultDecl, EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, Ident,
+    KeyValueProp, Lit, MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleItem, ObjectLit,
+    OptCall, OptChainBase, OptChainExpr, Param, ParamOrTsParamProp, Pat, Program, Prop, PropName,
+    PropOrSpread, SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn, UnaryOp, VarDecl,
+    VarDeclKind, VarDeclOrExpr,
 };
 
 use crate::error::{diag, diag_spanned, push_diag, CompileError};
@@ -420,7 +420,7 @@ fn lower_classes_to_functions(
         let mut field_keys = Vec::new();
         merged_fields(classes, cls, &mut field_keys);
         field_keys.sort();
-        let self_ty = TsType::ObjectNum(field_keys.clone());
+        let self_ty = crate::ir::object_num_from_field_names(field_keys.clone());
         let ctor_name = format!("{}_new", cls.name);
         let ctor_fn = if let Some(c) = &cls.ctor {
             let mut body = Vec::new();
@@ -735,6 +735,7 @@ fn collect_fn_decls(
     errs: &mut Vec<CompileError>,
 ) -> Vec<IRFunction> {
     let mut out = Vec::new();
+    let mut export_default_main_ref_span: Option<Span> = None;
     match program {
         Program::Module(m) => {
             for item in &m.body {
@@ -811,24 +812,65 @@ fn collect_fn_decls(
                             "`export { ... }` without `from` is not supported (use `export function` or `export { x } from \"./file.ts\"`)",
                         );
                     }
-                    ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(e)) => {
-                        push_diag(
-                            errs,
-                            cm.as_ref(),
-                            path,
-                            e.span(),
-                            "`export default` is not supported (only `export function` is supported)",
-                        );
-                    }
-                    ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(e)) => {
-                        push_diag(
-                            errs,
-                            cm.as_ref(),
-                            path,
-                            e.span(),
-                            "`export default` is not supported (only `export function` is supported)",
-                        );
-                    }
+                    ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(e)) => match &e.decl {
+                        DefaultDecl::Fn(fe) => {
+                            let Some(ident) = &fe.ident else {
+                                push_diag(
+                                        errs,
+                                        cm.as_ref(),
+                                        path,
+                                        fe.span(),
+                                        "export default function must be named `main` (trust entry point)",
+                                    );
+                                continue;
+                            };
+                            if ident.sym != "main" {
+                                push_diag(
+                                        errs,
+                                        cm.as_ref(),
+                                        path,
+                                        ident.span(),
+                                        "export default function must be named `main` (trust entry point)",
+                                    );
+                                continue;
+                            }
+                            match build_named_function(
+                                fe.span(),
+                                ident,
+                                &fe.function,
+                                cm,
+                                path,
+                                next_id,
+                                iface,
+                            ) {
+                                Ok(ir) => out.push(ir),
+                                Err(err) => errs.push(err),
+                            }
+                        }
+                        _ => {
+                            push_diag(
+                                    errs,
+                                    cm.as_ref(),
+                                    path,
+                                    e.span(),
+                                    "unsupported default export (only `export default function main` is supported)",
+                                );
+                        }
+                    },
+                    ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(e)) => match &*e.expr {
+                        Expr::Ident(i) if i.sym == "main" => {
+                            export_default_main_ref_span = Some(e.span());
+                        }
+                        _ => {
+                            push_diag(
+                                    errs,
+                                    cm.as_ref(),
+                                    path,
+                                    e.span(),
+                                    "unsupported `export default` expression (use `export default function main` or `export default main` after a top-level `function main`)",
+                                );
+                        }
+                    },
                     ModuleItem::ModuleDecl(ModuleDecl::ExportAll(e)) => {
                         if !e.type_only {
                             continue;
@@ -870,6 +912,17 @@ fn collect_fn_decls(
                     }
                 }
             }
+            if let Some(span) = export_default_main_ref_span {
+                if !out.iter().any(|f| f.name == "main") {
+                    push_diag(
+                        errs,
+                        cm.as_ref(),
+                        path,
+                        span,
+                        "`export default main` requires a top-level `function main` in this module",
+                    );
+                }
+            }
         }
         Program::Script(s) => {
             for stmt in &s.body {
@@ -898,12 +951,24 @@ fn build_fn(
     next_id: &mut u32,
     iface: &HashMap<String, TsType>,
 ) -> Result<IRFunction, CompileError> {
-    let func = &f.function;
+    build_named_function(f.span(), &f.ident, &f.function, cm, path, next_id, iface)
+}
+
+/// `decl_span`：整段函数声明在源码中的 span（`FnDecl` / `FnExpr`）。
+fn build_named_function(
+    decl_span: Span,
+    ident: &Ident,
+    func: &swc_ecma_ast::Function,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    next_id: &mut u32,
+    iface: &HashMap<String, TsType>,
+) -> Result<IRFunction, CompileError> {
     if func.is_generator {
         return Err(diag_spanned(
             cm,
             path,
-            f,
+            ident,
             "generator functions are not supported",
         ));
     }
@@ -928,7 +993,7 @@ fn build_fn(
         &func.return_type,
         cm,
         path,
-        f.span(),
+        decl_span,
         iface,
         if fn_type_params.is_empty() {
             None
@@ -944,7 +1009,7 @@ fn build_fn(
                     return Err(diag_spanned(
                         cm,
                         path,
-                        f,
+                        ident,
                         "async function `Promise<T>` requires `T` to be `number`, `string`, or `void`",
                     ));
                 }
@@ -953,7 +1018,7 @@ fn build_fn(
                 return Err(diag_spanned(
                     cm,
                     path,
-                    f,
+                    ident,
                     "async function must have explicit return type `Promise<...>`",
                 ));
             }
@@ -963,7 +1028,7 @@ fn build_fn(
             return Err(diag_spanned(
                 cm,
                 path,
-                f,
+                ident,
                 "only `async function` may return `Promise<...>`",
             ));
         }
@@ -988,7 +1053,7 @@ fn build_fn(
     let body = func
         .body
         .as_ref()
-        .ok_or_else(|| diag_spanned(cm, path, f, "function body is required"))?;
+        .ok_or_else(|| diag_spanned(cm, path, ident, "function body is required"))?;
 
     let ir_id = *next_id;
     *next_id = next_id.saturating_add(1);
@@ -997,12 +1062,12 @@ fn build_fn(
 
     Ok(IRFunction {
         ir_id,
-        name: f.ident.sym.to_string(),
+        name: ident.sym.to_string(),
         type_params: fn_type_params_vec,
         params,
         ret,
         body: body_ir,
-        span: f.span(),
+        span: decl_span,
         cm: SendSourceMap(cm.clone()),
         source_path: path.to_string(),
         is_async: is_async_fn,
@@ -2945,6 +3010,7 @@ fn build_member_expr(
             length_dispatch: None,
             http_response_member: None,
             stream_read_member: None,
+            object_member_access: None,
         }),
         MemberProp::Computed(c) => Ok(IRExpr::Index {
             obj,
@@ -2990,6 +3056,7 @@ fn build_opt_chain_expr(
                     length_dispatch: None,
                     http_response_member: None,
                     stream_read_member: None,
+                    object_member_access: None,
                 })
             } else {
                 Ok(IRExpr::Member {
@@ -2999,6 +3066,7 @@ fn build_opt_chain_expr(
                     length_dispatch: None,
                     http_response_member: None,
                     stream_read_member: None,
+                    object_member_access: None,
                 })
             }
         }

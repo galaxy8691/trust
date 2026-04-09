@@ -32,7 +32,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 - [x] **Error recovery**: **single diagnostic** today (fail on first); multi-diagnostic collection is future work; see [README — Diagnostics (§1.1)](README.md).
 - [x] **Preserving comments**: [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) populates [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs) (swc); frozen into HIR and optionally emitted as Rust `//` lines ([§14 — Comments vs generated Rust](PROJECT-TODO.md)); see README §1.1.
-- [x] **`export` variants**: `export function`, top-level `function`, relative **`export * from "./…"`** / **`export { … } from "./…"`** (value re-exports; HIR skips); other `export` forms still rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs), [`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)); negatives `export_*_fail.ts` + `cli_e2e`.
+- [x] **`export` variants**: `export function`, top-level `function`, relative **`export * from "./…"`** / **`export { … } from "./…"`** (value re-exports; HIR skips); **`export default function main`**, **`export default async function main`**, and **`export default main`** when `main` is a top-level function (see §13.6); other `export default` shapes still rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs), [`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)); negatives `export_*_fail.ts` + `cli_e2e`.
 
 ### 1.2 Statements and declarations
 
@@ -301,6 +301,22 @@ Large efforts; land as **parse (swc/AST) → HIR → `sem` → `codegen` → int
 - [x] **codegen**: same `If`/`Eq` emission; no dedicated `match` for `switch`.
 - [x] **Tests**: positive [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts) (`run_switch_ok_prints_seven`, `compile_switch_ok_writes_rust`); negative [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts) (`compile_switch_fallthrough_fails`).
 
+### 13.6 `export default` (staged; not full `tsc`)
+
+Trust keeps a **callable entry named `main`**. Default export is supported only when it is equivalent to that contract.
+
+- [x] **A1 — default function**: `export default function main` / `export default async function main` → same IR as `export function main` ([`build.rs`](crates/ts2rs-hir/src/build.rs)); module graph records `main` as export ([`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)); fixtures `export_default_function_main_ok.ts`, `export_default_async_main_ok.ts` + `cli_e2e`.
+- [x] **A2 — default references `main`**: `export default main` when a top-level `function main` exists; validated after scan ([`build.rs`](crates/ts2rs-hir/src/build.rs)); fixture `export_default_main_ref_ok.ts`.
+- [x] **Default import**: `import main from "./dep.ts"` requires binding name `main` and target default export `main` ([`import_utils.rs`](crates/ts2rs-parser/src/import_utils.rs)); negative `import_default_wrong_binding_fail.ts`.
+- [ ] **A3 — arbitrary default expressions** (`export default 42`, anonymous arrows, etc.): **still rejected** unless they reduce to the supported shapes above; document in README “Unsupported / Partial”.
+
+### 13.7 Structural typing milestones (not full `tsc`)
+
+**trust** uses static, codegen-friendly rules; **not** full TypeScript structural subtyping.
+
+- [x] **B1 — nested `ObjectNum` + optional props**: [`ObjectProp`](crates/ts2rs-hir/src/ir.rs), [`object_shape_assignable`](crates/ts2rs-hir/src/sem/helpers.rs), object literals as `serde_json::Value` in codegen; fixture `nested_object_ok.ts`.
+- [ ] **B2+ — cross-file interface names in type position, callable members on object types, richer `readonly`/index signatures**: **backlog**; README documents current limits and differences from `tsc`.
+
 ---
 
 ## 14. Next steps (follow-up backlog)
@@ -323,7 +339,7 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 - [x] **Simplified `tsconfig` (CLI `--project`)**: recursive **`extends`**, **`include` / `exclude` glob**, merged **`files`** (still **no** npm / `node_modules`; not full `tsc` merge semantics). Implementation: [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs). **`include`-only** projects: matched `.ts` files are sorted; **entry** is lexicographically first — use explicit **`files`** when order matters. Tests: `tsconfig_resolve` unit tests, `run_project_tsconfig_extends_include_ok`.
 - [x] **npm / package-manager resolution**: **`node_modules`**, npm packages, and typical `compilerOptions.paths` → package layouts — **explicit non-goal; not planned.** Imports stay **relative** `./x.ts` (and CLI roots / `--project` roots).
-- [x] **Relative re-exports**: `export * from "./x.ts"` and `export { a as b } from "./x.ts"` (value exports; **`export * as` / `export default` / local `export { x }` without `from`** still rejected). Effective exports for `validate_imports`: [`effective_exported_function_names_by_path`](crates/ts2rs-parser/src/module_graph.rs); module graph follows re-export edges. HIR skips these statements (no duplicate IR). Test: `validate_import_via_export_star_from`, `run_reexport_export_star_ok`.
+- [x] **Relative re-exports**: `export * from "./x.ts"` and `export { a as b } from "./x.ts"` (value exports; **`export * as` / local `export { x }` without `from`** still rejected; **default export** is limited — see §13.6). Effective exports for `validate_imports`: [`effective_exported_function_names_by_path`](crates/ts2rs-parser/src/module_graph.rs); module graph follows re-export edges. HIR skips these statements (no duplicate IR). Test: `validate_import_via_export_star_from`, `run_reexport_export_star_ok`.
 - [x] **README / matrix alignment**: “Not 1.0”, unsupported table, and §1.1 updated for the above (this bullet).
 
 ### Performance and security (aligned with §10–§11; **parallelism / codegen safety / driver resources** are tracked here)

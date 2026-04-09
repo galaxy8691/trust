@@ -127,9 +127,9 @@ function main(): number {
         assert!(rs.contains("format!"), "{rs}");
     }
 
-    /// §4.2：对象字面量为值型 `HashMap::from`，无 `Rc`/`Arc`（见 codegen `ObjectLit`）。
+    /// §4.2：对象字面量降为 `serde_json::json!` / `serde_json::Value`，无 `Rc`/`Arc`（见 codegen `ObjectLit`）。
     #[test]
-    fn codegen_42_object_literal_hashmap_without_rc() {
+    fn codegen_42_object_literal_json_value_without_rc() {
         let src = r#"
 function main(): number {
   let o: { k: number } = { k: 1 };
@@ -139,9 +139,10 @@ function main(): number {
         let p = parse_typescript_file("obj.ts", src).unwrap();
         let (rs, _) = lower_program(&p.program, &p.source_map, "obj.ts").unwrap();
         assert!(
-            rs.contains("HashMap::from"),
-            "expected HashMap::from for object literal: {rs}"
+            rs.contains("serde_json::json!"),
+            "expected serde_json::json! for object literal: {rs}"
         );
+        assert!(rs.contains(".get(\"k\")"), "{rs}");
         assert!(!rs.contains("Rc::"), "{rs}");
         assert!(!rs.contains("Arc::"), "{rs}");
     }
@@ -234,7 +235,7 @@ function main(): number {
         );
     }
 
-    /// §5.2：对象字段 `length` 走 `HashMap::get`，非 `len()`。
+    /// §5.2：对象字段 `length` 走 `Value::get`，非 `len()`。
     #[test]
     fn codegen_52_object_length_field_uses_get() {
         let src = r#"function main(): number {
@@ -360,6 +361,6 @@ function main(): number {
         let p = parse_typescript_file("n.ts", src).unwrap();
         let (rs, _) = lower_program(&p.program, &p.source_map, "n.ts").unwrap();
         assert!(rs.contains("vec!["), "{rs}");
-        assert!(rs.contains("HashMap"), "{rs}");
+        assert!(rs.contains("serde_json::json!"), "{rs}");
     }
 }

@@ -36,7 +36,7 @@ fn json_value_to_ir(v: Value, span: Span) -> Result<IRExpr, String> {
         }
         Value::String(s) => Ok(IRExpr::Str(s, span)),
         Value::Array(arr) => json_array_to_ir(arr, span),
-        Value::Object(map) => json_object_flat_numbers_to_ir(map, span),
+        Value::Object(map) => json_object_to_ir(map, span),
     }
 }
 
@@ -90,28 +90,11 @@ fn json_array_to_ir(arr: Vec<Value>, span: Span) -> Result<IRExpr, String> {
     }
 }
 
-fn json_object_flat_numbers_to_ir(
-    map: serde_json::Map<String, Value>,
-    span: Span,
-) -> Result<IRExpr, String> {
+fn json_object_to_ir(map: serde_json::Map<String, Value>, span: Span) -> Result<IRExpr, String> {
     let mut fields: Vec<(String, IRExpr)> = Vec::with_capacity(map.len());
     for (k, v) in map {
-        match v {
-            Value::Number(n) => {
-                let f = n
-                    .as_f64()
-                    .ok_or_else(|| "JSON number out of range for f64".to_string())?;
-                if !f.is_finite() {
-                    return Err("JSON number must be finite".to_string());
-                }
-                fields.push((k, IRExpr::Number(f, span)));
-            }
-            _ => {
-                return Err(
-                    "`JSON.parse` literal object values must be numbers (no nesting)".to_string(),
-                );
-            }
-        }
+        let ir = json_value_to_ir(v, span)?;
+        fields.push((k, ir));
     }
     fields.sort_by(|a, b| a.0.cmp(&b.0));
     for w in fields.windows(2) {

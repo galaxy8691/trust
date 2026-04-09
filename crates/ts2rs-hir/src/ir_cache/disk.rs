@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::ir::{
     BinaryKind, ForInKind, HttpResponseMember, HttpResponseMethodKind, IRBinOp, IRUnaryOp,
     IndexKind, JsonBuiltinKind, MathBuiltinKind, MemberLengthDispatch, NumberBuiltinKind,
-    StreamReadResultMember, StringMethodKind, TsType, UriBuiltinKind,
+    ObjectMemberAccessKind, StreamReadResultMember, StringMethodKind, TsType, UriBuiltinKind,
 };
 
 pub type DSpan = (u32, u32);
@@ -94,6 +94,7 @@ pub enum DiskIRExpr {
         length_dispatch: Option<MemberLengthDispatch>,
         http_response_member: Option<HttpResponseMember>,
         stream_read_member: Option<StreamReadResultMember>,
+        object_member_access: Option<ObjectMemberAccessKind>,
     },
     Null(DSpan),
     Undefined(DSpan),
@@ -109,6 +110,7 @@ pub enum DiskIRExpr {
         length_dispatch: Option<MemberLengthDispatch>,
         http_response_member: Option<HttpResponseMember>,
         stream_read_member: Option<StreamReadResultMember>,
+        object_member_access: Option<ObjectMemberAccessKind>,
     },
     MathBuiltin {
         kind: MathBuiltinKind,

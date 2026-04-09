@@ -4,7 +4,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use swc_ecma_ast::{Decl, ExportDecl, FnDecl, Module, ModuleDecl, ModuleItem, Program, Stmt};
+use swc_ecma_ast::{
+    Decl, DefaultDecl, ExportDecl, FnDecl, Module, ModuleDecl, ModuleItem, Program, Stmt,
+};
 
 use crate::import_utils::{named_import_target, resolve_supported_import_path};
 use crate::{parse_typescript_file, ParseError, ParsedSource};
@@ -115,6 +117,19 @@ fn find_exported_function(m: &Module, name: &str) -> Option<FnDecl> {
                 ..
             })) if !f.declare && f.ident.sym == name => {
                 return Some(f.clone());
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(edd)) if name == "main" => {
+                if let DefaultDecl::Fn(fe) = &edd.decl {
+                    if let Some(ident) = &fe.ident {
+                        if ident.sym == "main" {
+                            return Some(FnDecl {
+                                ident: ident.clone(),
+                                declare: false,
+                                function: fe.function.clone(),
+                            });
+                        }
+                    }
+                }
             }
             ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) if !f.declare && f.ident.sym == name => {
                 return Some(f.clone());

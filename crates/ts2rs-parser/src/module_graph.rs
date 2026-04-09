@@ -8,7 +8,8 @@ use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
 use swc_ecma_ast::{
-    Decl, ExportDecl, ExportSpecifier, ModuleDecl, ModuleExportName, ModuleItem, Program,
+    Decl, DefaultDecl, ExportDecl, ExportSpecifier, Expr, ModuleDecl, ModuleExportName, ModuleItem,
+    Program,
 };
 
 use crate::import_utils::{
@@ -217,7 +218,7 @@ fn visit_module(
     Ok(())
 }
 
-/// 每个模块导出的函数名（仅 `export function name`）。
+/// 每个模块导出的函数名：`export function`、以及 `export default function main` / `export default main`（指向顶层 `function main`）。
 pub fn exported_function_names(program: &Program) -> HashSet<String> {
     let mut out = HashSet::new();
     let Program::Module(m) = program else {
@@ -231,6 +232,22 @@ pub fn exported_function_names(program: &Program) -> HashSet<String> {
         {
             if !f.declare {
                 out.insert(f.ident.sym.to_string());
+            }
+        }
+        if let ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(edd)) = item {
+            if let DefaultDecl::Fn(fe) = &edd.decl {
+                if let Some(ident) = &fe.ident {
+                    if ident.sym == "main" {
+                        out.insert("main".to_string());
+                    }
+                }
+            }
+        }
+        if let ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(ede)) = item {
+            if let Expr::Ident(i) = &*ede.expr {
+                if i.sym == "main" {
+                    out.insert("main".to_string());
+                }
             }
         }
     }
@@ -315,6 +332,22 @@ fn effective_exported_function_names_at(
                     {
                         if !f.declare {
                             try_add_exported_fn(&mut set, file_path, f.ident.sym.to_string())?;
+                        }
+                    }
+                    if let ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(edd)) = item {
+                        if let DefaultDecl::Fn(fe) = &edd.decl {
+                            if let Some(ident) = &fe.ident {
+                                if ident.sym == "main" {
+                                    try_add_exported_fn(&mut set, file_path, "main".to_string())?;
+                                }
+                            }
+                        }
+                    }
+                    if let ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(ede)) = item {
+                        if let Expr::Ident(i) = &*ede.expr {
+                            if i.sym == "main" {
+                                set.insert("main".to_string());
+                            }
                         }
                     }
                     if let ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) = item {

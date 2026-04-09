@@ -46,8 +46,18 @@ pub(crate) fn named_import_target(spec: &ImportSpecifier) -> Result<String, Pars
             };
             Ok(want)
         }
-        ImportSpecifier::Default(_) | ImportSpecifier::Namespace(_) => Err(ParseError::Message(
-            "only named imports `{ foo }` are supported".to_string(),
+        ImportSpecifier::Default(d) => {
+            if d.local.sym != "main" {
+                return Err(ParseError::Message(
+                    "default import must use the binding name `main` (trust maps it to the module default export)"
+                        .to_string(),
+                ));
+            }
+            Ok("main".to_string())
+        }
+        ImportSpecifier::Namespace(_) => Err(ParseError::Message(
+            "only named imports `{ foo }` and `import main from \"./file.ts\"` are supported"
+                .to_string(),
         )),
     }
 }

@@ -30,7 +30,7 @@
 
 - [x] **错误恢复**：解析与 build/sem 可在一次失败中输出**多条**诊断（见 README.zh-CN.md §1.1）；模块图仍可能在**首个无法解析的文件**处返回（单文件内可多条）。
 - [x] **保留注释**：[`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 写入 [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs)（swc）；可冻结进 HIR 并可选生成 Rust `//` 行（[§14 — 注释与生成 Rust](PROJECT-TODO.zh-CN.md)）；详见 README.zh-CN.md §1.1。
-- [x] **`export` 变体**：`export function`、顶层 `function`、相对 **`export * from "./…"`** / **`export { … } from "./…"`**（值重导出；HIR 跳过）；其余 `export` 仍拒绝（[`build.rs`](crates/ts2rs-hir/src/build.rs)、[`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)）；负例 `export_*_fail.ts` + `cli_e2e`。
+- [x] **`export` 变体**：`export function`、顶层 `function`、相对 **`export * from "./…"`** / **`export { … } from "./…"`**（值重导出；HIR 跳过）；**`export default function main`**、**`export default async function main`**、以及顶层已有 **`function main`** 时的 **`export default main`**（见 §13.6）；其余 `export default` 形态仍拒绝（[`build.rs`](crates/ts2rs-hir/src/build.rs)、[`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)）；负例 `export_*_fail.ts` + `cli_e2e`。
 
 ### 1.2 语句与声明扩展
 
@@ -299,6 +299,22 @@
 - [x] **codegen**：沿用 `If`/`Eq` 发射；`switch` 专用 `match` 未做。
 - [x] **测试**：正例 [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts)（`run_switch_ok_prints_seven`、`compile_switch_ok_writes_rust`）；负例 [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts)（`compile_switch_fallthrough_fails`，穿透诊断）。
 
+### 13.6 `export default`（分阶段；非完整 `tsc`）
+
+trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定等价时支持。
+
+- [x] **A1 — 默认函数**：`export default function main` / `export default async function main` → 与 `export function main` 同 IR（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；模块图记录导出 `main`（[`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)）；fixture `export_default_function_main_ok.ts`、`export_default_async_main_ok.ts` + `cli_e2e`。
+- [x] **A2 — 默认指向 `main`**：存在顶层 `function main` 时的 `export default main`；扫描结束后校验（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；fixture `export_default_main_ref_ok.ts`。
+- [x] **默认导入**：`import main from "./dep.ts"` 要求绑定名为 `main` 且目标默认导出为 `main`（[`import_utils.rs`](crates/ts2rs-parser/src/import_utils.rs)）；负例 `import_default_wrong_binding_fail.ts`。
+- [ ] **A3 — 任意默认表达式**（`export default 42`、匿名箭头等）：**仍拒绝**，除非可归约为上述支持形态；README「不支持 / 部分支持」已说明边界。
+
+### 13.7 结构子类型里程碑（非完整 `tsc`）
+
+**trust** 使用静态、可 codegen 的规则；**不等于** TypeScript 完整结构子类型。
+
+- [x] **B1 — 嵌套 `ObjectNum` + 可选属性**：[`ObjectProp`](crates/ts2rs-hir/src/ir.rs)、[`object_shape_assignable`](crates/ts2rs-hir/src/sem/helpers.rs)、codegen 对象字面量为 `serde_json::Value`；fixture `nested_object_ok.ts`。
+- [ ] **B2+ — 跨文件接口名在类型位置、对象上的可调用成员、`readonly`/索引签名等更丰富规则**：**待办**；README 写明当前限制及与 `tsc` 的差异。
+
 ---
 
 ## 14. 后续工作（backlog）
@@ -321,7 +337,7 @@
 
 - [x] **简化 `tsconfig`（CLI `--project`）**：递归 **`extends`**、**`include` / `exclude` glob**、合并后的 **`files`**（仍**无** npm / `node_modules`；合并语义为简化子集，非完整 `tsc`）。实现：[`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs)。**仅 `include`** 时匹配的 `.ts` 会排序，**入口**为字典序第一个；需固定顺序时用显式 **`files`**。验收：`tsconfig_resolve` 单测、`run_project_tsconfig_extends_include_ok`。
 - [x] **npm / 包管理器式解析**：**`node_modules`、npm 包、以及典型 `compilerOptions.paths` 指向包布局** — **明确非目标，不计划做。** 导入仍以**相对路径** `./x.ts` 为主（外加 CLI 多根 / `--project` 根列表）。
-- [x] **相对路径重导出**：`export * from "./x.ts"`、`export { a as b } from "./x.ts"`（值导出；**`export * as` / `export default` / 无 `from` 的 `export { x }`** 仍拒绝）。有效导出与 `validate_imports`：[`effective_exported_function_names_by_path`](crates/ts2rs-parser/src/module_graph.rs)；模块图沿 re-export 拉取依赖。HIR 跳过上述语句。验收：`validate_import_via_export_star_from`、`run_reexport_export_star_ok`。
+- [x] **相对路径重导出**：`export * from "./x.ts"`、`export { a as b } from "./x.ts"`（值导出；**`export * as` / 无 `from` 的 `export { x }`** 仍拒绝；**默认导出**为受限子集 — 见 §13.6）。有效导出与 `validate_imports`：[`effective_exported_function_names_by_path`](crates/ts2rs-parser/src/module_graph.rs)；模块图沿 re-export 拉取依赖。HIR 跳过上述语句。验收：`validate_import_via_export_star_from`、`run_reexport_export_star_ok`。
 - [x] **README / 矩阵对齐**：已同步「非 1.0」、不支持表与 §1.1（本条）。
 
 ### 性能与安全（与 §10–§11 对齐；**并行 / 代码安全 / driver 资源**以本节勾选为准）

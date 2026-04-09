@@ -38,10 +38,10 @@ flowchart LR
 
 | 用户可见形态 | 说明 |
 |--------------|------|
-| 非 `export function` / 非顶层 `function` / 非相对 **`export * from "./…"`** / 非 **`export { … } from "./…"`** 的 `export` | 如无 `from` 的 `export { }`、`export default`、`export * as`、`export const`、`export class` 等（**顶层、无 `export` 的 `class`** 见矩阵与 [PROJECT-TODO.zh-CN.md §13.3](PROJECT-TODO.zh-CN.md)） |
+| 非 `export function` / 非顶层 `function` / 非相对 **`export * from "./…"`** / 非 **`export { … } from "./…"`** / 非 **`export default function main`** / 非 **`export default main`**（须先有 `function main`）的 `export` | 如无 `from` 的 `export { }`、任意非 `main` 的 `export default`、`export * as`、`export const`、`export class` 等（**顶层、无 `export` 的 `class`** 见矩阵与 [PROJECT-TODO.zh-CN.md §13.3](PROJECT-TODO.zh-CN.md)） |
 | 复杂泛型语义 | 高阶推导、复杂约束与完整 TS 泛型语义仍未实现；**调用处显式类型实参的单态化子集**见矩阵「泛型与类型参数」与 [§13.1](PROJECT-TODO.zh-CN.md) |
 | 可选链（拒斥边界） | 受限 **`f?.()`** / **`recv?.m()`** 已支持（`optional_call_ok.ts`）；任意 callee、非标识符 callee 等仍可能拒绝（见 `optional_chain_fail.ts`） |
-| `interface extends`、跨文件导入接口名、可选属性 | 仅单文件具名表 |
+| `interface extends`、跨依赖文件导入接口/类型**名** | **单文件**具名表；同文件内已支持嵌套 `number` 对象与 `k?: number`（**非**完整 `tsc` 结构规则） |
 | 交集 `A & B` | 拒绝 |
 | `bigint`、类型位置模板字面量类型 | 拒绝 |
 | 完整 `tsc` / TS 结构子类型全集 / 超出 §13.2 的 HOF | 完整类型检查与结构子类型全集未实现；**受限**函数类型与箭头值见矩阵与 [§13.2](PROJECT-TODO.zh-CN.md) |
@@ -51,12 +51,12 @@ flowchart LR
 - **矩阵覆盖**：下表「支持」或「部分支持」行均有代表性 **fixture**（[`fixtures/`](crates/ts2rs-cli/tests/fixtures/)）与 **[`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)** 测试对应，详见下文 **[矩阵与集成测试对照](#矩阵与集成测试对照)**。手工大样例另见 [`test-ts/main.ts`](test-ts/main.ts)、[`test-ts/math.ts`](test-ts/math.ts)。**回归**用例目录见 [`tests/regression/`](crates/ts2rs-cli/tests/regression/)。
 - **诊断**：编译**错误**为**英文**，格式为 `path:line:col: message`（[`CompileError`](crates/ts2rs-hir/src/error.rs)）。**警告**（如不可达代码）同为该格式，经 [`CompileWarning`](crates/ts2rs-hir/src/error.rs) 收集；成功编译时 CLI / driver 将警告打印到 **stderr**，不抬高退出码。
 - **CI**：推送与 PR 在 GitHub Actions 上运行 `cargo fmt --all --check`、`cargo test --workspace` 与 `cargo clippy --workspace --all-targets`（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）。
-- **非 1.0**：与完整 `tsc` 的 `tsconfig` 行为对齐、`export default`、`export * as` 等；**不计划支持 npm / `node_modules` / 包管理器式模块解析。** **相对路径** `import { x } from "./dep.ts"` 与相对 **`export *` / `export { … } from`**（桶文件重导出）已支持；CLI 支持**多根**（位置参数 `.ts`）或 **`--project`** 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude` glob**，见 [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs)）+ [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs) + [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs)，HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)；入口须含 `main`，全局函数名唯一。**可选增量**：`compile` / `run` 的 **`--incremental [DIR]`** 将各模块 HIR 片段写入磁盘缓存（无参时默认 `.ts2rs-cache`）；每次仍会解析全部 `.ts`，节省主要在 HIR 构建与 I/O；见 [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs)。
+- **非 1.0**：与完整 `tsc` 的 `tsconfig` 行为对齐、任意 `export default` 表达式、`export * as` 等；**不计划支持 npm / `node_modules` / 包管理器式模块解析。** **相对路径** `import { x } from "./dep.ts"`、**`import main from "./dep.ts"`**（绑定名**必须**为 `main`，对应依赖的默认导出 `main`）与相对 **`export *` / `export { … } from`**（桶文件重导出）已支持；CLI 支持**多根**（位置参数 `.ts`）或 **`--project`** 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude` glob**，见 [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs)）+ [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs) + [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs)，HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)；入口须含 `main`，全局函数名唯一。**可选增量**：`compile` / `run` 的 **`--incremental [DIR]`** 将各模块 HIR 片段写入磁盘缓存（无参时默认 `.ts2rs-cache`）；每次仍会解析全部 `.ts`，节省主要在 HIR 构建与 I/O；见 [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs)。
 
 ## 诊断与前端健壮性（§1.1）
 
 - **多条编译错误**：build 与语义阶段可在**一次失败**中收集多条诊断（[`CompileError::Many`](crates/ts2rs-hir/src/error.rs)），按行输出多条 `path:line:col: message`（已排序）。解析器 [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 会输出 swc **`take_errors()` 的全部**诊断。**单态化**与 **codegen** 仍可能在首条内部错误处停止。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
-- **`export` 形态**：`export function …`、顶层 `function …`、相对 **`export * from "./…"`**、**`export { a as b } from "./…"`**（**函数**导出，见 [`build.rs`](crates/ts2rs-hir/src/build.rs)、[`module_graph`](crates/ts2rs-parser/src/module_graph.rs)）；`export class` / `export const` / `export default` / 无 `from` 的 `export { x }` 等仍**报错**；**顶层、无 `export` 的 `class`** 见矩阵。负例见 `export_*_fail.ts` 与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)。
+- **`export` 形态**：`export function …`、顶层 `function …`、**`export default function main`**、**`export default main`**（同模块须有 `function main`）、相对 **`export * from "./…"`**、**`export { a as b } from "./…"`**（**函数**导出，见 [`build.rs`](crates/ts2rs-hir/src/build.rs)、[`module_graph`](crates/ts2rs-parser/src/module_graph.rs)）；`export class` / `export const` / 其它 `export default` / 无 `from` 的 `export { x }` 等仍**报错**；**顶层、无 `export` 的 `class`** 见矩阵。正例 `export_default_*_ok.ts`，负例 `export_*_fail.ts` 与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)。
 - **注释**：swc 的 `Program` **仍无**注释节点；[`ParsedSource`](crates/ts2rs-parser/src/lib.rs) 含 `source_map` 与解析器收集的 `comments`（swc 注释表）。**将 TS leading 注释写入生成 Rust** 为可选：[`CodegenOptions::emit_ts_source_comments`](crates/ts2rs-hir/src/codegen.rs)，CLI `ts2rs compile --ts-source-comments`，在语句与顶层函数前输出 `//` 行；trailing 与大粒度 lowering 后的位置不保证（见 [PROJECT-TODO.zh-CN.md §14](PROJECT-TODO.zh-CN.md)）。
 - **后续与 backlog**（更细粒度注释映射、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
 
@@ -83,7 +83,7 @@ flowchart LR
 |------|------|------|
 | 单文件 `.ts` | 支持 | |
 | `function` 顶层声明 | 支持 | `export function` 同文件内支持；其它 `export` 形式见上文 §1.1 |
-| `import` | 部分支持 | 仅 `import { name } from "./relative.ts"`；依赖模块须在**有效导出**中含 `name`（`export function` 与/或相对 re-export）；模块图见 `import_add_main.ts`、`run_reexport_export_star_ok` 与负例 `import_missing_export_*`、`circular_*` |
+| `import` | 部分支持 | `import { name } from "./relative.ts"` 与 **`import main from "./relative.ts"`**（绑定名须为 `main`）；依赖模块须在**有效导出**中含对应符号（`export function`、`export default function main` / `export default main`、相对 re-export）；见 `import_add_main.ts`、`export_default_*_ok.ts`、`run_reexport_export_star_ok` 与负例 `import_missing_export_*`、`import_default_wrong_binding_fail.ts`、`circular_*` |
 | `number` / `boolean` / `string` / `void` | 支持 | `void` 仅作返回类型；`let` 不可用 `void` |
 | `let`（单声明） | 部分支持 | 须类型注解；可无初始化，但使用前须明确赋值（见上文 §3.4）；可变 `let` 可二次赋值（`IRStmt::Assign`）；见 `definite_assign_ok.ts` |
 | `const` | 支持 | 与 `let` 同形，语义禁止赋值 |
@@ -99,17 +99,17 @@ flowchart LR
 | 逗号表达式 | 支持 | 取最后一项类型与值；见 `comma_ok.ts` |
 | 成员访问 | 部分支持 | `string.length` 为 JS **UTF-16 码元数**；`string[i]` 为 UTF-16 下标（单码元 `string`）；`number[].length`；对象字段 `length`；**`obj.m(args)`** 脱糖为全局 **`m(receiver, ...args)`**；**一层链式** `f().prop` / `f().m()`（`chain_call_ok.ts`）；**未**支持 `obj[expr](...)`；见 `string_utf16_length.ts`、`method_call_ok.ts`、`stdlib_hir_ok.ts` 等 |
 | `?.` / `??` | 部分支持 | `?.` **成员**与**调用** `f?.()` / `recv?.m()`（`optional_call_ok.ts`）；`??` 对同族 `Union` 去 `null`/`undefined` 合并扩展；`optional_ok.ts`、`nullish_ok.ts`；完整 discriminated 收窄见 §3.3 |
-| 数组 / 对象字面量 | 部分支持 | 仅 `number[]` 与 `{ k: number }` 子集；对象为值型 `HashMap`（无 `Rc`/`Arc`）；见 `array_ok.ts`、`object_ok.ts`；完整类型语法见 §1.4 / §2.1 |
+| 数组 / 对象字面量 | 部分支持 | `number[]`；对象类型为 **`number` 叶子**、**嵌套**对象与 **`k?: number`**（宽度/可选规则与完整 `tsc` 不同，见 [`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs)）；运行时表示为 **`serde_json::Value`**；见 `array_ok.ts`、`object_ok.ts`、`nested_object_ok.ts` |
 | `switch` | 部分支持 | `case` 仅 `number`/`boolean` **字面量**；`default` 须**最后**；**无** `case` 间穿透（空 `case` 体拒绝）；`case` 末尾 `break` 在 build 剥离；判别式与 `if` 条件类型规则一致；见 [`switch_ok.ts`](crates/ts2rs-cli/tests/fixtures/switch_ok.ts)、负例 [`switch_fail.ts`](crates/ts2rs-cli/tests/fixtures/switch_fail.ts) |
 | `return` | 支持 | 非 `void` 函数需满足 `fn_body_returns`（含提前穷尽返回 + 尾部规则，见上文「控制流与 return」） |
 | `void` 函数 | 支持 | 不要求 `return` 路径检查 |
 | `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 在 Rust 侧为 **`f64`**；见下文 §4.1 |
 | `Math.*` 内建 | 部分支持 | `abs`、`min`、`max`、`floor`、`ceil`、`sign`、`trunc`、`round`、`pow`（`f64`；`pow` 非负指数）；见 `math_builtin.ts`、`stdlib_hir_ok.ts` |
-| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`；`JSON.parse`（字面量折叠为 trust 闭合形状；非常量仍为 JSON number 文档 → `f64`，`serde_json`）；`encodeURIComponent` / `decodeURIComponent`（`urlencoding`）；`charAt` 等（UTF-16）；`readLine()`；见 `stdlib_hir_ok.ts`、`json_uri_trust_ok.ts` |
+| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`（`string` / `number` / `boolean` / trust **对象**形状）；`JSON.parse`（字面量折叠为 trust 闭合形状，含嵌套纯 number 对象；非常量仍为 JSON number 文档 → `f64`，`serde_json`）；`encodeURIComponent` / `decodeURIComponent`（`urlencoding`）；`charAt` 等（UTF-16）；`readLine()`；见 `stdlib_hir_ok.ts`、`json_uri_trust_ok.ts` |
 | `console.log` / `console.error` / `console.debug` | 支持 | `log` → `println!`；`error` / `debug` → `eprintln!`；多参数均为 `"{}"` **空格分隔**（与 §4.1 一致） |
 | 字面量类型 | 部分支持 | `42`、`"a"`、`true` 等类型位置；向 `number`/`string`/`boolean` 拓宽；见 `literal_type_ok.ts`；`bigint`/模板字面量类型位置拒绝 |
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
-| `interface`（受限） | 部分支持 | 顶层 `interface` / `export interface`；声明体与 `{ k: number }` 相同规则，解析为 [`TsType::ObjectNum`](crates/ts2rs-hir/src/ir.rs)（`build.rs` 中具名表）；类型位置用 `Point` 形式引用；**单文件**内按出现顺序声明，引用尚未声明的接口名会报错；**不**从依赖模块导入接口名；`extends`、泛型、可选属性拒绝；见 `interface_ok.ts`、`export_interface_ok.ts`、负例 `interface_extends_fail.ts`、`interface_generic_fail.ts` |
+| `interface`（受限） | 部分支持 | 顶层 `interface` / `export interface`；声明体为嵌套/可选 `ObjectNum` 字段（**单编译单元**）；类型位置用 `Point` 形式引用；**不**从依赖模块导入接口/类型**名**；对象类型上**无**可调用的方法成员类型（`obj.m()` 仍靠全局函数脱糖）；`extends`、泛型仍拒绝；见 `interface_ok.ts`、`nested_object_ok.ts`、`export_interface_ok.ts`、负例 `interface_extends_fail.ts`、`interface_generic_fail.ts` |
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types_with_errors`](crates/ts2rs-hir/src/build/build_types.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化：可写显式 `f<number>(x)`，或在实参类型可合成时省略（字面量、已注解的 `let`/参数）；不可推、冲突或多处错误会分别报错；`obj.m` 脱糖后的泛型全局函数同样推断；Rust 侧符号为 `name__` + 16 位十六进制指纹 |
 | 高阶函数 | 部分支持 | 函数类型与箭头闭包（`(number) => number` → `(f64) -> f64`）；变量调用 `f(...)` 等 |
@@ -124,7 +124,7 @@ flowchart LR
 | 主题 | 代表性 fixture | 代表性集成测试 |
 |------|----------------|----------------|
 | 单文件 / 算术 / 条件 / 字符串 | `sample.ts`、`ops.ts`、`boolean_if.ts`、`string_concat.ts` | `compile_writes_rust`、`compile_exec_writes_binary_and_runs`、`compile_exec_without_o_defaults_to_entry_stem_in_cwd`、`run_prints_main_result`、`run_ops_prints_six` 等 |
-| `import` / 多文件 / 导出 | `import_add_main.ts`+`add_dep.ts`、`multi_entry_*`、`export_main.ts` | `run_import_add_main_prints_three`、`run_multi_entry_extra_roots_prints_main`、`compile_export_main_writes_ts_main`、`run_reexport_export_star_ok` |
+| `import` / 多文件 / 导出 / default | `import_add_main.ts`+`add_dep.ts`、`export_default_*_ok.ts`、`multi_entry_*`、`export_main.ts` | `run_import_add_main_prints_three`、`run_export_default_function_main_prints_42`、`run_multi_entry_extra_roots_prints_main`、`compile_export_main_writes_ts_main`、`run_reexport_export_star_ok` |
 | 增量 HIR（`--incremental`） | e2e 临时目录 `lib.ts` + `app.ts` | `compile_incremental_rebuilds_only_changed_module` |
 | 负例（import/export/重复） | `import_missing_export_*`、`circular_*`、`dup_*`、`export_*_fail.ts`、`import_fail.ts` | `compile_import_missing_export_fails`、`compile_circular_import_fails` 等 |
 | `let`/`const`/块/赋值 | `const_ok.ts`、`assign_simple.ts`、`empty_stmt.ts`、`let_if.ts` | `run_const_ok_prints_42`、`run_assign_simple_prints_five` 等 |
@@ -133,7 +133,7 @@ flowchart LR
 | 逻辑/三元/模板/逗号 | `logical_bool.ts`、`logical_truthy_ok.ts`、`ternary_ok.ts`、`template_ok.ts`、`comma_ok.ts` | `run_logical_bool_prints_one`、`run_ternary_ok_prints_one` 等 |
 | 成员 / `Math` / HIR 标准库 / 链式 | `string_utf16_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`、`chain_call_ok.ts` 等 | `run_stdlib_hir_ok_prints_expected`、`run_json_uri_trust_ok_prints_expected`、`run_chain_call_ok_prints_six`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`、`compile_json_uri_trust_ok_emits_serde_json_and_urlencoding` 等 |
 | `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts`、`nullish_fn_ok.ts`（`check`）、`optional_call_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one`、`check_nullish_fn_union_ok`、`run_optional_call_ok_prints_five` |
-| 数组 / 对象字面量 | `array_ok.ts`、`object_ok.ts`；负例 `array_fail.ts` | `run_array_ok_prints_two`、`run_object_ok_prints_three`、`compile_array_return_type_mismatch_fails` |
+| 数组 / 对象字面量 | `array_ok.ts`、`object_ok.ts`、`nested_object_ok.ts`；负例 `array_fail.ts` | `run_array_ok_prints_two`、`run_object_ok_prints_three`、`run_nested_object_ok_prints_three`、`compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |
 | `console` | `console_stderr.ts`、`void_log.ts` | `compile_console_stderr_writes_eprintln`、`run_void_log_in_branch_prints_branch` |
 | 字面量类型 / 联合 / 交集 | `literal_type_*.ts`、`union_*.ts`、`intersection_type_fail.ts` | `run_literal_type_ok_prints_eight`、`compile_union_heterogeneous_fail_errors` 等 |

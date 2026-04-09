@@ -8,7 +8,7 @@ use crate::build::ModuleIrFragment;
 use crate::ir::*;
 use crate::ir_cache::disk::*;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug)]
 pub enum IrCacheError {
@@ -186,6 +186,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         } => DiskIRExpr::Member {
             obj: Box::new(encode_expr(cm, obj)),
             prop: prop.clone(),
@@ -193,6 +194,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             length_dispatch: *length_dispatch,
             http_response_member: *http_response_member,
             stream_read_member: *stream_read_member,
+            object_member_access: *object_member_access,
         },
         IRExpr::Null(sp) => DiskIRExpr::Null(to_dspan(cm, *sp)),
         IRExpr::Undefined(sp) => DiskIRExpr::Undefined(to_dspan(cm, *sp)),
@@ -208,6 +210,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         } => DiskIRExpr::OptionalMember {
             obj: Box::new(encode_expr(cm, obj)),
             prop: prop.clone(),
@@ -215,6 +218,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             length_dispatch: *length_dispatch,
             http_response_member: *http_response_member,
             stream_read_member: *stream_read_member,
+            object_member_access: *object_member_access,
         },
         IRExpr::MathBuiltin { kind, args, span } => DiskIRExpr::MathBuiltin {
             kind: *kind,
@@ -449,6 +453,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         } => IRExpr::Member {
             obj: Box::new(decode_expr(cm, base, *obj)),
             prop,
@@ -456,6 +461,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         },
         DiskIRExpr::Null(sp) => IRExpr::Null(from_dspan(base, sp)),
         DiskIRExpr::Undefined(sp) => IRExpr::Undefined(from_dspan(base, sp)),
@@ -471,6 +477,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         } => IRExpr::OptionalMember {
             obj: Box::new(decode_expr(cm, base, *obj)),
             prop,
@@ -478,6 +485,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             length_dispatch,
             http_response_member,
             stream_read_member,
+            object_member_access,
         },
         DiskIRExpr::MathBuiltin { kind, args, span } => IRExpr::MathBuiltin {
             kind,

@@ -6,6 +6,42 @@ use swc_common::Span;
 
 mod helpers;
 
+fn emit_json_object_field_get(o: &str, prop: &str, kind: ObjectMemberAccessKind) -> String {
+    match kind {
+        ObjectMemberAccessKind::NumberLeaf => format!(
+            "(({o}).get({prop:?}).expect(\"missing field\").as_f64().expect(\"expected JSON number field\"))"
+        ),
+        ObjectMemberAccessKind::NestedObject => format!(
+            "(({o}).get({prop:?}).expect(\"missing field\").clone())"
+        ),
+    }
+}
+
+fn emit_object_lit_json(
+    fields: &[(String, IRExpr)],
+    f: &IRFunction,
+    stmt_level: usize,
+    module: &IRModule,
+) -> Result<String, CompileError> {
+    if fields.is_empty() {
+        return Ok("serde_json::json!({})".to_string());
+    }
+    let mut parts = Vec::with_capacity(fields.len());
+    for (k, v) in fields {
+        let k_json = serde_json::to_string(k).map_err(|e| {
+            diag(
+                f.cm.as_ref(),
+                &f.source_path,
+                f.span,
+                format!("object key JSON encoding: {e}"),
+            )
+        })?;
+        let ve = emit_expr(v, f, stmt_level, module)?;
+        parts.push(format!("{k_json}: ({ve})"));
+    }
+    Ok(format!("serde_json::json!({{{}}})", parts.join(", ")))
+}
+
 /// 代码生成选项（默认不改变既有输出）。
 #[derive(Debug, Clone, Default)]
 pub struct CodegenOptions {
@@ -188,7 +224,8 @@ fn __ts2rs_utf16_index_of(haystack: &str, needle: &str, from_utf16: i32) -> f64 
         "Vec<f64>"
         | "Vec<String>"
         | "Vec<reqwest::Response>"
-        | "std::collections::HashMap<String, f64>" => {
+        | "std::collections::HashMap<String, f64>"
+        | "serde_json::Value" => {
             out.push_str(&format!(
                 "    println!(\"{{:?}}\", ts_main(){await_main});\n"
             ));
@@ -908,11 +945,10 @@ fn emit_stmt(
         }
         IRStmt::MemberAssign { obj, prop, rhs, .. } => {
             out.push_str(&ind);
-            out.push_str(obj);
-            out.push_str(".insert(");
-            out.push_str(&format!("{prop:?}.to_string(), "));
-            out.push_str(&emit_expr(rhs, f, level, module)?);
-            out.push_str(");\n");
+            let rhs_e = emit_expr(rhs, f, level, module)?;
+            out.push_str(&format!(
+                "if let Some(__m) = {obj}.as_object_mut() {{ __m.insert({prop:?}.to_string(), serde_json::to_value(&({rhs_e})).expect(\"member assign value\")); }}\n",
+            ));
         }
         IRStmt::Expr { expr, .. } => {
             out.push_str(&ind);
@@ -1005,7 +1041,9 @@ fn emit_stmt(
             match kind {
                 Some(ForInKind::ObjectKeys) => {
                     out.push_str(&ind);
-                    out.push_str(&format!("for __k in {tmp}.keys() {{\n"));
+                    out.push_str(&format!(
+                        "for __k in {tmp}.as_object().expect(\"for..in object\").keys() {{\n",
+                    ));
                     out.push_str(&indent(level + 1));
                     out.push_str(&format!("let {key}: {key_rust_ty} = __k.clone();\n"));
                 }
@@ -1286,7 +1324,7 @@ fn emit_expr(
             length_dispatch,
             http_response_member,
             stream_read_member,
-            ..
+            object_member_access,
         } => {
             let o = emit_expr(obj, f, stmt_level, module)?;
             if let Some(h) = http_response_member {
@@ -1318,10 +1356,28 @@ fn emit_expr(
                     Some(MemberLengthDispatch::Uint8ArrayLen) => {
                         Ok(format!("({o}.len() as f64)"))
                     }
-                    None => Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop)),
+                    None => {
+                        let k = object_member_access.ok_or_else(|| {
+                            diag(
+                                f.cm.as_ref(),
+                                &f.source_path,
+                                *member_span,
+                                "internal: object `.length` field access missing layout",
+                            )
+                        })?;
+                        Ok(emit_json_object_field_get(&o, prop, k))
+                    }
                 }
             } else {
-                Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop))
+                let k = object_member_access.ok_or_else(|| {
+                    diag(
+                        f.cm.as_ref(),
+                        &f.source_path,
+                        *member_span,
+                        "internal: object member access missing layout",
+                    )
+                })?;
+                Ok(emit_json_object_field_get(&o, prop, k))
             }
         }
         IRExpr::OptionalMember {
@@ -1331,7 +1387,7 @@ fn emit_expr(
             length_dispatch,
             http_response_member,
             stream_read_member,
-            ..
+            object_member_access,
         } => match &**obj {
             IRExpr::Null(_) | IRExpr::Undefined(_) => Ok("()".to_string()),
             _ => {
@@ -1365,10 +1421,28 @@ fn emit_expr(
                         Some(MemberLengthDispatch::Uint8ArrayLen) => {
                             Ok(format!("({o}.len() as f64)"))
                         }
-                        None => Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop)),
+                        None => {
+                            let k = object_member_access.ok_or_else(|| {
+                                diag(
+                                    f.cm.as_ref(),
+                                    &f.source_path,
+                                    *om_span,
+                                    "internal: object `.length` field access missing layout",
+                                )
+                            })?;
+                            Ok(emit_json_object_field_get(&o, prop, k))
+                        }
                     }
                 } else {
-                    Ok(format!("(*{o}.get({:?}).expect(\"missing field\"))", prop))
+                    let k = object_member_access.ok_or_else(|| {
+                        diag(
+                            f.cm.as_ref(),
+                            &f.source_path,
+                            *om_span,
+                            "internal: object member access missing layout",
+                        )
+                    })?;
+                    Ok(emit_json_object_field_get(&o, prop, k))
                 }
             }
         },
@@ -1460,6 +1534,10 @@ fn emit_expr(
                     Ok(format!("__ts2rs_json_escape_string(&({inner}))"))
                 } else if is_numberish(ty) || is_booleanish(ty) {
                     Ok(format!("format!(\"{{}}\", {inner})"))
+                } else if matches!(ty, TsType::ObjectNum(_)) {
+                    Ok(format!(
+                        "serde_json::to_string(&({inner})).expect(\"JSON.stringify object\")"
+                    ))
                 } else {
                     Err(diag(
                         f.cm.as_ref(),
@@ -1520,23 +1598,7 @@ fn emit_expr(
             }
             Ok(format!("vec![{}]", xs.join(", ")))
         }
-        IRExpr::ObjectLit { fields, .. } => {
-            if fields.is_empty() {
-                return Ok("std::collections::HashMap::new()".to_string());
-            }
-            let mut pairs = Vec::with_capacity(fields.len());
-            for (k, v) in fields {
-                pairs.push(format!(
-                    "({:?}.to_string(), {})",
-                    k,
-                    emit_expr(v, f, stmt_level, module)?
-                ));
-            }
-            Ok(format!(
-                "std::collections::HashMap::from([{}])",
-                pairs.join(", ")
-            ))
-        }
+        IRExpr::ObjectLit { fields, .. } => emit_object_lit_json(fields, f, stmt_level, module),
         IRExpr::Index {
             obj,
             index,
