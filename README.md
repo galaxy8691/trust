@@ -55,10 +55,10 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 
 ## Diagnostics and surface (§1.1)
 
-- **Single error**: [`ts2rs_hir::compile`](crates/ts2rs-hir/src/lib.rs) / [`compile_graph`](crates/ts2rs-hir/src/lib.rs) report the **first** error only ([`CompileError`](crates/ts2rs-hir/src/error.rs)). On success, multiple [`CompileWarning`](crates/ts2rs-hir/src/error.rs) may be returned (same shape in [`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs)).
+- **Multiple compile errors**: build and semantic phases may collect **several** diagnostics in one failed run ([`CompileError::Many`](crates/ts2rs-hir/src/error.rs)), printed as multiple `path:line:col: message` lines (sorted). Parser [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) surfaces **all** swc `take_errors()` diagnostics. **Monomorphization** and **codegen** can still stop at the first internal error. On success, multiple [`CompileWarning`](crates/ts2rs-hir/src/error.rs) may be returned (same shape in [`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs)).
 - **`export` shapes**: anything other than `export function …` and top-level `function …` is rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs)), including `export class` / `export const` / etc.; **top-level `class` without `export`** is in the matrix. Negative fixtures `export_*_fail.ts` and [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
 - **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/ts2rs-parser/src/lib.rs) includes `source_map` for locations. Reflecting TS comments in Rust is **not** implemented.
-- **Follow-up backlog** (multi-error reporting, TS comments in generated Rust, project-scale tooling): see [PROJECT-TODO.md §14 — Toolchain and UX](PROJECT-TODO.md).
+- **Follow-up backlog** (TS comments in generated Rust, project-scale tooling): see [PROJECT-TODO.md §14 — Toolchain and UX](PROJECT-TODO.md).
 
 ## Control flow and return (§3.4)
 

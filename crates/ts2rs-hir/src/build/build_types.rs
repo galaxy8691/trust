@@ -301,34 +301,54 @@ pub(super) fn ts_type_from_ast(
     }
 }
 
-pub(super) fn collect_named_types(
+/// 收集具名类型；失败项记入 `errs` 并跳过，仍返回当前已收集的 `map`。
+pub(super) fn collect_named_types_with_errors(
     program: &Program,
     cm: &Lrc<SourceMap>,
     path: &str,
-) -> Result<HashMap<String, TsType>, CompileError> {
+    errs: &mut Vec<CompileError>,
+) -> HashMap<String, TsType> {
     let mut map = HashMap::new();
     match program {
         Program::Module(m) => {
             for item in &m.body {
                 match item {
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(i))) => {
-                        collect_one_interface(i.as_ref(), &mut map, cm, path)?;
+                        if let Err(e) = collect_one_interface(i.as_ref(), &mut map, cm, path) {
+                            errs.push(e);
+                        }
                     }
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsTypeAlias(a))) => {
-                        collect_one_type_alias(a.as_ref(), &mut map, cm, path)?;
+                        if let Err(e) = collect_one_type_alias(a.as_ref(), &mut map, cm, path) {
+                            errs.push(e);
+                        }
                     }
                     ModuleItem::Stmt(Stmt::Decl(Decl::Class(c))) => {
-                        collect_one_class(c, &mut map, cm, path)?;
+                        if let Err(e) = collect_one_class(c, &mut map, cm, path) {
+                            errs.push(e);
+                        }
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => {
                         match decl {
                             Decl::TsInterface(i) => {
-                                collect_one_interface(i.as_ref(), &mut map, cm, path)?
+                                if let Err(e) =
+                                    collect_one_interface(i.as_ref(), &mut map, cm, path)
+                                {
+                                    errs.push(e);
+                                }
                             }
                             Decl::TsTypeAlias(a) => {
-                                collect_one_type_alias(a.as_ref(), &mut map, cm, path)?
+                                if let Err(e) =
+                                    collect_one_type_alias(a.as_ref(), &mut map, cm, path)
+                                {
+                                    errs.push(e);
+                                }
                             }
-                            Decl::Class(c) => collect_one_class(c, &mut map, cm, path)?,
+                            Decl::Class(c) => {
+                                if let Err(e) = collect_one_class(c, &mut map, cm, path) {
+                                    errs.push(e);
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -340,20 +360,26 @@ pub(super) fn collect_named_types(
             for stmt in &s.body {
                 match stmt {
                     Stmt::Decl(Decl::TsInterface(i)) => {
-                        collect_one_interface(i.as_ref(), &mut map, cm, path)?;
+                        if let Err(e) = collect_one_interface(i.as_ref(), &mut map, cm, path) {
+                            errs.push(e);
+                        }
                     }
                     Stmt::Decl(Decl::TsTypeAlias(a)) => {
-                        collect_one_type_alias(a.as_ref(), &mut map, cm, path)?;
+                        if let Err(e) = collect_one_type_alias(a.as_ref(), &mut map, cm, path) {
+                            errs.push(e);
+                        }
                     }
                     Stmt::Decl(Decl::Class(c)) => {
-                        collect_one_class(c, &mut map, cm, path)?;
+                        if let Err(e) = collect_one_class(c, &mut map, cm, path) {
+                            errs.push(e);
+                        }
                     }
                     _ => {}
                 }
             }
         }
     }
-    Ok(map)
+    map
 }
 
 fn collect_one_class(

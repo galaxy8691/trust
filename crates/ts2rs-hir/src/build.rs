@@ -12,7 +12,7 @@ use swc_ecma_ast::{
     VarDeclOrExpr,
 };
 
-use crate::error::{diag, diag_spanned, CompileError};
+use crate::error::{diag, diag_spanned, push_diag, CompileError};
 use crate::ir::*;
 use crate::json_parse_fold::{fold_json_parse_arg, JsonParseFold};
 
@@ -24,9 +24,10 @@ pub fn build_module(
     path: &str,
 ) -> Result<IRModule, CompileError> {
     let mut next_id = 0u32;
-    let iface = collect_named_types(program, cm, path)?;
-    let classes = collect_class_decls(program, cm, path, &iface)?;
-    let fns = collect_fn_decls(program, cm, path, false, &mut next_id, &iface)?;
+    let mut errs = Vec::new();
+    let iface = build_types::collect_named_types_with_errors(program, cm, path, &mut errs);
+    let classes = collect_class_decls(program, cm, path, &iface, &mut errs);
+    let fns = collect_fn_decls(program, cm, path, false, &mut next_id, &iface, &mut errs);
     let mut lowered = lower_classes_to_functions(&classes, cm, path, &mut next_id, &iface)?;
     let mut all_fns = fns;
     all_fns.append(&mut lowered);
@@ -35,12 +36,16 @@ pub fn build_module(
             Program::Module(m) => m.span,
             Program::Script(s) => s.span,
         };
-        return Err(diag(
-            cm,
+        push_diag(
+            &mut errs,
+            cm.as_ref(),
             path,
             anchor,
             "no top-level function declarations found",
-        ));
+        );
+    }
+    if !errs.is_empty() {
+        return Err(CompileError::merge_sorted(errs));
     }
     Ok(IRModule {
         fns: all_fns,
@@ -58,26 +63,42 @@ pub fn build_program_multi(
     let mut next_id = 0u32;
     let mut all = Vec::new();
     let mut classes_all = Vec::new();
+    let mut all_errs = Vec::new();
     for (path, program, cm) in units {
-        let iface = collect_named_types(program, cm, path.as_str())?;
-        let classes = collect_class_decls(program, cm, path.as_str(), &iface)?;
-        let mut fns = collect_fn_decls(program, cm, path.as_str(), true, &mut next_id, &iface)?;
+        let mut errs = Vec::new();
+        let iface =
+            build_types::collect_named_types_with_errors(program, cm, path.as_str(), &mut errs);
+        let classes = collect_class_decls(program, cm, path.as_str(), &iface, &mut errs);
+        let mut fns = collect_fn_decls(
+            program,
+            cm,
+            path.as_str(),
+            true,
+            &mut next_id,
+            &iface,
+            &mut errs,
+        );
         let mut lowered =
             lower_classes_to_functions(&classes, cm, path.as_str(), &mut next_id, &iface)?;
         classes_all.extend(classes);
         fns.append(&mut lowered);
         all.append(&mut fns);
+        all_errs.extend(errs);
     }
     let mut seen = std::collections::HashSet::<String>::new();
     for f in &all {
         if !seen.insert(f.name.clone()) {
-            return Err(diag(
-                &f.cm,
+            push_diag(
+                &mut all_errs,
+                f.cm.as_ref(),
                 &f.source_path,
                 f.span,
                 format!("duplicate function `{}`", f.name),
-            ));
+            );
         }
+    }
+    if !all_errs.is_empty() {
+        return Err(CompileError::merge_sorted(all_errs));
     }
     Ok(IRModule {
         fns: all,
@@ -92,7 +113,8 @@ fn collect_class_decls(
     cm: &Lrc<SourceMap>,
     path: &str,
     iface: &HashMap<String, TsType>,
-) -> Result<Vec<IRClass>, CompileError> {
+    errs: &mut Vec<CompileError>,
+) -> Vec<IRClass> {
     let mut out = Vec::new();
     let mut push_class = |c: &ClassDecl| -> Result<(), CompileError> {
         if c.declare {
@@ -239,11 +261,19 @@ fn collect_class_decls(
         Program::Module(m) => {
             for item in &m.body {
                 match item {
-                    ModuleItem::Stmt(Stmt::Decl(Decl::Class(c))) => push_class(c)?,
+                    ModuleItem::Stmt(Stmt::Decl(Decl::Class(c))) => {
+                        if let Err(e) = push_class(c) {
+                            errs.push(e);
+                        }
+                    }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
                         decl: Decl::Class(c),
                         ..
-                    })) => push_class(c)?,
+                    })) => {
+                        if let Err(e) = push_class(c) {
+                            errs.push(e);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -251,12 +281,14 @@ fn collect_class_decls(
         Program::Script(s) => {
             for stmt in &s.body {
                 if let Stmt::Decl(Decl::Class(c)) = stmt {
-                    push_class(c)?;
+                    if let Err(e) = push_class(c) {
+                        errs.push(e);
+                    }
                 }
             }
         }
     }
-    Ok(out)
+    out
 }
 
 fn lower_classes_to_functions(
@@ -588,14 +620,6 @@ fn rewrite_this_in_expr(e: &mut IRExpr, span: Span) {
     }
 }
 
-fn collect_named_types(
-    program: &Program,
-    cm: &Lrc<SourceMap>,
-    path: &str,
-) -> Result<HashMap<String, TsType>, CompileError> {
-    build_types::collect_named_types(program, cm, path)
-}
-
 fn collect_fn_decls(
     program: &Program,
     cm: &Lrc<SourceMap>,
@@ -603,7 +627,8 @@ fn collect_fn_decls(
     allow_imports: bool,
     next_id: &mut u32,
     iface: &HashMap<String, TsType>,
-) -> Result<Vec<IRFunction>, CompileError> {
+    errs: &mut Vec<CompileError>,
+) -> Vec<IRFunction> {
     let mut out = Vec::new();
     match program {
         Program::Module(m) => {
@@ -613,107 +638,124 @@ fn collect_fn_decls(
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsTypeAlias(_))) => {}
                     ModuleItem::Stmt(Stmt::Decl(Decl::Class(_))) => {}
                     ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) if !f.declare => {
-                        out.push(build_fn(f, cm, path, next_id, iface)?);
+                        match build_fn(f, cm, path, next_id, iface) {
+                            Ok(ir) => out.push(ir),
+                            Err(e) => errs.push(e),
+                        }
                     }
                     ModuleItem::Stmt(s) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            s,
+                            s.span(),
                             "unsupported top-level statement (only top-level `function`, `interface`, and `type` declarations are supported)",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::Import(_)) => {
                         if allow_imports {
                             continue;
                         }
-                        return Err(diag(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
                             item.span(),
                             "`import` is not supported in this compiler version",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => {
                         match decl {
                             Decl::TsInterface(_) | Decl::TsTypeAlias(_) => {}
                             Decl::Fn(f) if !f.declare => {
-                                out.push(build_fn(f, cm, path, next_id, iface)?);
+                                match build_fn(f, cm, path, next_id, iface) {
+                                    Ok(ir) => out.push(ir),
+                                    Err(e) => errs.push(e),
+                                }
                             }
                             Decl::Class(_) => {}
                             Decl::Fn(f) if f.declare => {
-                                return Err(diag_spanned(
-                                    cm,
+                                push_diag(
+                                    errs,
+                                    cm.as_ref(),
                                     path,
-                                    f,
+                                    f.span(),
                                     "`export declare function` is not supported",
-                                ));
+                                );
                             }
                             _ => {
-                                return Err(diag_spanned(
-                                    cm,
+                                push_diag(
+                                    errs,
+                                    cm.as_ref(),
                                     path,
-                                    decl,
+                                    decl.span(),
                                     "unsupported export declaration (only `export function` / `export interface` / `export type` are supported)",
-                                ));
+                                );
                             }
                         }
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(e)) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            e,
+                            e.span(),
                             "`export { ... }` / named re-exports are not supported (only `export function` is supported)",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(e)) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            e,
+                            e.span(),
                             "`export default` is not supported (only `export function` is supported)",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(e)) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            e,
+                            e.span(),
                             "`export default` is not supported (only `export function` is supported)",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportAll(e)) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            e,
+                            e.span(),
                             "`export * from` / re-export-from is not supported in this compiler version",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::TsImportEquals(e)) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            e,
+                            e.span(),
                             "`import`/`export` TypeScript-specific forms are not supported in this compiler version",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::TsExportAssignment(e)) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            e,
+                            e.span(),
                             "`export =` is not supported in this compiler version",
-                        ));
+                        );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::TsNamespaceExport(e)) => {
-                        return Err(diag_spanned(
-                            cm,
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
                             path,
-                            e,
+                            e.span(),
                             "`export as namespace` is not supported in this compiler version",
-                        ));
+                        );
                     }
                 }
             }
@@ -725,14 +767,17 @@ fn collect_fn_decls(
                     | Stmt::Decl(Decl::TsTypeAlias(_))
                     | Stmt::Decl(Decl::Class(_)) => {}
                     Stmt::Decl(Decl::Fn(f)) if !f.declare => {
-                        out.push(build_fn(f, cm, path, next_id, iface)?);
+                        match build_fn(f, cm, path, next_id, iface) {
+                            Ok(ir) => out.push(ir),
+                            Err(e) => errs.push(e),
+                        }
                     }
                     _ => {}
                 }
             }
         }
     }
-    Ok(out)
+    out
 }
 
 fn build_fn(

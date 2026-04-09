@@ -3,7 +3,6 @@
 use std::fmt;
 
 use swc_common::{SourceMap, Span, Spanned};
-use thiserror::Error;
 
 /// 非致命警告（编译仍成功）。
 #[derive(Debug, Clone)]
@@ -24,16 +23,84 @@ impl fmt::Display for CompileWarning {
     }
 }
 
-#[derive(Debug, Error)]
+/// 编译失败：单条 [`CompileError::Diag`] 或多条 [`CompileError::Many`]。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileError {
-    #[error("{path}:{line}:{col}: {message}")]
     Diag {
         path: String,
         line: usize,
         col: usize,
         message: String,
     },
+    Many(Vec<CompileError>),
 }
+
+impl CompileError {
+    /// 展开嵌套的 `Many`。
+    pub fn flatten(self) -> Vec<CompileError> {
+        match self {
+            CompileError::Many(inner) => {
+                inner.into_iter().flat_map(CompileError::flatten).collect()
+            }
+            other => vec![other],
+        }
+    }
+
+    fn sort_key(&self) -> (String, usize, usize, String) {
+        match self {
+            CompileError::Diag {
+                path,
+                line,
+                col,
+                message,
+            } => (path.clone(), *line, *col, message.clone()),
+            CompileError::Many(_) => (String::new(), 0, 0, String::new()),
+        }
+    }
+
+    /// 合并、按位置排序并去重；仅一条则返回 `Diag`，否则 `Many`。
+    pub fn merge_sorted(items: Vec<CompileError>) -> CompileError {
+        let mut flat: Vec<CompileError> =
+            items.into_iter().flat_map(CompileError::flatten).collect();
+        flat.retain(|e| !matches!(e, CompileError::Many(_)));
+        flat.sort_by_key(|a| a.sort_key());
+        flat.dedup_by(|a, b| a.sort_key() == b.sort_key());
+        match flat.len() {
+            0 => CompileError::Diag {
+                path: String::new(),
+                line: 0,
+                col: 0,
+                message: "compile failed".to_string(),
+            },
+            1 => flat.pop().expect("len 1"),
+            _ => CompileError::Many(flat),
+        }
+    }
+}
+
+impl fmt::Display for CompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CompileError::Diag {
+                path,
+                line,
+                col,
+                message,
+            } => write!(f, "{path}:{line}:{col}: {message}"),
+            CompileError::Many(items) => {
+                for (i, e) in items.iter().enumerate() {
+                    if i > 0 {
+                        writeln!(f)?;
+                    }
+                    write!(f, "{e}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for CompileError {}
 
 pub fn diag(cm: &SourceMap, path: &str, span: Span, message: impl Into<String>) -> CompileError {
     let loc = cm.lookup_char_pos(span.lo);
@@ -43,6 +110,17 @@ pub fn diag(cm: &SourceMap, path: &str, span: Span, message: impl Into<String>) 
         col: loc.col_display,
         message: message.into(),
     }
+}
+
+/// 追加一条与 [`diag`] 相同格式的诊断（用于批量收集）。
+pub fn push_diag(
+    out: &mut Vec<CompileError>,
+    cm: &SourceMap,
+    path: &str,
+    span: Span,
+    message: impl Into<String>,
+) {
+    out.push(diag(cm, path, span, message));
 }
 
 pub fn warn(cm: &SourceMap, path: &str, span: Span, message: impl Into<String>) -> CompileWarning {

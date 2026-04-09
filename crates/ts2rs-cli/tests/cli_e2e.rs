@@ -434,6 +434,37 @@ fn compile_type_alias_dup_fails() {
     assert_compile_fails_stderr("type_alias_dup_fail.ts", "duplicate type name `A`");
 }
 
+#[test]
+fn compile_multi_fn_sem_errors_reports_two_diagnostic_lines() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let ts = fixture("multi_diag_two_fn_return_fail.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let out = Command::new(exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn ts2rs compile");
+    assert!(
+        !out.status.success(),
+        "expected compile to fail for multi_diag_two_fn_return_fail.ts"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let needle = "multi_diag_two_fn_return_fail.ts";
+    let lines_with_path = stderr
+        .lines()
+        .filter(|l| l.contains(needle) && l.matches(':').count() >= 3)
+        .count();
+    assert!(
+        lines_with_path >= 2,
+        "expected at least two path:line:col lines in stderr, got:\n{stderr}"
+    );
+}
+
 // --- 1.0 matrix fixtures ---
 
 #[test]

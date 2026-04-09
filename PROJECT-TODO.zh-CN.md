@@ -28,7 +28,7 @@
 
 ### 1.1 已支持路径的健壮性
 
-- [x] **错误恢复**：**当前策略为单条诊断**（首次失败即返回）；多诊断收集为后续增强，见 [README.zh-CN.md](README.zh-CN.md)「诊断与前端健壮性（§1.1）」。
+- [x] **错误恢复**：解析与 build/sem 可在一次失败中输出**多条**诊断（见 README.zh-CN.md §1.1）；模块图仍可能在**首个无法解析的文件**处返回（单文件内可多条）。
 - [x] **保留注释**：**已评估**：AST 不挂注释，`source_map` 已有；贯通注释需 parser/token 层扩展，结论写在 README §1.1。
 - [x] **`export` 变体**：除 `export function` 外均已显式拒绝（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；负例 fixtures `export_*_fail.ts` + `cli_e2e`。
 
@@ -65,7 +65,7 @@
 
 - [x] **字面量类型**、**联合类型**、**接口**、**type 别名**：与 **强类型** checker 路线图对齐（拆分为下列子项；**字面量类型**、**primitive/字面量联合**、**受限 `interface`→`ObjectNum`** 与 **受限 `type` 别名→具名表** 已见子项）。**泛型**见下列独立子项（文档化「仍拒绝」里程碑，非实现语义）。
 
-**与已实现子集的关系**：§1.3 已支持受限注解 `number[]`、`{ k: number }`（HIR 中 [`TsType::ArrayNumber`](crates/ts2rs-hir/src/ir.rs) / [`ObjectNum`](crates/ts2rs-hir/src/ir.rs)）。**字面量类型**（`NumberLit` / `StringLit` / `BoolLit`）与 **联合类型**（[`TsType::Union`](crates/ts2rs-hir/src/ir.rs) + 规范化）已见下项；**顶层 `interface`** 在类型层等价于具名 `ObjectNum`（与对象类型字面量同一规则）；**顶层 `type` 别名**经 [`collect_named_types`](crates/ts2rs-hir/src/build.rs) 解析为既有 `TsType` 并进入同一张具名表；**泛型语义**仍未实现，拒绝对照见下列子项与 [README §1.4](README.zh-CN.md)；完整对象/接口形状与 IR 演进见 §2.1；**静态**空值与分支收窄与 §3.3 交叉。
+**与已实现子集的关系**：§1.3 已支持受限注解 `number[]`、`{ k: number }`（HIR 中 [`TsType::ArrayNumber`](crates/ts2rs-hir/src/ir.rs) / [`ObjectNum`](crates/ts2rs-hir/src/ir.rs)）。**字面量类型**（`NumberLit` / `StringLit` / `BoolLit`）与 **联合类型**（[`TsType::Union`](crates/ts2rs-hir/src/ir.rs) + 规范化）已见下项；**顶层 `interface`** 在类型层等价于具名 `ObjectNum`（与对象类型字面量同一规则）；**顶层 `type` 别名**经 [`collect_named_types_with_errors`](crates/ts2rs-hir/src/build/build_types.rs) 解析为既有 `TsType` 并进入同一张具名表；**泛型语义**仍未实现，拒绝对照见下列子项与 [README §1.4](README.zh-CN.md)；完整对象/接口形状与 IR 演进见 §2.1；**静态**空值与分支收窄与 §3.3 交叉。
 
 **子项（逐项勾选）**
 
@@ -307,10 +307,10 @@
 
 ### 工具链与体验
 
-**多条诊断收集**（见 [README.zh-CN.md](README.zh-CN.md) §1.1「单条错误」）
+**多条诊断收集**（见 [README.zh-CN.md](README.zh-CN.md) §1.1）
 
-- [ ] **编译管线**为 **遇错即停**：[`build_module`](crates/ts2rs-hir/src/lib.rs) / [`check_module`](crates/ts2rs-hir/src/sem.rs) / [`emit_rust_with_options`](crates/ts2rs-hir/src/codegen.rs) 遇首条 [`CompileError`](crates/ts2rs-hir/src/error.rs) 即返回。
-- [ ] **解析器**：[`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 仅从 [`take_errors()`](crates/ts2rs-parser/src/lib.rs) 取出**一条**错误；是否汇总 swc 全部解析诊断留待后续。
+- [x] **编译管线（build + sem）**：[`build_module`](crates/ts2rs-hir/src/build.rs) 与 [`check_module`](crates/ts2rs-hir/src/sem.rs) 可聚合多条 [`CompileError`](crates/ts2rs-hir/src/error.rs) 为 [`CompileError::Many`](crates/ts2rs-hir/src/error.rs)（排序后输出）。顶层声明 / 各函数语义错误会尽量收集；**单态化**仍可能在首条错误处停止；[`emit_rust_with_options`](crates/ts2rs-hir/src/codegen.rs) 在 codegen 首条内部错误处停止。
+- [x] **解析器**：[`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 汇总 swc [`take_errors()`](crates/ts2rs-parser/src/lib.rs) **全部**诊断（并与 `parse_program` 主错误合并、排序）。**模块图**仍按文件顺序在首次解析失败时返回（单文件 stderr 可多行）。
 
 **注释与生成 Rust**（见 [README.zh-CN.md](README.zh-CN.md) §1.1「注释」）
 

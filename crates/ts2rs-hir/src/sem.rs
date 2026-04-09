@@ -1,11 +1,12 @@
 //! 名字解析、类型检查、简化 return 路径检查。
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use rayon::prelude::*;
 use swc_common::{sync::Lrc, SourceMap, Span, DUMMY_SP};
 
-use crate::error::{diag, warn, CompileError, CompileWarning};
+use crate::error::{diag, push_diag, warn, CompileError, CompileWarning};
 use crate::ir::*;
 
 mod helpers;
@@ -90,107 +91,135 @@ fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
 }
 
 pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, CompileError> {
-    validate_classes(module)?;
-    mono::monomorphize_module_functions(module)?;
+    let mut errs: Vec<CompileError> = Vec::new();
+    validate_classes(module, &mut errs);
+
+    if let Err(e) = mono::monomorphize_module_functions(module) {
+        errs.push(e);
+        return Err(CompileError::merge_sorted(errs));
+    }
 
     let mut globals: HashMap<String, FnSig> = HashMap::new();
+    let mut seen_name: HashMap<String, ()> = HashMap::new();
     for f in &module.fns {
-        if globals
-            .insert(
-                f.name.clone(),
-                FnSig {
-                    type_params: f.type_params.clone(),
-                    params: f.params.iter().map(|(_, t)| t.clone()).collect(),
-                    ret: f.ret.clone(),
-                    is_async: f.is_async,
-                },
-            )
-            .is_some()
-        {
-            return Err(diag(
-                &f.cm,
+        let sig = FnSig {
+            type_params: f.type_params.clone(),
+            params: f.params.iter().map(|(_, t)| t.clone()).collect(),
+            ret: f.ret.clone(),
+            is_async: f.is_async,
+        };
+        if seen_name.contains_key(&f.name) {
+            push_diag(
+                &mut errs,
+                f.cm.as_ref(),
                 &f.source_path,
                 f.span,
                 format!("duplicate function `{}`", f.name),
-            ));
+            );
+        } else {
+            seen_name.insert(f.name.clone(), ());
+            globals.insert(f.name.clone(), sig);
         }
     }
 
-    let main_fn = module
-        .fns
-        .iter()
-        .find(|f| f.name == "main")
-        .ok_or_else(|| {
+    match module.fns.iter().find(|f| f.name == "main") {
+        None => {
             if let Some(first) = module.fns.first() {
-                return diag(
-                    &first.cm,
+                push_diag(
+                    &mut errs,
+                    first.cm.as_ref(),
                     &first.source_path,
                     first.span,
                     "missing required entry point `function main()`",
                 );
+            } else {
+                let dummy_cm = Lrc::new(SourceMap::default());
+                push_diag(
+                    &mut errs,
+                    dummy_cm.as_ref(),
+                    module.entry_path.as_str(),
+                    DUMMY_SP,
+                    "missing required entry point `function main()`",
+                );
             }
-            // 退化：无顶层函数时由 build 阶段报错；此处仅占位。
-            diag(
-                &Lrc::new(SourceMap::default()),
-                module.entry_path.as_str(),
-                DUMMY_SP,
-                "missing required entry point `function main()`",
-            )
-        })?;
-    if !paths_equal_file(&main_fn.source_path, &module.entry_path) {
-        return Err(diag(
-            &main_fn.cm,
-            &main_fn.source_path,
-            main_fn.span,
-            "entry point `main` must be defined in the entry file",
-        ));
+        }
+        Some(main_fn) => {
+            if !paths_equal_file(&main_fn.source_path, &module.entry_path) {
+                push_diag(
+                    &mut errs,
+                    main_fn.cm.as_ref(),
+                    &main_fn.source_path,
+                    main_fn.span,
+                    "entry point `main` must be defined in the entry file",
+                );
+            }
+        }
     }
 
-    let warning_chunks: Result<Vec<Vec<CompileWarning>>, CompileError> = module
-        .fns
-        .par_iter_mut()
-        .map(|f| {
-            let mut local = Vec::new();
-            let cm = f.cm.clone();
-            let p = f.source_path.clone();
-            check_function(f, &globals, &cm, &p, &mut local)?;
-            Ok(local)
-        })
-        .collect();
-    let warnings: Vec<CompileWarning> = warning_chunks?.into_iter().flatten().collect();
+    let par = Mutex::new((Vec::<CompileWarning>::new(), Vec::<CompileError>::new()));
+    module.fns.par_iter_mut().for_each(|f| {
+        let mut local = Vec::new();
+        let cm = f.cm.clone();
+        let p = f.source_path.clone();
+        match check_function(f, &globals, &cm, &p, &mut local) {
+            Ok(()) => {
+                let mut g = par.lock().expect("poisoned mutex in check_module");
+                g.0.extend(local);
+            }
+            Err(e) => {
+                let mut g = par.lock().expect("poisoned mutex in check_module");
+                g.1.push(e);
+            }
+        }
+    });
+    let (mut warnings, sem_errs) = par.into_inner().expect("poisoned mutex in check_module");
+    errs.extend(sem_errs);
+    if !errs.is_empty() {
+        return Err(CompileError::merge_sorted(errs));
+    }
+    warnings.sort_by(|a, b| {
+        (&a.path, a.line, a.col, &a.message).cmp(&(&b.path, b.line, b.col, &b.message))
+    });
     Ok(warnings)
 }
 
-fn validate_classes(module: &IRModule) -> Result<(), CompileError> {
+fn validate_classes(module: &IRModule, out: &mut Vec<CompileError>) {
     let mut cmap: HashMap<String, &IRClass> = HashMap::new();
     for c in &module.classes {
-        if cmap.insert(c.name.clone(), c).is_some() {
-            return Err(diag(
+        if cmap.contains_key(&c.name) {
+            push_diag(
+                out,
                 c.cm.as_ref(),
                 &c.source_path,
                 c.span,
                 format!("duplicate class `{}`", c.name),
-            ));
+            );
+        } else {
+            cmap.insert(c.name.clone(), c);
         }
     }
     for c in &module.classes {
         if let Some(p) = &c.extends {
             if p == &c.name {
-                return Err(diag(
+                push_diag(
+                    out,
                     c.cm.as_ref(),
                     &c.source_path,
                     c.span,
                     "class cannot extend itself",
-                ));
+                );
+                continue;
             }
-            let parent = cmap.get(p).ok_or_else(|| {
-                diag(
+            let Some(parent) = cmap.get(p) else {
+                push_diag(
+                    out,
                     c.cm.as_ref(),
                     &c.source_path,
                     c.span,
                     format!("unknown base class `{p}`"),
-                )
-            })?;
+                );
+                continue;
+            };
             let mut p_methods = HashMap::<String, (&Vec<(String, TsType)>, &TsType)>::new();
             for m in &parent.methods {
                 p_methods.insert(m.name.clone(), (&m.params, &m.ret));
@@ -198,7 +227,8 @@ fn validate_classes(module: &IRModule) -> Result<(), CompileError> {
             for m in &c.methods {
                 if let Some((pp, pr)) = p_methods.get(&m.name) {
                     if !m.is_override {
-                        return Err(diag(
+                        push_diag(
+                            out,
                             c.cm.as_ref(),
                             &c.source_path,
                             m.span,
@@ -206,23 +236,24 @@ fn validate_classes(module: &IRModule) -> Result<(), CompileError> {
                                 "method `{}` overrides base method and must use `override`",
                                 m.name
                             ),
-                        ));
-                    }
-                    if *pp != &m.params || *pr != &m.ret {
-                        return Err(diag(
+                        );
+                    } else if *pp != &m.params || *pr != &m.ret {
+                        push_diag(
+                            out,
                             c.cm.as_ref(),
                             &c.source_path,
                             m.span,
                             format!("override signature mismatch for method `{}`", m.name),
-                        ));
+                        );
                     }
                 } else if m.is_override {
-                    return Err(diag(
+                    push_diag(
+                        out,
                         c.cm.as_ref(),
                         &c.source_path,
                         m.span,
                         format!("`override` method `{}` not found in base class", m.name),
-                    ));
+                    );
                 }
             }
             if let Some(ctor) = &c.ctor {
@@ -234,12 +265,13 @@ fn validate_classes(module: &IRModule) -> Result<(), CompileError> {
                     }) if callee == "__super_ctor"
                 );
                 if !has_super_first {
-                    return Err(diag(
+                    push_diag(
+                        out,
                         c.cm.as_ref(),
                         &c.source_path,
                         ctor.span,
                         "subclass constructor must start with `super(...)`",
-                    ));
+                    );
                 }
             }
         } else if let Some(ctor) = &c.ctor {
@@ -251,17 +283,18 @@ fn validate_classes(module: &IRModule) -> Result<(), CompileError> {
                         ..
                     } if callee == "__super_ctor"
                 ) {
-                    return Err(diag(
+                    push_diag(
+                        out,
                         c.cm.as_ref(),
                         &c.source_path,
                         ctor.span,
                         "`super(...)` is only valid in subclass constructor",
-                    ));
+                    );
+                    break;
                 }
             }
         }
     }
-    Ok(())
 }
 
 fn collect_fn_sigs_in_stmts(stmts: &[IRStmt]) -> HashMap<String, FnSig> {

@@ -4,26 +4,93 @@ mod import_utils;
 mod module_graph;
 mod resolve_imports;
 
+use std::fmt;
 use std::path::Path;
 
 use swc_common::{sync::Lrc, FileName, SourceMap, Span, Spanned};
 use swc_ecma_ast::Program;
 use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax};
-use thiserror::Error;
 
-/// 解析失败（含源位置信息，便于 CLI 输出）。
-#[derive(Debug, Error)]
+/// 解析失败：一条或多条诊断（多行 `Display`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
-    #[error("{path}:{line}:{col}: {message}")]
     WithLocation {
         path: String,
         line: usize,
         col: usize,
         message: String,
+        byte_pos: u32,
     },
-    #[error("parse failed: {0}")]
     Message(String),
+    Many(Vec<ParseError>),
 }
+
+impl ParseError {
+    /// 展开嵌套的 `Many`，保留 `WithLocation` 与 `Message`。
+    pub fn flatten(self) -> Vec<ParseError> {
+        match self {
+            ParseError::Many(inner) => inner.into_iter().flat_map(ParseError::flatten).collect(),
+            other => vec![other],
+        }
+    }
+
+    fn sort_key(&self) -> (String, u32, usize, usize, String) {
+        match self {
+            ParseError::WithLocation {
+                path,
+                line,
+                col,
+                message,
+                byte_pos,
+            } => (path.clone(), *byte_pos, *line, *col, message.clone()),
+            ParseError::Message(m) => (String::new(), 0, 0, 0, m.clone()),
+            ParseError::Many(_) => (String::new(), 0, 0, 0, String::new()),
+        }
+    }
+}
+
+fn sort_parse_errors_vec(v: &mut [ParseError]) {
+    v.sort_by_key(|a| a.sort_key());
+}
+
+/// 合并多条诊断为单一 `ParseError`（已排序；单条则不含 `Many` 包装）。
+pub fn merge_parse_errors(items: Vec<ParseError>) -> ParseError {
+    let mut flat: Vec<ParseError> = items.into_iter().flat_map(ParseError::flatten).collect();
+    flat.retain(|e| !matches!(e, ParseError::Many(_)));
+    sort_parse_errors_vec(&mut flat);
+    flat.dedup_by(|a, b| a.sort_key() == b.sort_key());
+    match flat.len() {
+        0 => ParseError::Message("parse failed".to_string()),
+        1 => flat.pop().expect("len 1"),
+        _ => ParseError::Many(flat),
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseError::WithLocation {
+                path,
+                line,
+                col,
+                message,
+                ..
+            } => write!(f, "{path}:{line}:{col}: {message}"),
+            ParseError::Message(msg) => write!(f, "{msg}"),
+            ParseError::Many(items) => {
+                for (i, e) in items.iter().enumerate() {
+                    if i > 0 {
+                        writeln!(f)?;
+                    }
+                    write!(f, "{e}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 /// 解析结果：AST + 源映射（供语义/诊断行列号）。
 pub struct ParsedSource {
@@ -55,23 +122,30 @@ pub fn parse_typescript_file(
 
     let mut parser = Parser::new(Syntax::Typescript(ts), StringInput::from(&*fm), None);
 
-    let program = parser
-        .parse_program()
-        .map_err(|e| diagnostic_to_error(&cm, &path_str, e.span(), e.kind().msg().as_ref()))?;
+    let program_result = parser.parse_program();
 
-    if let Some(e) = parser.take_errors().into_iter().next() {
-        return Err(diagnostic_to_error(
-            &cm,
-            &path_str,
-            e.span(),
-            e.kind().msg().as_ref(),
-        ));
+    let mut collected: Vec<ParseError> = parser
+        .take_errors()
+        .into_iter()
+        .map(|e| diagnostic_to_error(&cm, &path_str, e.span(), e.kind().msg().as_ref()))
+        .collect();
+
+    match program_result {
+        Ok(program) => {
+            if collected.is_empty() {
+                return Ok(ParsedSource {
+                    program,
+                    source_map: cm,
+                });
+            }
+            Err(merge_parse_errors(collected))
+        }
+        Err(e) => {
+            let primary = diagnostic_to_error(&cm, &path_str, e.span(), e.kind().msg().as_ref());
+            collected.insert(0, primary);
+            Err(merge_parse_errors(collected))
+        }
     }
-
-    Ok(ParsedSource {
-        program,
-        source_map: cm,
-    })
 }
 
 pub use module_graph::{
@@ -88,6 +162,7 @@ fn diagnostic_to_error(cm: &Lrc<SourceMap>, path: &str, span: Span, message: &st
         line: loc.line,
         col: loc.col_display,
         message: message.to_string(),
+        byte_pos: span.lo.0,
     }
 }
 
@@ -117,6 +192,46 @@ mod tests {
         };
         let s = e.to_string();
         assert!(s.contains("bad.ts"), "{s}");
+    }
+
+    #[test]
+    fn parse_collects_multiple_take_errors_when_present() {
+        // swc 在同一段恢复解析中可对后续片段再报 take_errors（两行常落在同一逻辑行）。
+        let src = "enum E { A,\nenum F { B,\n";
+        let e = match parse_typescript_file("multi.ts", src) {
+            Err(e) => e,
+            Ok(_) => panic!("expected parse errors"),
+        };
+        let s = e.to_string();
+        assert!(
+            s.lines().count() >= 2,
+            "expected multiple diagnostic lines, got:\n{s}"
+        );
+        assert!(s.contains("multi.ts"), "{s}");
+    }
+
+    #[test]
+    fn merge_parse_errors_formats_multiple_lines() {
+        let e = merge_parse_errors(vec![
+            ParseError::WithLocation {
+                path: "a.ts".into(),
+                line: 1,
+                col: 1,
+                message: "first".into(),
+                byte_pos: 0,
+            },
+            ParseError::WithLocation {
+                path: "a.ts".into(),
+                line: 3,
+                col: 2,
+                message: "second".into(),
+                byte_pos: 20,
+            },
+        ]);
+        let s = e.to_string();
+        assert!(s.contains("first"), "{s}");
+        assert!(s.contains("second"), "{s}");
+        assert!(s.lines().count() >= 2, "{s}");
     }
 
     #[test]

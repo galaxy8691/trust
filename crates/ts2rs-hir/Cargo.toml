@@ -10,7 +10,6 @@ rayon = "1.10"
 serde_json = "1.0"
 swc_common = "21.0.0"
 swc_ecma_ast = "23.0.0"
-thiserror = "2.0.18"
 
 [dev-dependencies]
 ts2rs-parser = { path = "../ts2rs-parser" }

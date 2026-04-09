@@ -67,7 +67,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 - [x] **Literal types**, **union types**, **`interface`**, **`type` aliases**: aligned with **strong-typing** checker roadmap (sub-items below; **literal types**, **primitive/literal unions**, **limited `interface`→`ObjectNum`**, **limited `type` alias→named table**). **Generics** are a separate sub-item (document “still rejected” milestone, not semantics).
 
-**Relation to implemented subset**: §1.3 supports limited annotations `number[]`, `{ k: number }` ([`TsType::ArrayNumber`](crates/ts2rs-hir/src/ir.rs) / [`ObjectNum`](crates/ts2rs-hir/src/ir.rs)). **Literal types** (`NumberLit` / `StringLit` / `BoolLit`) and **unions** ([`TsType::Union`](crates/ts2rs-hir/src/ir.rs) + normalization) below; **top-level `interface`** is nominal `ObjectNum` in the type layer (same rules as object type literals); **top-level `type` aliases** via [`collect_named_types`](crates/ts2rs-hir/src/build.rs) into the same named table; **generic semantics** still not implemented — rejection table in [README §1.4](README.md) and sub-items below; full object/interface shapes and IR in §2.1; **static** null and branch narrowing crosses §3.3.
+**Relation to implemented subset**: §1.3 supports limited annotations `number[]`, `{ k: number }` ([`TsType::ArrayNumber`](crates/ts2rs-hir/src/ir.rs) / [`ObjectNum`](crates/ts2rs-hir/src/ir.rs)). **Literal types** (`NumberLit` / `StringLit` / `BoolLit`) and **unions** ([`TsType::Union`](crates/ts2rs-hir/src/ir.rs) + normalization) below; **top-level `interface`** is nominal `ObjectNum` in the type layer (same rules as object type literals); **top-level `type` aliases** via [`collect_named_types_with_errors`](crates/ts2rs-hir/src/build/build_types.rs) into the same named table; **generic semantics** still not implemented — rejection table in [README §1.4](README.md) and sub-items below; full object/interface shapes and IR in §2.1; **static** null and branch narrowing crosses §3.3.
 
 **Sub-items**
 
@@ -309,10 +309,10 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 ### Toolchain and UX
 
-**Multi-diagnostic collection** (see [README §1.1 — Diagnostics and surface](README.md) “Single error”)
+**Multi-diagnostic collection** (see [README §1.1 — Diagnostics and surface](README.md))
 
-- [ ] **Compile pipeline** is **fail-fast**: [`build_module`](crates/ts2rs-hir/src/lib.rs) / [`check_module`](crates/ts2rs-hir/src/sem.rs) / [`emit_rust_with_options`](crates/ts2rs-hir/src/codegen.rs) return on first [`CompileError`](crates/ts2rs-hir/src/error.rs).
-- [ ] **Parser**: [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) only reports **one** error from [`take_errors()`](crates/ts2rs-parser/src/lib.rs); surfacing every swc parse diagnostic is future work.
+- [x] **Compile pipeline (build + sem)**: [`build_module`](crates/ts2rs-hir/src/build.rs) and [`check_module`](crates/ts2rs-hir/src/sem.rs) collect multiple [`CompileError`](crates/ts2rs-hir/src/error.rs) into [`CompileError::Many`](crates/ts2rs-hir/src/error.rs) (sorted). Top-level declaration / per-function sem errors are aggregated; **monomorphization** may still stop at the first error; [`emit_rust_with_options`](crates/ts2rs-hir/src/codegen.rs) remains fail-fast on first codegen issue.
+- [x] **Parser**: [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) reports **all** swc [`take_errors()`](crates/ts2rs-parser/src/lib.rs) diagnostics (plus primary `parse_program` error when present), merged and sorted. **Module graph** still returns on the first file parse failure (per-file output can be multi-line).
 
 **Comments vs generated Rust** (see [README §1.1 — Comments](README.md))
 
