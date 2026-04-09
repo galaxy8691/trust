@@ -1,6 +1,6 @@
 // test-ts：多文件手工回归 — 入口须为 `export function main`；依赖 `./math.ts`（math 再依赖 `./strutil.ts`）。
 // 运行：`cargo run -p trust-cli -- run test-ts/main.ts`
-// 覆盖：控制流、字面量/联合、`interface`/`type`、多文件 import、`Math`/工具函数、**泛型**（显式 `identity<number>(…)`）、**高阶函数**（`apply_num`、返回闭包的 `make_adder`）、**class / extends / super / 实例方法**（见下文 `OOBase`/`OOChild`）、通过 `Trust.toml` 的 Rust crate 互操作（`regex` / `url`），以及 `async`/`await` + `fetch` 天气请求。
+// 覆盖：控制流、字面量/联合、`interface`/`type`、多文件 import、`Math`/工具函数、**泛型**（显式 `identity<number>(…)`）、**高阶函数**（`apply_num`、返回闭包的 `make_adder`）、**class / extends / super / 实例方法**（见下文 `OOBase`/`OOChild`）、通过 `Trust.toml` 的 Rust crate 互操作（`regex` / `url` / `diesel::sqlite::SqliteConnection::establish`），以及 `async`/`await` + `fetch` 天气请求。
 // **仍不覆盖**（由 fixtures 或仍为 backlog）：`export class` 跨文件、完整 discriminated 收窄等 — 见 README 矩阵与 PROJECT-TODO。
 // stdout 依次：`ok 1`、`cmp 1`、`void_fn 1`；随后一行 `out= 15 5 50 2`（空格分隔）；最后一行 stdout 为 main 返回值（当前 **354224848179262000000**；以 `cargo run -p trust-cli -- run test-ts/main.ts` 为准）。
 // stderr：`err 1` 与单独一行 `2`（console.debug）。
@@ -27,6 +27,7 @@ import {
   sub,
 } from "./math.ts";
 import { Regex } from "regex";
+import { SqliteConnection } from "diesel";
 import { Url } from "url";
 
 interface Point {
@@ -221,6 +222,10 @@ export async function main(): Promise<number> {
   acc = acc + sch.length;
   acc = acc + pth.length;
   console.log("rust_url", sch, pth);
+
+  // Diesel：清单里 `new` → `SqliteConnection::establish`（`Connection::establish`，非 `SimpleConnection`）；`:memory:` 仅作演示。
+  let _sqlite: SqliteConnection = new SqliteConnection(":memory:");
+  console.log("diesel_sqlite_establish", 1);
 
   // 天气请求（HTTP 走 Rust 生态实现）
   let weather_a: string = await fetchText("https://wttr.in/?format=3");

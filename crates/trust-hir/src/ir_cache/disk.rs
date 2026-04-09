@@ -55,6 +55,8 @@ pub enum DiskIRExpr {
         span: DSpan,
         inherent_rust: Option<String>,
         inherent_rust_str_ref: Option<Vec<bool>>,
+        #[serde(default)]
+        inherent_rust_result_to_string: bool,
     },
     OptionalCall {
         callee: String,
@@ -70,6 +72,8 @@ pub enum DiskIRExpr {
         span: DSpan,
         inherent_rust: Option<String>,
         inherent_rust_str_ref: Option<Vec<bool>>,
+        #[serde(default)]
+        inherent_rust_result_to_string: bool,
     },
     RustNew {
         result_ty: TsType,

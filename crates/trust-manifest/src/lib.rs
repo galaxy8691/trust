@@ -34,32 +34,9 @@ fn sorted_dependency_table_string(deps: &toml::Table, path_base: Option<&Path>) 
         if let Some(base) = path_base {
             v = resolve_path_dependency_value(v, base);
         }
-        match &v {
-            toml::Value::String(_) => {
-                let line = toml::to_string(&toml::Value::Table({
-                    let mut m = toml::map::Map::new();
-                    m.insert(k.clone(), v.clone());
-                    m
-                }))
-                .unwrap_or_default();
-                out.push_str(&line);
-            }
-            toml::Value::Table(t)
-                if t.len() == 1 && t.get("path").and_then(|x| x.as_str()).is_some() =>
-            {
-                let path_val = t.get("path").expect("path key");
-                out.push_str(&format!("{k} = {{ path = {path_val} }}\n"));
-            }
-            _ => {
-                let line = toml::to_string(&toml::Value::Table({
-                    let mut m = toml::map::Map::new();
-                    m.insert(k.clone(), v);
-                    m
-                }))
-                .unwrap_or_default();
-                out.push_str(&line);
-            }
-        }
+        // `toml::to_string` 包一层 `{ k => v }` 时，嵌套表会变成顶层 `[k]`，Cargo 会报 unused manifest key。
+        // 对 `toml::Value` 使用 `Display` 可得到内联表/字符串形式：`diesel = { version = "…", … }`。
+        out.push_str(&format!("{k} = {v}\n"));
     }
     out
 }

@@ -2704,6 +2704,7 @@ fn build_expr(
                             span: c.span,
                             inherent_rust: None,
                             inherent_rust_str_ref: None,
+                            inherent_rust_result_to_string: false,
                         });
                     }
                     return Err(diag_spanned(
@@ -3115,6 +3116,7 @@ fn build_opt_chain_call_expr(
                     span: call.span,
                     inherent_rust: None,
                     inherent_rust_str_ref: None,
+                    inherent_rust_result_to_string: false,
                 })
             } else {
                 Err(diag_spanned(
@@ -3154,6 +3156,7 @@ fn build_opt_chain_call_expr(
                         span: call.span,
                         inherent_rust: None,
                         inherent_rust_str_ref: None,
+                        inherent_rust_result_to_string: false,
                     })
                 } else {
                     Err(diag_spanned(

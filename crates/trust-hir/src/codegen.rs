@@ -1312,6 +1312,7 @@ fn emit_expr(
             args,
             inherent_rust: Some(rust_m),
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
             ..
         }
         | IRExpr::OptionalMethodCall {
@@ -1320,6 +1321,7 @@ fn emit_expr(
             args,
             inherent_rust: Some(rust_m),
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
             ..
         } => {
             let recv = emit_expr(receiver, f, stmt_level, module)?;
@@ -1336,7 +1338,12 @@ fn emit_expr(
                     e
                 });
             }
-            Ok(format!("({recv}).{rust_m}({})", ps.join(", ")))
+            let inner = format!("({recv}).{rust_m}({})", ps.join(", "));
+            Ok(if *inherent_rust_result_to_string {
+                format!("({inner}).to_string()")
+            } else {
+                inner
+            })
         }
         IRExpr::MethodCall {
             receiver,

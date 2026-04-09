@@ -1,6 +1,8 @@
 [dependencies]
 regex = "1.12"
 url = "2.5"
+diesel = { version = "2.2.6", features = ["sqlite"] }
+libsqlite3-sys = { version = "0.30.1", features = ["bundled"] }
 trust_orm_facade = { path = "crates/trust_orm_facade" }
 trust_ffi_facade = { path = "crates/trust_ffi_facade" }
 
@@ -22,6 +24,14 @@ method = [
   { name = "scheme", args = [], returns = "string" },
   { name = "path", args = [], returns = "string" },
 ]
+
+# Diesel：`SimpleConnection` **没有** `establish`（只有 `batch_execute`）；`establish` 在 **`Connection`** trait 上。
+# 生成 crate 未 `use diesel::Connection`，故用 UFCS，避免找不到 `establish`。
+[[rust_binding]]
+crate = "diesel"
+type_name = "SqliteConnection"
+rust_type = "diesel::sqlite::SqliteConnection"
+new = { rust = "<diesel::sqlite::SqliteConnection as diesel::connection::Connection>::establish", unwrap = true }
 
 # Diesel：链式查询、`?`、关联类型 留在 Rust（见 `examples/crates/trust_orm_facade`）；TS 只绑窄 API。
 [[rust_binding]]

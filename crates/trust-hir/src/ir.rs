@@ -456,6 +456,8 @@ pub enum IRExpr {
         inherent_rust: Option<String>,
         /// 与 `args` 对齐；`true` 表示该实参在 Rust 侧以 `&str` 传递（对 `String` 生成 `.as_str()`）。
         inherent_rust_str_ref: Option<Vec<bool>>,
+        /// `Trust.toml` 声明 `returns = "string"`（等）时，Rust 侧常见为 `&str`，生成代码需 `.to_string()` 以得到 `String`。
+        inherent_rust_result_to_string: bool,
     },
     /// `f?.(args)`：可选调用（callee 为顶层标识符）；类型检查与 [`IRExpr::Call`] 一致，代码生成同 [`IRExpr::Call`]（非空 callee 下与 `f(args)` 等价）。
     OptionalCall {
@@ -473,6 +475,7 @@ pub enum IRExpr {
         span: Span,
         inherent_rust: Option<String>,
         inherent_rust_str_ref: Option<Vec<bool>>,
+        inherent_rust_result_to_string: bool,
     },
     /// Trust extern：`new Regex("…")` → `regex::Regex::new(...).unwrap()` 等。
     RustNew {

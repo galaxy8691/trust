@@ -124,6 +124,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             span,
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         } => DiskIRExpr::MethodCall {
             receiver: Box::new(encode_expr(cm, receiver)),
             method: method.clone(),
@@ -132,6 +133,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             span: to_dspan(cm, *span),
             inherent_rust: inherent_rust.clone(),
             inherent_rust_str_ref: inherent_rust_str_ref.clone(),
+            inherent_rust_result_to_string: *inherent_rust_result_to_string,
         },
         IRExpr::OptionalCall {
             callee,
@@ -152,6 +154,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             span,
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         } => DiskIRExpr::OptionalMethodCall {
             receiver: Box::new(encode_expr(cm, receiver)),
             method: method.clone(),
@@ -160,6 +163,7 @@ fn encode_expr(cm: &SourceMap, e: &IRExpr) -> DiskIRExpr {
             span: to_dspan(cm, *span),
             inherent_rust: inherent_rust.clone(),
             inherent_rust_str_ref: inherent_rust_str_ref.clone(),
+            inherent_rust_result_to_string: *inherent_rust_result_to_string,
         },
         IRExpr::RustNew {
             result_ty,
@@ -414,6 +418,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             span,
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         } => IRExpr::MethodCall {
             receiver: Box::new(decode_expr(cm, base, *receiver)),
             method,
@@ -422,6 +427,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             span: from_dspan(base, span),
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         },
         DiskIRExpr::OptionalCall {
             callee,
@@ -442,6 +448,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             span,
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         } => IRExpr::OptionalMethodCall {
             receiver: Box::new(decode_expr(cm, base, *receiver)),
             method,
@@ -450,6 +457,7 @@ fn decode_expr(cm: &Lrc<SourceMap>, base: u32, e: DiskIRExpr) -> IRExpr {
             span: from_dspan(base, span),
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         },
         DiskIRExpr::RustNew {
             result_ty,

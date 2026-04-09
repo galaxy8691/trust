@@ -63,6 +63,15 @@ fn trust_method_returns_ty(
     }
 }
 
+/// `Trust.toml` 声明 `returns = "string"` / `string | null` 时，生成 `String`；Rust 常见返回 `&str`，需在调用点 `.to_string()`。
+fn trust_rust_extern_return_needs_to_string_coerce(returns: &str) -> bool {
+    let t = returns.trim();
+    if t.replace(' ', "") == "string|null" {
+        return true;
+    }
+    matches!(t, "string")
+}
+
 fn trust_method_arg_ty(
     cm: &SendSourceMap,
     path: &str,
@@ -1984,6 +1993,7 @@ fn infer_expr_mut(
             span,
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         }
         | IRExpr::OptionalMethodCall {
             receiver,
@@ -1993,6 +2003,7 @@ fn infer_expr_mut(
             span,
             inherent_rust,
             inherent_rust_str_ref,
+            inherent_rust_result_to_string,
         } => {
             let rt = infer_expr_mut(receiver, stack, globals, cm, path)?;
             if let TsType::RustExtern {
@@ -2035,6 +2046,8 @@ fn infer_expr_mut(
                             *inherent_rust = Some(rust_name);
                             *inherent_rust_str_ref =
                                 Some(mb.args.iter().map(|s| s.trim() == "string").collect());
+                            *inherent_rust_result_to_string =
+                                trust_rust_extern_return_needs_to_string_coerce(&mb.returns);
                             return trust_method_returns_ty(cm, path, *span, &mb.returns);
                         }
                     }
