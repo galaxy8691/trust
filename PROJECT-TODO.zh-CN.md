@@ -30,7 +30,7 @@
 
 - [x] **错误恢复**：解析与 build/sem 可在一次失败中输出**多条**诊断（见 README.zh-CN.md §1.1）；模块图仍可能在**首个无法解析的文件**处返回（单文件内可多条）。
 - [x] **保留注释**：[`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 写入 [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs)（swc）；可冻结进 HIR 并可选生成 Rust `//` 行（[§14 — 注释与生成 Rust](PROJECT-TODO.zh-CN.md)）；详见 README.zh-CN.md §1.1。
-- [x] **`export` 变体**：除 `export function` 外均已显式拒绝（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；负例 fixtures `export_*_fail.ts` + `cli_e2e`。
+- [x] **`export` 变体**：`export function`、顶层 `function`、相对 **`export * from "./…"`** / **`export { … } from "./…"`**（值重导出；HIR 跳过）；其余 `export` 仍拒绝（[`build.rs`](crates/ts2rs-hir/src/build.rs)、[`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)）；负例 `export_*_fail.ts` + `cli_e2e`。
 
 ### 1.2 语句与声明扩展
 
@@ -180,7 +180,7 @@
 
 ### 6.2 多文件与模块（[`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)）
 
-- [x] **解析多入口**：[`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs)；CLI 多 `.ts` 位置参数或 `--project` + 极简 JSON `files`（[`ts2rs-cli`](crates/ts2rs-cli/src/main.rs)）。（验收：`module_graph::tests::extra_root_includes_unreachable_file`；`cli_e2e` `run_multi_entry_extra_roots_prints_main`、`run_project_tsconfig_prints_main`。）
+- [x] **解析多入口**：[`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs)；CLI 多 `.ts` 位置参数或 `--project` + 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude`**，见 [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)）（[`ts2rs-cli`](crates/ts2rs-cli/src/main.rs)）。（验收：`module_graph::tests::extra_root_includes_unreachable_file`；`cli_e2e` `run_multi_entry_extra_roots_prints_main`、`run_project_tsconfig_prints_main`、`run_project_tsconfig_extends_include_ok`。）
 - [x] **依赖图（子集）**：入口文件 + 相对 `import` → [`parse_module_graph`](crates/ts2rs-parser/src/module_graph.rs)（保留各模块 AST）→ `validate_imports` → [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) → 单 Rust crate。
 - [x] **`Cargo.toml` 生成**：[`RustBuildOptions`](crates/ts2rs-driver/src/lib.rs) / [`build_rust_to_executable_with_options`](crates/ts2rs-driver/src/lib.rs)；可选 path 依赖 `ts2rs_rt` + feature `ts2rs_rt`；CLI `--link-ts2rs-rt`。（验收：`write_minimal_crate_with_link_ts2rs_rt_contains_optional_path_dep`；`cli_e2e` `run_with_link_ts2rs_rt_prints_main`；`cargo test --workspace`。）
 - [x] **循环依赖**：[`parse_module_graph`](crates/ts2rs-parser/src/module_graph.rs) 检测并报错（见 `circular_*.ts`）。
@@ -319,10 +319,10 @@
 
 **工程级工具链**（见 [README.zh-CN.md](README.zh-CN.md)「非 1.0」与「不支持」边界）
 
-- [ ] **完整 `tsconfig`**：`extends`、`include` glob，不止于极简 `--project` JSON（仅 `files`）。
-- [ ] **包解析**（如 `node_modules`、`paths` 映射等典型 TS 工程行为）。
-- [ ] **`export * from`** 及**更多 `export` 形态**（相对当前支持子集）。
-- [ ] 随 README「非 1.0」/ 不支持表调整时同步更新本列表。
+- [x] **简化 `tsconfig`（CLI `--project`）**：递归 **`extends`**、**`include` / `exclude` glob**、合并后的 **`files`**（仍**无** npm / `node_modules`；合并语义为简化子集，非完整 `tsc`）。实现：[`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs)。**仅 `include`** 时匹配的 `.ts` 会排序，**入口**为字典序第一个；需固定顺序时用显式 **`files`**。验收：`tsconfig_resolve` 单测、`run_project_tsconfig_extends_include_ok`。
+- [x] **npm / 包管理器式解析**：**`node_modules`、npm 包、以及典型 `compilerOptions.paths` 指向包布局** — **明确非目标，不计划做。** 导入仍以**相对路径** `./x.ts` 为主（外加 CLI 多根 / `--project` 根列表）。
+- [x] **相对路径重导出**：`export * from "./x.ts"`、`export { a as b } from "./x.ts"`（值导出；**`export * as` / `export default` / 无 `from` 的 `export { x }`** 仍拒绝）。有效导出与 `validate_imports`：[`effective_exported_function_names_by_path`](crates/ts2rs-parser/src/module_graph.rs)；模块图沿 re-export 拉取依赖。HIR 跳过上述语句。验收：`validate_import_via_export_star_from`、`run_reexport_export_star_ok`。
+- [x] **README / 矩阵对齐**：已同步「非 1.0」、不支持表与 §1.1（本条）。
 
 ### 性能与安全（与 §10–§11 对齐；**并行 / 代码安全 / driver 资源**以本节勾选为准）
 

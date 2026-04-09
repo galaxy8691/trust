@@ -7,9 +7,13 @@ use std::path::{Path, PathBuf};
 use swc_common::comments::SingleThreadedComments;
 use swc_common::sync::Lrc;
 use swc_common::SourceMap;
-use swc_ecma_ast::{Decl, ExportDecl, ModuleDecl, ModuleItem, Program};
+use swc_ecma_ast::{
+    Decl, ExportDecl, ExportSpecifier, ModuleDecl, ModuleExportName, ModuleItem, Program,
+};
 
-use crate::import_utils::{named_import_target, resolve_supported_import_path};
+use crate::import_utils::{
+    named_import_target, resolve_relative_ts_path, resolve_supported_import_path,
+};
 use crate::{parse_typescript_file, ParseError, ParsedSource};
 
 /// 解析得到的单个模块。
@@ -95,9 +99,22 @@ fn visit_module(
 
     if let Program::Module(ref m) = source.program {
         for item in &m.body {
-            if let ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) = item {
-                let dep = resolve_supported_import_path(path, imp)?;
-                visit_module(&dep, visited, stack, modules)?;
+            match item {
+                ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) => {
+                    let dep = resolve_supported_import_path(path, imp)?;
+                    visit_module(&dep, visited, stack, modules)?;
+                }
+                ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) if !ea.type_only => {
+                    let dep = resolve_relative_ts_path(path, &ea.src)?;
+                    visit_module(&dep, visited, stack, modules)?;
+                }
+                ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(ne))
+                    if ne.src.is_some() && !ne.type_only =>
+                {
+                    let dep = resolve_relative_ts_path(path, ne.src.as_deref().expect("checked"))?;
+                    visit_module(&dep, visited, stack, modules)?;
+                }
+                _ => {}
             }
         }
     }
@@ -131,14 +148,176 @@ pub fn exported_function_names(program: &Program) -> HashSet<String> {
     out
 }
 
-/// 校验每个 `import { x }` 在目标模块中有对应 `export function x`。
-pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
-    let mut exports_by_path: HashMap<PathBuf, HashSet<String>> = HashMap::new();
-    for m in &graph.modules {
-        let canon = m.path.canonicalize().unwrap_or_else(|_| m.path.clone());
-        let names = exported_function_names(&m.source.program);
-        exports_by_path.insert(canon, names);
+fn module_export_name_str(n: &ModuleExportName) -> String {
+    match n {
+        ModuleExportName::Ident(i) => i.sym.to_string(),
+        ModuleExportName::Str(s) => s.value.to_string_lossy().into_owned(),
     }
+}
+
+fn try_add_exported_fn(
+    set: &mut HashSet<String>,
+    module_path: &Path,
+    name: String,
+) -> Result<(), ParseError> {
+    if !set.insert(name.clone()) {
+        return Err(ParseError::Message(format!(
+            "duplicate exported function `{name}` in `{}`",
+            module_path.display()
+        )));
+    }
+    Ok(())
+}
+
+struct ModuleEntry<'a> {
+    path: PathBuf,
+    program: &'a Program,
+}
+
+fn build_module_index(graph: &ParsedModuleGraph) -> HashMap<PathBuf, ModuleEntry<'_>> {
+    let mut m = HashMap::new();
+    for pm in &graph.modules {
+        let canon = pm.path.canonicalize().unwrap_or_else(|_| pm.path.clone());
+        m.insert(
+            canon,
+            ModuleEntry {
+                path: pm.path.clone(),
+                program: &pm.source.program,
+            },
+        );
+    }
+    m
+}
+
+fn effective_exported_function_names_at(
+    canon: &PathBuf,
+    index: &HashMap<PathBuf, ModuleEntry<'_>>,
+    memo: &mut HashMap<PathBuf, HashSet<String>>,
+    visiting: &mut HashSet<PathBuf>,
+) -> Result<HashSet<String>, ParseError> {
+    if let Some(cached) = memo.get(canon) {
+        return Ok(cached.clone());
+    }
+    if visiting.contains(canon) {
+        return Err(ParseError::Message(format!(
+            "circular re-export involving `{}`",
+            canon.display()
+        )));
+    }
+    let entry = index.get(canon).ok_or_else(|| {
+        ParseError::Message(format!(
+            "internal error: missing module `{}` in export resolution",
+            canon.display()
+        ))
+    })?;
+    visiting.insert(canon.clone());
+
+    let build = (|| -> Result<HashSet<String>, ParseError> {
+        let mut set = HashSet::new();
+        let file_path = &entry.path;
+        match entry.program {
+            Program::Script(_) => {}
+            Program::Module(m) => {
+                for item in &m.body {
+                    if let ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
+                        decl: Decl::Fn(f),
+                        ..
+                    })) = item
+                    {
+                        if !f.declare {
+                            try_add_exported_fn(&mut set, file_path, f.ident.sym.to_string())?;
+                        }
+                    }
+                    if let ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) = item {
+                        if ea.type_only {
+                            continue;
+                        }
+                        let dep = resolve_relative_ts_path(file_path, &ea.src)?;
+                        let dep_canon = dep.canonicalize().unwrap_or_else(|_| dep.clone());
+                        let sub = effective_exported_function_names_at(
+                            &dep_canon, index, memo, visiting,
+                        )?;
+                        for n in sub {
+                            try_add_exported_fn(&mut set, file_path, n)?;
+                        }
+                    }
+                    if let ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(ne)) = item {
+                        if ne.type_only {
+                            continue;
+                        }
+                        if let Some(src) = ne.src.as_deref() {
+                            let dep = resolve_relative_ts_path(file_path, src)?;
+                            let dep_canon = dep.canonicalize().unwrap_or_else(|_| dep.clone());
+                            let sub = effective_exported_function_names_at(
+                                &dep_canon, index, memo, visiting,
+                            )?;
+                            for spec in &ne.specifiers {
+                                match spec {
+                                    ExportSpecifier::Namespace(_) => {
+                                        return Err(ParseError::Message(
+                                            "`export * as` re-export is not supported".to_string(),
+                                        ));
+                                    }
+                                    ExportSpecifier::Default(_) => {
+                                        return Err(ParseError::Message(
+                                            "`export default` re-export from is not supported"
+                                                .to_string(),
+                                        ));
+                                    }
+                                    ExportSpecifier::Named(named) => {
+                                        if named.is_type_only {
+                                            continue;
+                                        }
+                                        let orig = module_export_name_str(&named.orig);
+                                        let exported = named
+                                            .exported
+                                            .as_ref()
+                                            .map(module_export_name_str)
+                                            .unwrap_or_else(|| orig.clone());
+                                        if !sub.contains(&orig) {
+                                            return Err(ParseError::Message(format!(
+                                                "no exported function `{orig}` in `{}`",
+                                                dep.display()
+                                            )));
+                                        }
+                                        try_add_exported_fn(&mut set, file_path, exported)?;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(set)
+    })();
+
+    visiting.remove(canon);
+    let set = build?;
+    memo.insert(canon.clone(), set.clone());
+    Ok(set)
+}
+
+/// 每个模块**有效**导出的函数名：`export function`、相对路径 `export * from` / `export { … } from`。
+pub fn effective_exported_function_names_by_path(
+    graph: &ParsedModuleGraph,
+) -> Result<HashMap<PathBuf, HashSet<String>>, ParseError> {
+    let index = build_module_index(graph);
+    let mut memo = HashMap::new();
+    let mut out = HashMap::new();
+    let mut keys: Vec<PathBuf> = index.keys().cloned().collect();
+    keys.sort();
+    for canon in keys {
+        let s =
+            effective_exported_function_names_at(&canon, &index, &mut memo, &mut HashSet::new())?;
+        out.insert(canon, s);
+    }
+    Ok(out)
+}
+
+/// 校验每个 `import { x }` 在目标模块的有效导出中有对应函数名。
+pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
+    let exports_by_path = effective_exported_function_names_by_path(graph)?;
 
     for m in &graph.modules {
         let Program::Module(mod_body) = &m.source.program else {
@@ -237,6 +416,72 @@ mod tests {
         assert!(
             s.contains("no exported function `foo`"),
             "expected missing export diagnostic, got: {s}"
+        );
+    }
+
+    #[test]
+    fn validate_import_via_export_star_from() {
+        let dir = tempdir().unwrap();
+        let lib = dir.path().join("lib.ts");
+        let barrel = dir.path().join("barrel.ts");
+        let app = dir.path().join("app.ts");
+        fs::write(
+            &lib,
+            "export function add(a: number, b: number): number { return a + b; }\n",
+        )
+        .unwrap();
+        fs::write(&barrel, "export * from \"./lib.ts\";\n").unwrap();
+        fs::write(
+            &app,
+            "import { add } from \"./barrel.ts\";\nexport function main(): number { return add(1, 2); }\n",
+        )
+        .unwrap();
+        let g = parse_module_graph(&app).unwrap();
+        validate_imports(&g).unwrap();
+    }
+
+    #[test]
+    fn validate_import_export_named_from_alias() {
+        let dir = tempdir().unwrap();
+        let lib = dir.path().join("lib.ts");
+        let barrel = dir.path().join("barrel.ts");
+        let app = dir.path().join("app.ts");
+        fs::write(
+            &lib,
+            "export function add(a: number, b: number): number { return a + b; }\n",
+        )
+        .unwrap();
+        fs::write(&barrel, "export { add as plus } from \"./lib.ts\";\n").unwrap();
+        fs::write(
+            &app,
+            "import { plus } from \"./barrel.ts\";\nexport function main(): number { return plus(1, 2); }\n",
+        )
+        .unwrap();
+        let g = parse_module_graph(&app).unwrap();
+        validate_imports(&g).unwrap();
+    }
+
+    #[test]
+    fn duplicate_export_star_twice_errors() {
+        let dir = tempdir().unwrap();
+        let lib = dir.path().join("lib.ts");
+        let barrel = dir.path().join("barrel.ts");
+        fs::write(
+            &lib,
+            "export function add(a: number, b: number): number { return a + b; }\n",
+        )
+        .unwrap();
+        fs::write(
+            &barrel,
+            "export * from \"./lib.ts\";\nexport * from \"./lib.ts\";\n",
+        )
+        .unwrap();
+        let g = parse_module_graph(&barrel).unwrap();
+        let e = validate_imports(&g).unwrap_err();
+        let s = e.to_string();
+        assert!(
+            s.contains("duplicate exported function"),
+            "expected duplicate export diagnostic, got: {s}"
         );
     }
 }

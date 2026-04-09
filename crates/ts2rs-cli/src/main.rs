@@ -1,6 +1,7 @@
 mod cli_args;
 mod commands;
 mod graph_loader;
+mod tsconfig_resolve;
 
 use clap::Parser;
 

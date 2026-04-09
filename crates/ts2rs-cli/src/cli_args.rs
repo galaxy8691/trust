@@ -70,7 +70,7 @@ pub(crate) struct GraphInput {
     /// 入口 `.ts` 在前，其余为额外根（与 `--project` 互斥）
     #[arg(value_name = "TS")]
     pub(crate) inputs: Vec<PathBuf>,
-    /// 极简 JSON tsconfig（仅 `files` 数组），路径相对该文件目录；与位置参数互斥
+    /// JSON tsconfig：`extends`、`files`、`include`、`exclude`（简化合并，无 npm）；路径相对各字段所在配置目录；与位置参数互斥
     #[arg(long, value_name = "TSCONFIG")]
     pub(crate) project: Option<PathBuf>,
 }

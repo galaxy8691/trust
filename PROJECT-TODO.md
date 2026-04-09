@@ -32,7 +32,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 - [x] **Error recovery**: **single diagnostic** today (fail on first); multi-diagnostic collection is future work; see [README — Diagnostics (§1.1)](README.md).
 - [x] **Preserving comments**: [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) populates [`ParsedSource::comments`](crates/ts2rs-parser/src/lib.rs) (swc); frozen into HIR and optionally emitted as Rust `//` lines ([§14 — Comments vs generated Rust](PROJECT-TODO.md)); see README §1.1.
-- [x] **`export` variants**: everything except `export function` is explicitly rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs)); negative fixtures `export_*_fail.ts` + `cli_e2e`.
+- [x] **`export` variants**: `export function`, top-level `function`, relative **`export * from "./…"`** / **`export { … } from "./…"`** (value re-exports; HIR skips); other `export` forms still rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs), [`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)); negatives `export_*_fail.ts` + `cli_e2e`.
 
 ### 1.2 Statements and declarations
 
@@ -182,7 +182,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 6.2 Multi-file and modules ([`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs))
 
-- [x] **Multi-root parsing**: [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs); CLI multiple `.ts` or `--project` + minimal JSON `files` ([`ts2rs-cli`](crates/ts2rs-cli/src/main.rs)) (`extra_root_includes_unreachable_file`; `run_multi_entry_extra_roots_prints_main`, `run_project_tsconfig_prints_main`).
+- [x] **Multi-root parsing**: [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs); CLI multiple `.ts` or `--project` + simplified JSON (`extends`, `files`, `include` / `exclude`) via [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs) ([`ts2rs-cli`](crates/ts2rs-cli/src/main.rs)) (`extra_root_includes_unreachable_file`; `run_multi_entry_extra_roots_prints_main`, `run_project_tsconfig_prints_main`, `run_project_tsconfig_extends_include_ok`).
 - [x] **Dependency graph (subset)**: entry + relative `import` → [`parse_module_graph`](crates/ts2rs-parser/src/module_graph.rs) (per-module AST) → `validate_imports` → [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) → one Rust crate.
 - [x] **Generating `Cargo.toml`**: [`RustBuildOptions`](crates/ts2rs-driver/src/lib.rs) / [`build_rust_to_executable_with_options`](crates/ts2rs-driver/src/lib.rs); optional path dep `ts2rs_rt` + feature; CLI `--link-ts2rs-rt` (`write_minimal_crate_with_link_ts2rs_rt_contains_optional_path_dep`; `run_with_link_ts2rs_rt_prints_main`).
 - [x] **Cycles**: [`parse_module_graph`](crates/ts2rs-parser/src/module_graph.rs) detects and errors (`circular_*.ts`).
@@ -321,10 +321,10 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 **Project-scale tooling** (see [README — Scope (1.0)](README.md) “Not 1.0” and [Unsupported TypeScript](README.md))
 
-- [ ] **Full `tsconfig`**: `extends`, `include` glob, beyond minimal `--project` JSON with `files` only.
-- [ ] **Package resolution** (e.g. `node_modules`, `paths` mapping as in typical TS projects).
-- [ ] **`export *` from** and **more `export` shapes** than the supported subset.
-- [ ] Keep this list aligned with README “Not 1.0” / unsupported table when scope changes.
+- [x] **Simplified `tsconfig` (CLI `--project`)**: recursive **`extends`**, **`include` / `exclude` glob**, merged **`files`** (still **no** npm / `node_modules`; not full `tsc` merge semantics). Implementation: [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs). **`include`-only** projects: matched `.ts` files are sorted; **entry** is lexicographically first — use explicit **`files`** when order matters. Tests: `tsconfig_resolve` unit tests, `run_project_tsconfig_extends_include_ok`.
+- [x] **npm / package-manager resolution**: **`node_modules`**, npm packages, and typical `compilerOptions.paths` → package layouts — **explicit non-goal; not planned.** Imports stay **relative** `./x.ts` (and CLI roots / `--project` roots).
+- [x] **Relative re-exports**: `export * from "./x.ts"` and `export { a as b } from "./x.ts"` (value exports; **`export * as` / `export default` / local `export { x }` without `from`** still rejected). Effective exports for `validate_imports`: [`effective_exported_function_names_by_path`](crates/ts2rs-parser/src/module_graph.rs); module graph follows re-export edges. HIR skips these statements (no duplicate IR). Test: `validate_import_via_export_star_from`, `run_reexport_export_star_ok`.
+- [x] **README / matrix alignment**: “Not 1.0”, unsupported table, and §1.1 updated for the above (this bullet).
 
 ### Performance and security (aligned with §10–§11; **parallelism / codegen safety / driver resources** are tracked here)
 

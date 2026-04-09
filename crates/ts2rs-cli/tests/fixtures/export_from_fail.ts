@@ -1,1 +1,1 @@
-export * from "./m";
+export * from "m";

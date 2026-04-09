@@ -38,7 +38,7 @@ flowchart LR
 
 | 用户可见形态 | 说明 |
 |--------------|------|
-| 非 `export function` / 非顶层 `function` 的 `export` | 如 `export { }`、`export default`、`export * from`、`export const`、`export class` 等（**顶层、无 `export` 的 `class`** 见矩阵与 [PROJECT-TODO.zh-CN.md §13.3](PROJECT-TODO.zh-CN.md)） |
+| 非 `export function` / 非顶层 `function` / 非相对 **`export * from "./…"`** / 非 **`export { … } from "./…"`** 的 `export` | 如无 `from` 的 `export { }`、`export default`、`export * as`、`export const`、`export class` 等（**顶层、无 `export` 的 `class`** 见矩阵与 [PROJECT-TODO.zh-CN.md §13.3](PROJECT-TODO.zh-CN.md)） |
 | 复杂泛型语义 | 高阶推导、复杂约束与完整 TS 泛型语义仍未实现；**调用处显式类型实参的单态化子集**见矩阵「泛型与类型参数」与 [§13.1](PROJECT-TODO.zh-CN.md) |
 | 可选链（拒斥边界） | 受限 **`f?.()`** / **`recv?.m()`** 已支持（`optional_call_ok.ts`）；任意 callee、非标识符 callee 等仍可能拒绝（见 `optional_chain_fail.ts`） |
 | `interface extends`、跨文件导入接口名、可选属性 | 仅单文件具名表 |
@@ -51,12 +51,12 @@ flowchart LR
 - **矩阵覆盖**：下表「支持」或「部分支持」行均有代表性 **fixture**（[`fixtures/`](crates/ts2rs-cli/tests/fixtures/)）与 **[`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)** 测试对应，详见下文 **[矩阵与集成测试对照](#矩阵与集成测试对照)**。手工大样例另见 [`test-ts/main.ts`](test-ts/main.ts)、[`test-ts/math.ts`](test-ts/math.ts)。**回归**用例目录见 [`tests/regression/`](crates/ts2rs-cli/tests/regression/)。
 - **诊断**：编译**错误**为**英文**，格式为 `path:line:col: message`（[`CompileError`](crates/ts2rs-hir/src/error.rs)）。**警告**（如不可达代码）同为该格式，经 [`CompileWarning`](crates/ts2rs-hir/src/error.rs) 收集；成功编译时 CLI / driver 将警告打印到 **stderr**，不抬高退出码。
 - **CI**：推送与 PR 在 GitHub Actions 上运行 `cargo fmt --all --check`、`cargo test --workspace` 与 `cargo clippy --workspace --all-targets`（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）。
-- **非 1.0**：完整 `tsconfig`（`extends` / `include` glob）、包名解析、`export *` 等仍为后续目标；**相对路径** `import { x } from "./dep.ts"` 已支持；CLI 另支持**多入口**：多个 `.ts` 位置参数或极简 JSON（仅 `files` 数组）+ `--project`（[`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs) + `validate_imports`，HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)；入口文件须含 `main`，全局函数名唯一）。
+- **非 1.0**：与完整 `tsc` 的 `tsconfig` 行为对齐、`export default`、`export * as` 等；**不计划支持 npm / `node_modules` / 包管理器式模块解析。** **相对路径** `import { x } from "./dep.ts"` 与相对 **`export *` / `export { … } from`**（桶文件重导出）已支持；CLI 支持**多根**（位置参数 `.ts`）或 **`--project`** 简化 JSON（**`extends`**、**`files`**、**`include` / `exclude` glob**，见 [`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs)、[`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs)）+ [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs) + [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs)，HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)；入口须含 `main`，全局函数名唯一。
 
 ## 诊断与前端健壮性（§1.1）
 
 - **多条编译错误**：build 与语义阶段可在**一次失败**中收集多条诊断（[`CompileError::Many`](crates/ts2rs-hir/src/error.rs)），按行输出多条 `path:line:col: message`（已排序）。解析器 [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) 会输出 swc **`take_errors()` 的全部**诊断。**单态化**与 **codegen** 仍可能在首条内部错误处停止。**成功时**可附带多条 [`CompileWarning`](crates/ts2rs-hir/src/error.rs)（[`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs) 同形）。
-- **`export` 形态**：除 `export function …` 与顶层 `function …` 外，其余 `export`（如 `export { … }`、`export default`、`export * from`、`export const`、`export class` 等）均**显式报错**（[`build.rs`](crates/ts2rs-hir/src/build.rs)）；**顶层、无 `export` 的 `class`** 见矩阵。负例样例见 `export_*_fail.ts`（与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)）。
+- **`export` 形态**：`export function …`、顶层 `function …`、相对 **`export * from "./…"`**、**`export { a as b } from "./…"`**（**函数**导出，见 [`build.rs`](crates/ts2rs-hir/src/build.rs)、[`module_graph`](crates/ts2rs-parser/src/module_graph.rs)）；`export class` / `export const` / `export default` / 无 `from` 的 `export { x }` 等仍**报错**；**顶层、无 `export` 的 `class`** 见矩阵。负例见 `export_*_fail.ts` 与 [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)。
 - **注释**：swc 的 `Program` **仍无**注释节点；[`ParsedSource`](crates/ts2rs-parser/src/lib.rs) 含 `source_map` 与解析器收集的 `comments`（swc 注释表）。**将 TS leading 注释写入生成 Rust** 为可选：[`CodegenOptions::emit_ts_source_comments`](crates/ts2rs-hir/src/codegen.rs)，CLI `ts2rs compile --ts-source-comments`，在语句与顶层函数前输出 `//` 行；trailing 与大粒度 lowering 后的位置不保证（见 [PROJECT-TODO.zh-CN.md §14](PROJECT-TODO.zh-CN.md)）。
 - **后续与 backlog**（更细粒度注释映射、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
 
@@ -83,7 +83,7 @@ flowchart LR
 |------|------|------|
 | 单文件 `.ts` | 支持 | |
 | `function` 顶层声明 | 支持 | `export function` 同文件内支持；其它 `export` 形式见上文 §1.1 |
-| `import` | 部分支持 | 仅 `import { name } from "./relative.ts"`；依赖须 `export function name`；解析为模块图（不合并 AST）；见 `import_add_main.ts` 与负例 `import_missing_export_*`、`circular_*` |
+| `import` | 部分支持 | 仅 `import { name } from "./relative.ts"`；依赖模块须在**有效导出**中含 `name`（`export function` 与/或相对 re-export）；模块图见 `import_add_main.ts`、`run_reexport_export_star_ok` 与负例 `import_missing_export_*`、`circular_*` |
 | `number` / `boolean` / `string` / `void` | 支持 | `void` 仅作返回类型；`let` 不可用 `void` |
 | `let`（单声明） | 部分支持 | 须类型注解；可无初始化，但使用前须明确赋值（见上文 §3.4）；可变 `let` 可二次赋值（`IRStmt::Assign`）；见 `definite_assign_ok.ts` |
 | `const` | 支持 | 与 `let` 同形，语义禁止赋值 |
@@ -124,7 +124,7 @@ flowchart LR
 | 主题 | 代表性 fixture | 代表性集成测试 |
 |------|----------------|----------------|
 | 单文件 / 算术 / 条件 / 字符串 | `sample.ts`、`ops.ts`、`boolean_if.ts`、`string_concat.ts` | `compile_writes_rust`、`run_prints_main_result`、`run_ops_prints_six` 等 |
-| `import` / 多文件 / 导出 | `import_add_main.ts`+`add_dep.ts`、`multi_entry_*`、`export_main.ts` | `run_import_add_main_prints_three`、`run_multi_entry_extra_roots_prints_main`、`compile_export_main_writes_ts_main` |
+| `import` / 多文件 / 导出 | `import_add_main.ts`+`add_dep.ts`、`multi_entry_*`、`export_main.ts` | `run_import_add_main_prints_three`、`run_multi_entry_extra_roots_prints_main`、`compile_export_main_writes_ts_main`、`run_reexport_export_star_ok` |
 | 负例（import/export/重复） | `import_missing_export_*`、`circular_*`、`dup_*`、`export_*_fail.ts`、`import_fail.ts` | `compile_import_missing_export_fails`、`compile_circular_import_fails` 等 |
 | `let`/`const`/块/赋值 | `const_ok.ts`、`assign_simple.ts`、`empty_stmt.ts`、`let_if.ts` | `run_const_ok_prints_42`、`run_assign_simple_prints_five` 等 |
 | 语义边界（重复/shadow/void 分支） | `let_dup_same_block_fail.ts`、`let_shadow_nested_ok.ts`、`param_let_same_name_fail.ts`、`void_log_in_branch.ts` | 对应 `compile_*` / `run_void_log_in_branch_prints_branch` |
@@ -139,7 +139,7 @@ flowchart LR
 | `interface` / `type` / 泛型子集 | `interface_*.ts`、`type_alias_*.ts`、`generic_function_ok.ts` | `run_interface_generic_ok_prints_zero`、`run_type_alias_generic_ok_prints_zero`、`run_generic_function_ok_prints_three` |
 | class 子集 | `class_basic_ok.ts`、`class_this_method_ok.ts`、`class_extends_ok.ts`、`class_super_ctor_ok.ts`、`class_*_fail.ts` | `run_class_basic_ok_prints_five`、`run_class_extends_ok_prints_seven`、`compile_class_super_invalid_fails`、`compile_class_override_mismatch_fails` |
 | 嵌套函数 | `nested_fn.ts` | `run_nested_fn_prints_nine` |
-| 极简 tsconfig / `--project` | `multi_entry_tsconfig.json` + `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
+| 极简 tsconfig / `--project` | `multi_entry_tsconfig.json` + `multi_entry_*.ts` | `run_project_tsconfig_prints_main`、`run_project_tsconfig_extends_include_ok` |
 | async / `Promise` / HTTP | `async_mvp_compile_ok.ts`、`async_control_flow_ok.ts`、`promise_all_fetch_ok.ts`、`fetch_response_ok.ts`、`fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`、`compile_async_control_flow_if_while_await_ok`、`compile_promise_all_fetch_alias_ok`、`compile_fetch_response_ok`、`compile_fetch_post_init_ok`、`compile_promise_then_fails` |
 | CLI：`check` / `--emit-ir` | `sample.ts`、`switch_fail.ts` | `check_sample_ok`、`compile_emit_ir_stderr_contains_ir_module` |
 | 可选链 / `??` / 对象字段（负例边界） | `optional_chain_fail.ts`、`nullish_fail.ts`、`object_fail.ts` | `compile_optional_call_bad_callee_fails` 等 |
@@ -224,7 +224,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 **退出码**：**`0`** 表示 ts2rs 与子程序均成功；**`ts2rs` 自身失败**（解析、语义、找不到 `cargo` 等）为 **`1`**；**`run`** 在已生成并成功启动子进程后，若子进程非零退出，则 **ts2rs 以该进程的退出码退出**（无 `code()` 时如信号则 **`1`**）。Warning **不**抬高退出码（与上文「诊断」一致）。
 
 - **多文件**：第一个位置参数为**入口**（须含 `export function main`），其余为**额外根**（入口 DFS 未覆盖的 `.ts` 仍会加入模块图）。
-- **极简 tsconfig**：`--project foo.json` 解析 JSON 中的 **`files`** 数组（路径相对该文件所在目录）；**第一项为入口**。与多个 `.ts` 位置参数**互斥**。
+- **`--project` tsconfig**（简化 JSON）：可选 **`extends`**、**`files`**、**`include`**、**`exclude`**（glob）；路径相对**书写该字段的配置文件**所在目录；**`exclude`** 在 `extends` 链上**累积**。若合并后 **`files` 非空**则只用 `files`；否则展开 **`include`**（仅 `.ts`）。**仅 `include`** 时匹配文件会排序，**入口**为字典序第一个——需固定顺序时用显式 **`files`**。与多个 `.ts` 位置参数**互斥**。
 - **`run --link-ts2rs-rt`**：在临时 crate 的 `Cargo.toml` 中加入可选 path 依赖 **`ts2rs_rt`**（须在本仓库源码树内构建；仅从 crates.io 安装时通常会失败）。生成代码默认仍不 `use ts2rs_rt`。
 - **`compile --link-ts2rs-rt`**：仅为 CLI 一致性保留，不生成 `Cargo.toml`，无效果。
 
@@ -239,7 +239,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | `ts2rs-lower` | `lower_program` / [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) |
 | `ts2rs-driver` | 临时 crate + `cargo build`（需本机 `cargo` 在 `PATH`）；[`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)；未找到 `cargo` 时 [`DriverError::CargoNotFound`](crates/ts2rs-driver/src/lib.rs)；流水线拆分：[`pipeline.rs`](crates/ts2rs-driver/src/pipeline.rs)、[`cargo_runner.rs`](crates/ts2rs-driver/src/cargo_runner.rs)、[`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs) |
 | `ts2rs_rt` | 可选运行时（预留） |
-| `ts2rs-cli` | 命令行 `ts2rs`；命令拆分：[`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs)、[`commands.rs`](crates/ts2rs-cli/src/commands.rs)、[`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs) |
+| `ts2rs-cli` | 命令行 `ts2rs`；[`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs)、[`commands.rs`](crates/ts2rs-cli/src/commands.rs)、[`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs)、[`tsconfig_resolve.rs`](crates/ts2rs-cli/src/tsconfig_resolve.rs) |
 
 ## 许可
 

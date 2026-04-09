@@ -752,12 +752,15 @@ fn collect_fn_decls(
                         }
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(e)) => {
+                        if e.src.is_some() && !e.type_only {
+                            continue;
+                        }
                         push_diag(
                             errs,
                             cm.as_ref(),
                             path,
                             e.span(),
-                            "`export { ... }` / named re-exports are not supported (only `export function` is supported)",
+                            "`export { ... }` without `from` is not supported (use `export function` or `export { x } from \"./file.ts\"`)",
                         );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(e)) => {
@@ -779,12 +782,15 @@ fn collect_fn_decls(
                         );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::ExportAll(e)) => {
+                        if !e.type_only {
+                            continue;
+                        }
                         push_diag(
                             errs,
                             cm.as_ref(),
                             path,
                             e.span(),
-                            "`export * from` / re-export-from is not supported in this compiler version",
+                            "`export type * from` is not supported in this compiler version",
                         );
                     }
                     ModuleItem::ModuleDecl(ModuleDecl::TsImportEquals(e)) => {

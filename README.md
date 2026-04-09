@@ -38,7 +38,7 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 
 | User-visible form | Notes |
 |-------------------|--------|
-| `export` other than `export function` / top-level `function` | e.g. `export { }`, `export default`, `export * from`, `export const`, `export class` (**top-level `class` without `export`** is in the matrix and [PROJECT-TODO.md §13.3](PROJECT-TODO.md)) |
+| `export` other than `export function` / top-level `function` / relative **`export * from "./x.ts"`** / **`export { … } from "./x.ts"`** | e.g. `export { }` without `from`, `export default`, `export * as`, `export const`, `export class` (**top-level `class` without `export`** is in the matrix and [PROJECT-TODO.md §13.3](PROJECT-TODO.md)) |
 | Advanced generics | Complex inference/constraints and full TS generic semantics are still out of scope; **explicit type arguments at call sites** (monomorphization subset) — see matrix “Generics” and [§13.1](PROJECT-TODO.md) |
 | Optional chaining (rejection boundary) | Restricted **`f?.()`** / **`recv?.m()`** are supported (`optional_call_ok.ts`); other callees / shapes may still be rejected (`optional_chain_fail.ts`) |
 | `interface` `extends`, optional props, imported interface names across files | Single-file nominal table only |
@@ -51,12 +51,12 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 - **Matrix coverage**: rows marked Supported / Partially supported have representative **fixtures** ([`fixtures/`](crates/ts2rs-cli/tests/fixtures/)) and **[`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)** tests; see **[Matrix vs integration tests](#matrix-vs-integration-tests)**. Larger examples: [`test-ts/main.ts`](test-ts/main.ts), [`test-ts/math.ts`](test-ts/math.ts). **Regression** cases: [`tests/regression/`](crates/ts2rs-cli/tests/regression/).
 - **Diagnostics**: compile **errors** are **English**, `path:line:col: message` ([`CompileError`](crates/ts2rs-hir/src/error.rs)). **Warnings** (e.g. unreachable code) use the same shape via [`CompileWarning`](crates/ts2rs-hir/src/error.rs); on success the CLI prints warnings to **stderr** and does **not** change exit code.
 - **CI**: pushes and PRs run `cargo fmt --all --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
-- **Not 1.0**: full `tsconfig` (`extends` / `include` glob), package resolution, `export *`, etc. **Relative** `import { x } from "./dep.ts"` is supported; the CLI supports **multiple roots**: several `.ts` arguments or a minimal JSON (`files` only) with `--project` ([`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs) + `validate_imports`, HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)); entry must define `main`, global function names unique.
+- **Not 1.0**: full `tsc` tsconfig parity, `export default`, `export * as`, etc. **npm / `node_modules` / package-manager resolution is not planned.** **Relative** `import { x } from "./dep.ts"` and relative **`export *` / `export { … } from`** (barrel files) are supported; the CLI supports **multiple roots** (positional `.ts`) or **`--project`** JSON with simplified **`extends`**, **`files`**, **`include` / `exclude` glob** ([`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs), [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs), [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs), HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)); entry must define `main`, global function names unique.
 
 ## Diagnostics and surface (§1.1)
 
 - **Multiple compile errors**: build and semantic phases may collect **several** diagnostics in one failed run ([`CompileError::Many`](crates/ts2rs-hir/src/error.rs)), printed as multiple `path:line:col: message` lines (sorted). Parser [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) surfaces **all** swc `take_errors()` diagnostics. **Monomorphization** and **codegen** can still stop at the first internal error. On success, multiple [`CompileWarning`](crates/ts2rs-hir/src/error.rs) may be returned (same shape in [`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs)).
-- **`export` shapes**: anything other than `export function …` and top-level `function …` is rejected ([`build.rs`](crates/ts2rs-hir/src/build.rs)), including `export class` / `export const` / etc.; **top-level `class` without `export`** is in the matrix. Negative fixtures `export_*_fail.ts` and [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
+- **`export` shapes**: `export function …`, top-level `function …`, relative **`export * from "./…"`**, and **`export { a as b } from "./…"`** are accepted for **function** exports (see [`build.rs`](crates/ts2rs-hir/src/build.rs), [`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)); `export class` / `export const` / `export default` / local `export { x }` without `from` / etc. are still rejected; **top-level `class` without `export`** is in the matrix. Negative fixtures `export_*_fail.ts` and [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
 - **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/ts2rs-parser/src/lib.rs) includes `source_map`, `comments` (swc leading/trailing tables via [`SingleThreadedComments`](https://rustdoc.swc.rs/swc_common/comments/struct.SingleThreadedComments.html)), and the parser always collects comments for downstream use. **TS comment text in generated Rust** is opt-in: [`CodegenOptions::emit_ts_source_comments`](crates/ts2rs-hir/src/codegen.rs) (CLI `ts2rs compile --ts-source-comments`) emits leading comments as Rust `//` lines before statements and top-level functions; trailing comments and exact placement after large desugarings are not guaranteed (see [PROJECT-TODO.md §14](PROJECT-TODO.md)).
 - **Follow-up backlog** (finer-grained comment mapping, project-scale tooling): see [PROJECT-TODO.md §14 — Toolchain and UX](PROJECT-TODO.md).
 
@@ -78,7 +78,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 |---------|--------|-------|
 | Single `.ts` file | Supported | |
 | Top-level `function` | Supported | `export function` in-file; other `export` §1.1 |
-| `import` | Partial | Only `import { name } from "./relative.ts"`; deps need `export function name`; module graph; `import_add_main.ts`, negatives `import_missing_export_*`, `circular_*` |
+| `import` | Partial | Only `import { name } from "./relative.ts"`; deps need that name in the module’s **effective** exports (`export function` and/or relative re-exports); module graph; `import_add_main.ts`, `run_reexport_export_star_ok`, negatives `import_missing_export_*`, `circular_*` |
 | `number` / `boolean` / `string` / `void` | Supported | `void` only as return; `let` cannot be `void` |
 | `let` (single decl) | Partial | Type annotation required; may omit init but must assign before use (§3.4); mutable `let` → `IRStmt::Assign`; `definite_assign_ok.ts` |
 | `const` | Supported | Same shape as `let`; no reassignment |
@@ -134,7 +134,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Interface / type / generic subset | `interface_*.ts`, `type_alias_*.ts`, `generic_function_ok.ts` | `run_interface_generic_ok_prints_zero`, `run_type_alias_generic_ok_prints_zero`, `run_generic_function_ok_prints_three` |
 | Class subset | `class_basic_ok.ts`, `class_this_method_ok.ts`, `class_extends_ok.ts`, `class_super_ctor_ok.ts`, `class_*_fail.ts` | `run_class_basic_ok_prints_five`, `run_class_extends_ok_prints_seven`, `compile_class_super_invalid_fails`, `compile_class_override_mismatch_fails` |
 | Nested function | `nested_fn.ts` | `run_nested_fn_prints_nine` |
-| Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main` |
+| Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main`, `run_project_tsconfig_extends_include_ok` |
 | Async / `Promise` / HTTP | `async_mvp_compile_ok.ts`, `async_control_flow_ok.ts`, `promise_all_fetch_ok.ts`, `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`, `compile_async_control_flow_if_while_await_ok`, `compile_promise_all_fetch_alias_ok`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, `compile_promise_then_fails` |
 | CLI `check` / `--emit-ir` | `sample.ts`, `switch_fail.ts` | `check_sample_ok`, `compile_emit_ir_stderr_contains_ir_module` |
 | Negative optional / nullish / object | `optional_chain_fail.ts`, `nullish_fail.ts`, `object_fail.ts` | `compile_optional_call_bad_callee_fails`, … |
@@ -201,7 +201,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 **Exit codes**: **0** success; **1** ts2rs/driver errors; **`run`** propagates child process exit code when the binary fails; warnings do not change exit code.
 
 - **Multi-file**: first path is **entry** (`export function main`), rest are **extra roots**.
-- **Minimal tsconfig**: `--project foo.json` reads **`files`** (paths relative to the JSON); first entry is entry; mutually exclusive with extra `.ts` args.
+- **`--project` tsconfig** (simplified JSON): optional **`extends`**, **`files`**, **`include`**, **`exclude`** (globs); paths relative to the config file that contains them; **`exclude`** accumulates along the `extends` chain. If merged **`files`** is non-empty, only those entries are used; otherwise **`include`** globs are expanded (`.ts` only). **`include`-only**: roots are sorted; first path is entry — use **`files`** to pin entry order. Mutually exclusive with positional `.ts` args.
 - **`--link-ts2rs-rt`**: optional path dep on **`ts2rs_rt`** (build from this repo).
 
 ## Crate layout
@@ -213,7 +213,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | `ts2rs-lower` | [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) |
 | `ts2rs-driver` | Temp crate + `cargo` ([`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)); pipeline split: [`pipeline.rs`](crates/ts2rs-driver/src/pipeline.rs), [`cargo_runner.rs`](crates/ts2rs-driver/src/cargo_runner.rs), [`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs) |
 | `ts2rs_rt` | Optional runtime |
-| `ts2rs-cli` | `ts2rs` binary; command split: [`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs), [`commands.rs`](crates/ts2rs-cli/src/commands.rs), [`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs) |
+| `ts2rs-cli` | `ts2rs` binary; [`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs), [`commands.rs`](crates/ts2rs-cli/src/commands.rs), [`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs), [`tsconfig_resolve.rs`](crates/ts2rs-cli/src/tsconfig_resolve.rs) |
 
 ## License
 

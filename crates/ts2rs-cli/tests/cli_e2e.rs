@@ -604,8 +604,8 @@ fn compile_import_fails_with_message() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("import"),
-        "expected stderr to mention import, got:\n{stderr}"
+        stderr.contains("relative") || stderr.contains("import"),
+        "expected stderr to mention non-relative import, got:\n{stderr}"
     );
 }
 
@@ -619,7 +619,10 @@ fn run_import_fails() {
         .expect("spawn ts2rs run");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("import"), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("relative") || stderr.contains("import"),
+        "stderr:\n{stderr}"
+    );
 }
 
 fn assert_compile_fails_stderr(fixture_name: &str, needle: &str) {
@@ -659,7 +662,7 @@ fn compile_export_default_fails() {
 
 #[test]
 fn compile_export_from_fails() {
-    assert_compile_fails_stderr("export_from_fail.ts", "export * from");
+    assert_compile_fails_stderr("export_from_fail.ts", "relative");
 }
 
 #[test]
@@ -1140,6 +1143,64 @@ fn run_project_tsconfig_prints_main() {
     let tsconfig = fixture("multi_entry_tsconfig.json");
     let out = Command::new(exe)
         .args(["run", "--project", tsconfig.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "42\n");
+}
+
+#[test]
+fn run_reexport_export_star_ok() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let lib = dir.path().join("lib.ts");
+    let barrel = dir.path().join("barrel.ts");
+    let app = dir.path().join("app.ts");
+    std::fs::write(
+        &lib,
+        "export function add(a: number, b: number): number { return a + b; }\n",
+    )
+    .unwrap();
+    std::fs::write(&barrel, "export * from \"./lib.ts\";\n").unwrap();
+    std::fs::write(
+        &app,
+        "import { add } from \"./barrel.ts\";\nexport function main(): number { return add(1, 2); }\n",
+    )
+    .unwrap();
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let out = Command::new(exe)
+        .args(["run", app.to_str().unwrap()])
+        .output()
+        .expect("spawn ts2rs run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "3\n");
+}
+
+#[test]
+fn run_project_tsconfig_extends_include_ok() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base = dir.path().join("base.json");
+    let cfg = dir.path().join("tsconfig.json");
+    let main = dir.path().join("main.ts");
+    let side = dir.path().join("side.ts");
+    std::fs::write(&main, "export function main(): number { return 42; }\n").unwrap();
+    std::fs::write(&side, "export function unused(): number { return 1; }\n").unwrap();
+    std::fs::write(&base, r#"{"include": ["*.ts"]}"#).unwrap();
+    std::fs::write(
+        &cfg,
+        r#"{"extends": "./base.json", "files": ["main.ts", "side.ts"]}"#,
+    )
+    .unwrap();
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_ts2rs"));
+    let out = Command::new(exe)
+        .args(["run", "--project", cfg.to_str().unwrap()])
         .output()
         .expect("spawn ts2rs run");
     assert!(
