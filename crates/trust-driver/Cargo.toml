@@ -1,0 +1,15 @@
+[package]
+name = "trust-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+trust-manifest = { path = "../trust-manifest" }
+tempfile = "3.27.0"
+thiserror = "2.0.18"
+wait-timeout = "0.2"
+trust-hir = { path = "../trust-hir" }
+trust-lower = { path = "../trust-lower" }
+trust-parser = { path = "../trust-parser" }

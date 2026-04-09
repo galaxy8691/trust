@@ -1,0 +1,15 @@
+[package]
+name = "trust-manifest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Parse Trust.toml for Rust crate dependencies and extern bindings (trust)"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.18"
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"

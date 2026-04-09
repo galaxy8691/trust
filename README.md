@@ -1,6 +1,6 @@
 [中文](README.zh-CN.md)
 
-# ts2rs
+# trust
 
 Experimental **TypeScript → Rust source** compiler (implemented in Rust), then **cargo/rustc** to produce executables. This repository is often used as the **trust** subset in engineering.
 
@@ -12,9 +12,9 @@ See also [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), and t
 
 ## Architecture
 
-Parse (swc) → **HIR** ([`ts2rs-hir`](crates/ts2rs-hir)) → **semantic checks** (symbols, types, simplified return paths) → **Rust codegen** → **cargo** link.
+Parse (swc) → **HIR** ([`ts2rs-hir`](crates/trust-hir)) → **semantic checks** (symbols, types, simplified return paths) → **Rust codegen** → **cargo** link.
 
-Optional runtime [`ts2rs_rt`](crates/ts2rs_rt): generated code does **not** depend on this crate today; it exposes placeholder APIs such as `read_stdin_line`. Console: `console.log` → `println!`, `console.error` / `console.debug` → `eprintln!`.
+Optional runtime [`ts2rs_rt`](crates/trust_rt): generated code does **not** depend on this crate today; it exposes placeholder APIs such as `read_stdin_line`. Console: `console.log` → `println!`, `console.error` / `console.debug` → `eprintln!`.
 
 ```mermaid
 flowchart LR
@@ -30,24 +30,24 @@ flowchart LR
   CLI --> DRV
 ```
 
-[`ts2rs-lower`](crates/ts2rs-lower) wires HIR build, semantics, and codegen. [`ts2rs-driver`](crates/ts2rs-driver) builds a temporary crate and runs `cargo` (used by `ts2rs run`).
+[`ts2rs-lower`](crates/trust-lower) wires HIR build, semantics, and codegen. [`ts2rs-driver`](crates/trust-driver) builds a temporary crate and runs `cargo` (used by `ts2rs run`).
 
 ## Rust crates via `Trust.toml` (not npm)
 
 The compiler can link **real crates.io (or path/git) dependencies** and call into them from TypeScript using an explicit manifest. This path is **not** npm, `node_modules`, or `tsc` module resolution.
 
-- **Discovery**: walk **up** from the entry `.ts` file’s directory (and parents) for a file named **`Trust.toml`** (see [`discover_trust_toml`](crates/ts2rs-trust-manifest/src/lib.rs)).
-- **`[dependencies]`**: a Cargo-shaped table; lines are **merged** into the generated crate’s `Cargo.toml` [`dependencies`] (see [`crate_writer`](crates/ts2rs-driver/src/crate_writer.rs)). The import string in TS must match the dependency **key** (e.g. `import { Regex } from "regex"` requires a `regex = "…"` entry).
+- **Discovery**: walk **up** from the entry `.ts` file’s directory (and parents) for a file named **`Trust.toml`** (see [`discover_trust_toml`](crates/trust-manifest/src/lib.rs)).
+- **`[dependencies]`**: a Cargo-shaped table; lines are **merged** into the generated crate’s `Cargo.toml` [`dependencies`] (see [`crate_writer`](crates/trust-driver/src/crate_writer.rs)). The import string in TS must match the dependency **key** (e.g. `import { Regex } from "regex"` requires a `regex = "…"` entry).
 - **`[[rust_binding]]`**: maps a TS symbol imported from that crate key to a Rust type path, optional `new` (`rust` path + optional `unwrap` on `Result`), and `method` rows (`name`, `args` like `string` \| `number` \| `boolean`, `returns`). **No reflection**: the compiler does **not** scrape Rust sources or rustdoc; bindings are author-maintained.
 - **Codegen**: `new T("…")` lowers to the configured Rust constructor path; methods become **inherent** calls on the Rust type. TS `string` values are `String` in generated Rust; binding specs of `string` for a method argument emit `.as_str()` at the call site so APIs like `regex::Regex::is_match(&self, &str)` type-check.
 
 **Serde-style crates**: listing `serde` under `[dependencies]` only adds a Cargo dependency for future derives or transitive use; you generally **cannot** `import { Serialize } from "serde"` unless you add a binding, and proc-macro-only APIs are not meaningful on the TS surface.
 
-Fixture: [`tests/fixtures/trust_regex/`](crates/ts2rs-cli/tests/fixtures/trust_regex/) — tests `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate`.
+Fixture: [`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — tests `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate`.
 
 ## Unsupported TypeScript (trust rejection boundary)
 
-Common forms that are **explicitly rejected** (diagnostics are English; see [`build.rs`](crates/ts2rs-hir/src/build.rs) / [`sem.rs`](crates/ts2rs-hir/src/sem.rs)). This table complements the **generics** table below and the language matrix. Features marked Supported / Partially supported there (restricted **`?.`**, monomorphized generics, top-level `class` subset, etc.) are **not** listed here as “unsupported.”
+Common forms that are **explicitly rejected** (diagnostics are English; see [`build.rs`](crates/trust-hir/src/build.rs) / [`sem.rs`](crates/trust-hir/src/sem.rs)). This table complements the **generics** table below and the language matrix. Features marked Supported / Partially supported there (restricted **`?.`**, monomorphized generics, top-level `class` subset, etc.) are **not** listed here as “unsupported.”
 
 | User-visible form | Notes |
 |-------------------|--------|
@@ -61,23 +61,23 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 
 ## Scope (1.0)
 
-- **Matrix coverage**: rows marked Supported / Partially supported have representative **fixtures** ([`fixtures/`](crates/ts2rs-cli/tests/fixtures/)) and **[`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs)** tests; see **[Matrix vs integration tests](#matrix-vs-integration-tests)**. Larger examples: [`test-ts/main.ts`](test-ts/main.ts), [`test-ts/math.ts`](test-ts/math.ts). **Regression** cases: [`tests/regression/`](crates/ts2rs-cli/tests/regression/).
-- **Diagnostics**: compile **errors** are **English**, `path:line:col: message` ([`CompileError`](crates/ts2rs-hir/src/error.rs)). **Warnings** (e.g. unreachable code) use the same shape via [`CompileWarning`](crates/ts2rs-hir/src/error.rs); on success the CLI prints warnings to **stderr** and does **not** change exit code.
+- **Matrix coverage**: rows marked Supported / Partially supported have representative **fixtures** ([`fixtures/`](crates/trust-cli/tests/fixtures/)) and **[`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)** tests; see **[Matrix vs integration tests](#matrix-vs-integration-tests)**. Larger examples: [`test-ts/main.ts`](test-ts/main.ts), [`test-ts/math.ts`](test-ts/math.ts). **Regression** cases: [`tests/regression/`](crates/trust-cli/tests/regression/).
+- **Diagnostics**: compile **errors** are **English**, `path:line:col: message` ([`CompileError`](crates/trust-hir/src/error.rs)). **Warnings** (e.g. unreachable code) use the same shape via [`CompileWarning`](crates/trust-hir/src/error.rs); on success the CLI prints warnings to **stderr** and does **not** change exit code.
 - **CI**: pushes and PRs run `cargo fmt --all --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
-- **Not 1.0**: full `tsc` tsconfig parity, arbitrary `export default` expressions, `export * as`, etc. **npm / `node_modules` / package-manager resolution is not planned.** Rust crates are wired only through **`Trust.toml`** (see [Rust crates via `Trust.toml`](#rust-crates-via-trusttoml-not-npm)). **Relative** `import { x } from "./dep.ts"` and **`import main from "./dep.ts"`** (binding **must** be the identifier `main`, mapped to the dependency’s default export of `main`) and relative **`export *` / `export { … } from`** (barrel files) are supported; the CLI supports **multiple roots** (positional `.ts`) or **`--project`** JSON with simplified **`extends`**, **`files`**, **`include` / `exclude` glob** ([`tsconfig_resolve`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`graph_loader`](crates/ts2rs-cli/src/graph_loader.rs), [`parse_module_graph_with_extra_roots`](crates/ts2rs-parser/src/module_graph.rs), [`validate_imports`](crates/ts2rs-parser/src/module_graph.rs), HIR [`compile_graph`](crates/ts2rs-hir/src/lib.rs)); entry must define `main`, global function names unique. **Optional incremental** (`compile` / `run --incremental [DIR]`): caches per-module HIR to disk (default dir `.ts2rs-cache`); still parses all `.ts` each run; see [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs).
+- **Not 1.0**: full `tsc` tsconfig parity, arbitrary `export default` expressions, `export * as`, etc. **npm / `node_modules` / package-manager resolution is not planned.** Rust crates are wired only through **`Trust.toml`** (see [Rust crates via `Trust.toml`](#rust-crates-via-trusttoml-not-npm)). **Relative** `import { x } from "./dep.ts"` and **`import main from "./dep.ts"`** (binding **must** be the identifier `main`, mapped to the dependency’s default export of `main`) and relative **`export *` / `export { … } from`** (barrel files) are supported; the CLI supports **multiple roots** (positional `.ts`) or **`--project`** JSON with simplified **`extends`**, **`files`**, **`include` / `exclude` glob** ([`tsconfig_resolve`](crates/trust-cli/src/tsconfig_resolve.rs), [`graph_loader`](crates/trust-cli/src/graph_loader.rs), [`parse_module_graph_with_extra_roots`](crates/trust-parser/src/module_graph.rs), [`validate_imports`](crates/trust-parser/src/module_graph.rs), HIR [`compile_graph`](crates/trust-hir/src/lib.rs)); entry must define `main`, global function names unique. **Optional incremental** (`compile` / `run --incremental [DIR]`): caches per-module HIR to disk (default dir `.ts2rs-cache`); still parses all `.ts` each run; see [`incremental.rs`](crates/trust-cli/src/incremental.rs).
 
 ## Diagnostics and surface (§1.1)
 
-- **Multiple compile errors**: build and semantic phases may collect **several** diagnostics in one failed run ([`CompileError::Many`](crates/ts2rs-hir/src/error.rs)), printed as multiple `path:line:col: message` lines (sorted). Parser [`parse_typescript_file`](crates/ts2rs-parser/src/lib.rs) surfaces **all** swc `take_errors()` diagnostics. **Monomorphization** and **codegen** can still stop at the first internal error. On success, multiple [`CompileWarning`](crates/ts2rs-hir/src/error.rs) may be returned (same shape in [`ts2rs_lower`](crates/ts2rs-lower/src/lib.rs)).
-- **`export` shapes**: `export function …`, top-level `function …`, **`export default function main`**, **`export default main`** (with `function main` in the module), relative **`export * from "./…"`**, and **`export { a as b } from "./…"`** for **function** exports (see [`build.rs`](crates/ts2rs-hir/src/build.rs), [`module_graph.rs`](crates/ts2rs-parser/src/module_graph.rs)); `export class` / `export const` / other `export default` / local `export { x }` without `from` / etc. are still rejected; **top-level `class` without `export`** is in the matrix. Fixtures `export_default_*_ok.ts`, negatives `export_*_fail.ts`, and [`cli_e2e.rs`](crates/ts2rs-cli/tests/cli_e2e.rs).
-- **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/ts2rs-parser/src/lib.rs) includes `source_map`, `comments` (swc leading/trailing tables via [`SingleThreadedComments`](https://rustdoc.swc.rs/swc_common/comments/struct.SingleThreadedComments.html)), and the parser always collects comments for downstream use. **TS comment text in generated Rust** is opt-in: [`CodegenOptions::emit_ts_source_comments`](crates/ts2rs-hir/src/codegen.rs) (CLI `ts2rs compile --ts-source-comments`) emits leading comments as Rust `//` lines before statements and top-level functions; trailing comments and exact placement after large desugarings are not guaranteed (see [PROJECT-TODO.md §14](PROJECT-TODO.md)).
+- **Multiple compile errors**: build and semantic phases may collect **several** diagnostics in one failed run ([`CompileError::Many`](crates/trust-hir/src/error.rs)), printed as multiple `path:line:col: message` lines (sorted). Parser [`parse_typescript_file`](crates/trust-parser/src/lib.rs) surfaces **all** swc `take_errors()` diagnostics. **Monomorphization** and **codegen** can still stop at the first internal error. On success, multiple [`CompileWarning`](crates/trust-hir/src/error.rs) may be returned (same shape in [`ts2rs_lower`](crates/trust-lower/src/lib.rs)).
+- **`export` shapes**: `export function …`, top-level `function …`, **`export default function main`**, **`export default main`** (with `function main` in the module), relative **`export * from "./…"`**, and **`export { a as b } from "./…"`** for **function** exports (see [`build.rs`](crates/trust-hir/src/build.rs), [`module_graph.rs`](crates/trust-parser/src/module_graph.rs)); `export class` / `export const` / other `export default` / local `export { x }` without `from` / etc. are still rejected; **top-level `class` without `export`** is in the matrix. Fixtures `export_default_*_ok.ts`, negatives `export_*_fail.ts`, and [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs).
+- **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/trust-parser/src/lib.rs) includes `source_map`, `comments` (swc leading/trailing tables via [`SingleThreadedComments`](https://rustdoc.swc.rs/swc_common/comments/struct.SingleThreadedComments.html)), and the parser always collects comments for downstream use. **TS comment text in generated Rust** is opt-in: [`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs) (CLI `ts2rs compile --ts-source-comments`) emits leading comments as Rust `//` lines before statements and top-level functions; trailing comments and exact placement after large desugarings are not guaranteed (see [PROJECT-TODO.md §14](PROJECT-TODO.md)).
 - **Follow-up backlog** (finer-grained comment mapping, project-scale tooling): see [PROJECT-TODO.md §14 — Toolchain and UX](PROJECT-TODO.md).
 
 ## Control flow and return (§3.4)
 
-Implemented in [`sem.rs`](crates/ts2rs-hir/src/sem.rs) (`fn_body_returns`, `tail_returns_last_only`, `tail_returns_while_body`, `stmt_block_diverges`, etc.).
+Implemented in [`sem.rs`](crates/trust-hir/src/sem.rs) (`fn_body_returns`, `tail_returns_last_only`, `tail_returns_while_body`, `stmt_block_diverges`, etc.).
 
-- **Non-void functions**: [`check_function`](crates/ts2rs-hir/src/sem.rs) requires `fn_body_returns(&f.body, &ret)` or errors (“not all control paths return…”).
+- **Non-void functions**: [`check_function`](crates/trust-hir/src/sem.rs) requires `fn_body_returns(&f.body, &ret)` or errors (“not all control paths return…”).
 - **Early exhaustive return**: if an earlier statement guarantees a value return on all paths (e.g. full `if` / `else` with `fn_body_returns` on both), the rest may only produce **unreachable** warnings; see `early_return_unreachable.ts`.
 - **Tail rules**: if no such early return, the **last reachable statement** must satisfy the simplified return rules (return, `if` with both branches, block, `while` / `do-while` body per `tail_returns_while_body`). An `if` **without** `else` cannot satisfy the “last statement” rule by itself.
 - **Unreachable code**: statements after `return`, `break`/`continue` (in loops), or after an `if`/`else` that exhaustively returns — warning `unreachable code`; see `unreachable_after_return.ts`, `break_unreachable.ts`.
@@ -107,7 +107,7 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | Comma expression | Supported | `comma_ok.ts` |
 | Member access | Partial | `string.length` UTF-16 code units; `string[i]` UTF-16 index (single code unit as `string`); `number[].length`; `length` on objects; `obj.m(args)` → global `m(receiver,…)`; **chained** `f().prop` / `f().m()` (`chain_call_ok.ts`); no computed `obj[expr](…)`; fixtures `string_utf16_length.ts`, `method_call_ok.ts`, `object_length_field.ts`, `stdlib_hir_ok.ts` |
 | `?.` / `??` | Partial | `?.` **member** and **call** `f?.()` / `recv?.m()` (`optional_call_ok.ts`); `??` extended for same-family unions with `null`/`undefined`; `optional_ok.ts`, `nullish_ok.ts`; §3.3 |
-| Array / object literals | Partial | `number[]`; object types with **`number` leaves**, **nested** `{ inner: { x: number } }`, and **`k?: number`** (width subtyping + optional rules differ from full `tsc`; see [`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs)); runtime values use **`serde_json::Value`**; `array_ok.ts`, `object_ok.ts`, `nested_object_ok.ts` |
+| Array / object literals | Partial | `number[]`; object types with **`number` leaves**, **nested** `{ inner: { x: number } }`, and **`k?: number`** (width subtyping + optional rules differ from full `tsc`; see [`sem/helpers.rs`](crates/trust-hir/src/sem/helpers.rs)); runtime values use **`serde_json::Value`**; `array_ok.ts`, `object_ok.ts`, `nested_object_ok.ts` |
 | `switch` | Partial | `case` only `number`/`boolean` literals; `default` last; no fall-through; `switch_ok.ts`, `switch_fail.ts` |
 | `return` | Supported | `fn_body_returns` |
 | `void` functions | Supported | No return-path requirement |
@@ -153,7 +153,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Async / `Promise` / HTTP | `async_mvp_compile_ok.ts`, `async_control_flow_ok.ts`, `promise_all_fetch_ok.ts`, `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`, `compile_async_control_flow_if_while_await_ok`, `compile_promise_all_fetch_alias_ok`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, `compile_promise_then_fails` |
 | CLI `check` / `--emit-ir` | `sample.ts`, `switch_fail.ts` | `check_sample_ok`, `compile_emit_ir_stderr_contains_ir_module` |
 | Negative optional / nullish / object | `optional_chain_fail.ts`, `nullish_fail.ts`, `object_fail.ts` | `compile_optional_call_bad_callee_fails`, … |
-| Regression anchor | [`tests/regression/switch_fallthrough_regression.ts`](crates/ts2rs-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |
+| Regression anchor | [`tests/regression/switch_fallthrough_regression.ts`](crates/trust-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |
 
 ## Type roadmap (§1.4)
 
@@ -177,7 +177,7 @@ See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). **Implemented in `sem`**: after st
 - **`number` → `f64`** in generated Rust (`+`, `-`, `*`, `/`, compares, `Math.*`, etc.).
 - **`/`**: IEEE-754 double semantics via `f64` (closer to TS than the former `i32` division).
 - **Overflow / NaN**: `f64` infinity and NaN are possible; not identical to V8’s `number` edge cases in every scenario.
-- **`console.*` multi-arg**: spaced `"{}"` formatting ([`emit_builtin_log`](crates/ts2rs-hir/src/codegen.rs)).
+- **`console.*` multi-arg**: spaced `"{}"` formatting ([`emit_builtin_log`](crates/trust-hir/src/codegen.rs)).
 
 ## Build
 
@@ -215,7 +215,7 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 | **`-q` / `--quiet`** | Suppress warnings on success (errors still stderr) |
 | **`--color`** | `auto` / `always` / `never` for help styling; interacts with `NO_COLOR` |
 
-**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/ts2rs-hir/src/ir.rs) `Debug` to stderr), **`--exec`** (see table: **`-o`** is the executable path, or default **entry file stem** under **cwd** — on **Windows** the default name gets a **`.exe`** suffix; uses `cargo` like `run`), **`--incremental` / `--incremental DIR`** (multi-file HIR fragment cache; default dir `.ts2rs-cache` when flag is present without value). With **`--exec`** only: **`--link-ts2rs-rt`**, **`--debug`**, **`-O` / `--release`** (same semantics and mutual exclusion as `run`).
+**`compile`**: `--span-comments`, `--ts-source-comments` (emit TS leading comments as Rust `//` lines), `--emit-ir` (dumps [`IRModule`](crates/trust-hir/src/ir.rs) `Debug` to stderr), **`--exec`** (see table: **`-o`** is the executable path, or default **entry file stem** under **cwd** — on **Windows** the default name gets a **`.exe`** suffix; uses `cargo` like `run`), **`--incremental` / `--incremental DIR`** (multi-file HIR fragment cache; default dir `.ts2rs-cache` when flag is present without value). With **`--exec`** only: **`--link-ts2rs-rt`**, **`--debug`**, **`-O` / `--release`** (same semantics and mutual exclusion as `run`).
 
 **`run`**: `--link-ts2rs-rt`; **`--debug`** → debug `cargo build`; **`-O` / `--release`** (conflicts with `--debug`); **`--incremental`** same as `compile`.
 
@@ -230,12 +230,12 @@ cargo run -p ts2rs-cli -- check path/to/app.ts
 
 | Crate | Role |
 |-------|------|
-| `ts2rs-parser` | swc wrapper; `ParsedSource` (`program`, `source_map`, `comments`); [`module_graph`](crates/ts2rs-parser/src/module_graph.rs); shared import parsing in [`import_utils`](crates/ts2rs-parser/src/import_utils.rs) |
-| `ts2rs-hir` | IR, build, sem, `emit_rust`; [`compile_graph`](crates/ts2rs-hir/src/lib.rs); [`ir_cache`](crates/ts2rs-hir/src/ir_cache/mod.rs) (incremental disk snapshots); split helpers: [`build/build_types.rs`](crates/ts2rs-hir/src/build/build_types.rs), [`sem/helpers.rs`](crates/ts2rs-hir/src/sem/helpers.rs), [`codegen/helpers.rs`](crates/ts2rs-hir/src/codegen/helpers.rs) |
-| `ts2rs-lower` | [`lower_module_graph`](crates/ts2rs-lower/src/lib.rs) |
-| `ts2rs-driver` | Temp crate + `cargo` ([`compile_entrypoint_to_executable`](crates/ts2rs-driver/src/lib.rs)); pipeline split: [`pipeline.rs`](crates/ts2rs-driver/src/pipeline.rs), [`cargo_runner.rs`](crates/ts2rs-driver/src/cargo_runner.rs), [`crate_writer.rs`](crates/ts2rs-driver/src/crate_writer.rs) |
+| `ts2rs-parser` | swc wrapper; `ParsedSource` (`program`, `source_map`, `comments`); [`module_graph`](crates/trust-parser/src/module_graph.rs); shared import parsing in [`import_utils`](crates/trust-parser/src/import_utils.rs) |
+| `ts2rs-hir` | IR, build, sem, `emit_rust`; [`compile_graph`](crates/trust-hir/src/lib.rs); [`ir_cache`](crates/trust-hir/src/ir_cache/mod.rs) (incremental disk snapshots); split helpers: [`build/build_types.rs`](crates/trust-hir/src/build/build_types.rs), [`sem/helpers.rs`](crates/trust-hir/src/sem/helpers.rs), [`codegen/helpers.rs`](crates/trust-hir/src/codegen/helpers.rs) |
+| `ts2rs-lower` | [`lower_module_graph`](crates/trust-lower/src/lib.rs) |
+| `ts2rs-driver` | Temp crate + `cargo` ([`compile_entrypoint_to_executable`](crates/trust-driver/src/lib.rs)); pipeline split: [`pipeline.rs`](crates/trust-driver/src/pipeline.rs), [`cargo_runner.rs`](crates/trust-driver/src/cargo_runner.rs), [`crate_writer.rs`](crates/trust-driver/src/crate_writer.rs) |
 | `ts2rs_rt` | Optional runtime |
-| `ts2rs-cli` | `ts2rs` binary; [`cli_args.rs`](crates/ts2rs-cli/src/cli_args.rs), [`commands.rs`](crates/ts2rs-cli/src/commands.rs), [`graph_loader.rs`](crates/ts2rs-cli/src/graph_loader.rs), [`tsconfig_resolve.rs`](crates/ts2rs-cli/src/tsconfig_resolve.rs), [`incremental.rs`](crates/ts2rs-cli/src/incremental.rs) |
+| `ts2rs-cli` | `ts2rs` binary; [`cli_args.rs`](crates/trust-cli/src/cli_args.rs), [`commands.rs`](crates/trust-cli/src/commands.rs), [`graph_loader.rs`](crates/trust-cli/src/graph_loader.rs), [`tsconfig_resolve.rs`](crates/trust-cli/src/tsconfig_resolve.rs), [`incremental.rs`](crates/trust-cli/src/incremental.rs) |
 
 ## License
 

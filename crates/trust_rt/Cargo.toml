@@ -1,0 +1,9 @@
+[package]
+name = "trust_rt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Minimal runtime helpers for trust-generated Rust (optional)"
+
+[dependencies]

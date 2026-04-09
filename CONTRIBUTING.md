@@ -1,6 +1,6 @@
 [中文](CONTRIBUTING.zh-CN.md)
 
-# Contributing to ts2rs
+# Contributing to trust
 
 Thank you for your interest in this experimental TypeScript→Rust compiler. This document describes how to build the workspace, what to run before opening a PR, and toolchain expectations.
 

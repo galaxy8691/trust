@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Experimental TypeScript→Rust compiler (`ts2rs-parser`, `ts2rs-hir`, `ts2rs-lower`, `ts2rs-driver`, `ts2rs-cli`, optional `ts2rs_rt`).
+- Experimental TypeScript→Rust compiler (`trust-parser`, `trust-hir`, `trust-lower`, `trust-driver`, `trust-cli`, optional `trust_rt`).
 - CLI subcommands `compile`, `run`, and `check`; multi-file / minimal `--project` workflow.
 - Trust strong-typing subset with English diagnostics, fixtures, and `cli_e2e` integration tests.
 - CI: `cargo fmt --all --check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets`.

@@ -14,7 +14,7 @@
 
 ### 新增
 
-- 实验性 TypeScript→Rust 编译器（`ts2rs-parser`、`ts2rs-hir`、`ts2rs-lower`、`ts2rs-driver`、`ts2rs-cli`、可选 `ts2rs_rt`）。
+- 实验性 TypeScript→Rust 编译器（`trust-parser`、`trust-hir`、`trust-lower`、`trust-driver`、`trust-cli`、可选 `trust_rt`）。
 - CLI：`compile` / `run` / `check`；多文件与极简 `--project` 工作流。
 - trust 强类型子集、英文诊断、fixture 与 `cli_e2e` 集成测试。
 - CI：`cargo fmt --all --check`、`cargo test --workspace`、`cargo clippy --workspace --all-targets`。

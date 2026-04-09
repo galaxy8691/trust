@@ -1,0 +1,16 @@
+[package]
+name = "trust-lower"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+swc_common = "21.0.0"
+swc_ecma_ast = "23.0.0"
+thiserror = "2.0.18"
+trust-hir = { path = "../trust-hir" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+trust-parser = { path = "../trust-parser" }

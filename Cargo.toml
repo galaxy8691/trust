@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "crates/ts2rs-cli",
-    "crates/ts2rs-parser",
-    "crates/ts2rs-hir",
-    "crates/ts2rs-lower",
-    "crates/ts2rs-driver",
-    "crates/ts2rs-trust-manifest",
-    "crates/ts2rs_rt",
+    "crates/trust-cli",
+    "crates/trust-parser",
+    "crates/trust-hir",
+    "crates/trust-lower",
+    "crates/trust-driver",
+    "crates/trust-manifest",
+    "crates/trust_rt",
 ]
 resolver = "2"
 

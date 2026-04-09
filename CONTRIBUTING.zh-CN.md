@@ -1,6 +1,6 @@
 [English](CONTRIBUTING.md)
 
-# 参与 ts2rs 贡献
+# 参与 trust 贡献
 
 感谢关注本实验性 TypeScript→Rust 编译器。本文说明如何构建工作区、提 PR 前应运行的命令，以及工具链约定。
 

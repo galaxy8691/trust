@@ -1,0 +1,15 @@
+[package]
+name = "trust-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+trust-manifest = { path = "../trust-manifest" }
+swc_common = "21.0.0"
+swc_ecma_ast = "23.0.0"
+swc_ecma_parser = "38.0.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
