@@ -6,7 +6,9 @@ use toml::Value;
 use trust_driver::{
     build_rust_and_copy_with_options, build_rust_to_executable_with_options, RustBuildOptions,
 };
-use trust_hir::{build_checked_module, emit_rust_with_options, CodegenOptions, StdlibMode};
+use trust_hir::{
+    build_checked_module, emit_rust_with_options, with_codegen_followup, CodegenOptions, StdlibMode,
+};
 use trust_lower::{check_module_graph, lower_module_graph_with_options};
 use trust_parser::validate_imports;
 
@@ -416,7 +418,8 @@ pub(crate) fn cmd_compile(
         let units = graph.compile_units();
         let (module, warnings) = build_checked_module(&units, &entry_path, graph.trust.as_ref())
             .map_err(|e| e.to_string())?;
-        let rust = emit_rust_with_options(&module, &codegen).map_err(|e| e.to_string())?;
+        let rust = emit_rust_with_options(&module, &codegen)
+            .map_err(|e| with_codegen_followup(e).to_string())?;
         (rust, warnings, Some(module))
     };
 

@@ -44,7 +44,7 @@
 
 ### 1.3 表达式扩展
 
-- [x] **`async` / `await` / `Promise` / `fetch` / `fetchText`（MVP）**：**`fetchText(url)`** → `Promise<string>`；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()`：**JSON number** → `f64`，**`serde_json`**，与动态 `JSON.parse` 一致）；**`response.body.getReader()`** + **`await reader.read()`** 分块 body；`init` 支持字面量 `method`、`headers`（值为字符串字面量）、可选 `body` 字符串）；**`Promise.all`**、**`.then`** 拒绝与 §async 条目一致；生成代码若含 **`futures_util`** 则 driver 注入 **`futures-util`**；**完整 WHATWG `fetch`（浏览器级 `ReadableStream`/`Headers` 等）/ 与某版本 Node 字节级 TLS·HTTP2 对齐**仍属后续。
+- [x] **`async` / `await` / `fetch` / `fetchText`（MVP）**：TS 表面**无** `Promise<T>` / `Promise.all` — `async function` 注解写**兑现类型** `T`（`number` / `string` / `void`），并行等待用 **`async_all([...])`**（对应 HIR [`PromiseAll`](crates/trust-hir/src/ir.rs)）；**`fetchText`**、**`fetch`**、**`readFileTextAsync`** 等仅可 **`await`**；**`response.body.getReader()`** + **`await reader.read()`**；`fetch` 的 `init` 支持字面量 `method`、`headers`、可选 `body`；**`.then` / 类型名 `Promise`** **拒绝**（[§13.8](PROJECT-TODO.zh-CN.md)）；含流式时 driver 注入 **`futures-util`**；**完整 WHATWG `fetch` / 与某 Node 字节级 TLS·HTTP2 对齐**仍属后续。
 - [x] **成员访问与调用链**：`string.length`（UTF-16）、`string[i]`、`number[]`/`string[]` 下标、对象 `length`；**`obj.m(args)`** → 全局 `m(receiver,…)`；**一层** `f().prop` / `f().m()`（`chain_call_ok.ts`）；可选 **`?.` / `f?.()` / `recv?.m()`**（`optional_call_ok.ts`）；见 `member_length_ok.ts`、`method_call_ok.ts`、`string_utf16_length.ts`、`stdlib_hir_ok.ts` 等。
 - [x] **可选链 / 空值合并**：受限子集已支持（`obj?.prop`、`??`；见 `optional_ok.ts`、`nullish_ok.ts`）；完整语义依赖 §3.3。
 - [x] **逻辑与短路**：`&&`、`||`；`boolean` 与 `number` 真值（`!= 0`）已支持，结果类型为 `boolean`（见 `logical_bool.ts`、`logical_truthy_ok.ts`）；与 TypeScript 值保留式 `&&`/`||` 仍不同；**强类型下**结果类型固定为 `boolean`，更复杂真值或联合操作数仍受限。
@@ -125,6 +125,46 @@
 - [x] **`null` / `undefined`**：[`TsType`](crates/trust-hir/src/ir.rs) 已含 `Null` / `Undefined` 等变体；检查以 **当前 sem 静态规则**为准，**不设** tsc 默认「万物可空」式软语义。验收：README §3.3；**未**实现 `strictNullChecks` 式开关。若将来增加模式，应为**显式编译选项**（如 strict 空值），**非**隐式放宽或兼容 JS 动态性。
 - [x] **结构类型 vs 名义类型**：**trust 以名义表 + 静态形状检查为界**；与 Rust 后端映射策略（当前以基础类型为主）。验收：README §3.3 已说明具名表/语义检查与 Rust 生成侧边界；**未**实现 TS 结构子类型全集，**不**将其列为路线目标。
 - [x] **函数类型与高阶函数**：与 [§13.2](PROJECT-TODO.zh-CN.md) 及 README 一致——已实现**受限**静态函数类型、箭头值、`f(...)`、传参/返回函数等；codegen 闭包仍为 `(number) => number` 的严格子集。**勿**再写「无一等函数值 / 未做 HOF」；应区分「已支持的 HOF 子集」与「仍为后续的泛化 / codegen 扩展」。
+
+### 3.3.1 扩展路线 — 主线选择与规格包（实现待立项）
+
+**单次 PR 原则**：每次只落地**一条**主线；每条需 fixture + 更新 README §3.3 / 矩阵。
+
+**推荐顺序**
+
+1. **D1** — discriminated 收窄（主要改 `sem`，对 `if` + 联合收益大）。
+2. **R1** — `interface` 名义方法（build + sem，可能动 codegen 调用形态）。
+3. **G1 / G2** — 泛型单态子集扩大（`sem/mono.rs` + build 拒绝表）。
+4. **C1 / C2** — TS 注释落 Rust（以 `codegen` + 注释表为主，与 sem 耦合弱）。
+
+#### D1 — discriminated union 收窄（规格）
+
+- **目标**：在 `if (v.tag === 'a')` / `else` 内，当 `v` 为若干 `ObjectNum` 形联合臂且共享**必填** discriminant 字段、各臂字面量**互斥**时，静态收窄 `v` 的类型。
+- **条件形态（v0）**：`Eq` / `StrictEq`，左侧为标识符 `v` 的 `Member` / `OptionalMember` + 字面量属性名，右侧为与某一臂 discriminant **匹配的字面量**。（任意左式 / 计算属性：后续。）
+- **字面量 discriminant**：仅 `string` / `boolean` / `number` **字面量类型**（与 §1.4 一致）。
+- **与现有 `??` / `?.` 协同**：不得破坏 `nullish_ok.ts`、`optional_ok.ts`、`nullish_fn_ok.ts`。
+- **实现草图**：在 [`check_stmts`](crates/trust-hir/src/sem.rs) / `If` 分支上维护 `ident -> TsType` 流敏感环境，或 `Binding` 上可选 `narrow_ty`。
+- **计划 fixture**：`discriminated_narrow_ok.ts`、`discriminated_narrow_else_ok.ts`、`discriminated_narrow_non_literal_fail.ts` 等 + e2e。
+
+#### G1 / G2 — 泛型子集扩展（规格）
+
+- **G1**：显式类型实参的**更多安全调用形态**（链式/嵌套），逐项在 `mono.rs` 证明可单态 + fixture。
+- **G2**：推断仅当每个类型参数可从**已支持的合成实参类型**唯一确定；拒绝联合歧义、未知标识符等（保持现有多错误行为）。
+- **仍非目标**：高阶类型参数、`extends` 约束、默认类型参数、从异质联合推断等。
+- **回归**：保留现有 `generic_function_*_fail.ts` 与 `compile_generic_function_multi_infer_fail_reports_multiple_errors`。
+
+#### R1 — `interface` 实例方法（名义；规格）
+
+- **语法子集（v0）**：顶层 `interface I { m(): number; … }`，**无**重载、**无**方法级泛型。
+- **Lowering**：优先 **全局脱糖** `m__I(receiver, …)`（名称修饰），而非 `serde_json::Value` 分发；接收者为**单编译单元**内名义 `interface`（跨文件见 §13.7 B2a）。
+- **兼容**：不破坏现有非 interface 的 `method_call_ok.ts`、`chain_call_ok.ts`。
+- **计划 fixture**：`interface_method_ok.ts`、`interface_method_bad_args_fail.ts`。
+
+#### C1 / C2 — TS 注释写入生成 Rust（规格）
+
+- **C1**：边界说明见 README.zh-CN §1.1 — 仅 **leading**，按 **HIR 语句 span 起点**查表；`switch`→`if`、`for`→`while` 等 lowering 会导致注释位置与用户预期不一致。
+- **C2（后续）**：trailing / 行内注释需按 `span.hi` 与 swc 注释区间策略处理。
+- **可选警告**：`--ts-source-comments` 下对「有冻结注释但未被任何生成语句消费」做一次性提示（需额外遍历，**尚未实现**）。
 
 ### 3.4 控制流分析（进阶）
 
@@ -306,7 +346,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 - [x] **A1 — 默认函数**：`export default function main` / `export default async function main` → 与 `export function main` 同 IR（[`build.rs`](crates/trust-hir/src/build.rs)）；模块图记录导出 `main`（[`module_graph.rs`](crates/trust-parser/src/module_graph.rs)）；fixture `export_default_function_main_ok.ts`、`export_default_async_main_ok.ts` + `cli_e2e`。
 - [x] **A2 — 默认指向 `main`**：存在顶层 `function main` 时的 `export default main`；扫描结束后校验（[`build.rs`](crates/trust-hir/src/build.rs)）；fixture `export_default_main_ref_ok.ts`。
 - [x] **默认导入**：`import main from "./dep.ts"` 要求绑定名为 `main` 且目标默认导出为 `main`（[`import_utils.rs`](crates/trust-parser/src/import_utils.rs)）；负例 `import_default_wrong_binding_fail.ts`。
-- [ ] **A3 — 任意默认表达式**（`export default 42`、匿名箭头等）：**仍拒绝**，除非可归约为上述支持形态；README「不支持 / 部分支持」已说明边界。
+- [x] **A3 — 任意默认表达式**（`export default 42`、`export default () => {}`、匿名 `export default function` 等）：**明确不在范围内**（产品决策）。仅 **A1/A2** 形态受支持；见 [`README.zh-CN.md`](README.zh-CN.md)「不支持的 TypeScript」与诊断 §1.1 的 **`export` 形态**。除非入口契约变更，否则不计划支持一般「默认导出表达式」。
 
 ### 13.7 结构子类型里程碑（非完整 `tsc`）
 
@@ -314,18 +354,23 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 - [x] **B1 — 嵌套 `ObjectNum` + 可选属性**：[`ObjectProp`](crates/trust-hir/src/ir.rs)、[`object_shape_assignable`](crates/trust-hir/src/sem/helpers.rs)、codegen 对象字面量为 `serde_json::Value`；fixture `nested_object_ok.ts`。
 - [ ] **B2+ — 跨文件接口名在类型位置、对象上的可调用成员、`readonly`/索引签名等更丰富规则**：**待办**；README 写明当前限制及与 `tsc` 的差异。
+- **B2a（下一里程碑）** — 跨文件**仅类型** / 具名复用：例如 `import type { I } from "./dep.ts"` 并在注解中使用 `I`。**当前边界**：`import type` 与 type-only 说明符在导入解析阶段即**拒绝**（[`import_utils.rs`](crates/trust-parser/src/import_utils.rs)）；负例 fixture [`import_type_fail_main.ts`](crates/trust-cli/tests/fixtures/import_type_fail_main.ts) 与 e2e `compile_import_type_fails`。实现 B2a 需扩展模块图与合并后的类型表，不仅是 parser。
+
+### 13.8 异步表面 — 无用户侧 `Promise` / 无 `.then`（产品决策）
+
+**用户可见的 `Promise<T>`、`Promise.all`、`.then` / `.catch` / `.finally` 回调链** 均**不属于** trust。应写 **`async function …(): T`**（`T` 为 `number` / `string` / `void`），并行 **`async_all([...])`**。类型位置出现 **`Promise`** 即**报错**（[`build_types.rs`](crates/trust-hir/src/build/build_types.rs)）。**`.then`** 调用**报错**（[`build.rs`](crates/trust-hir/src/build.rs)；[`promise_then_fail.ts`](crates/trust-cli/tests/fixtures/promise_then_fail.ts)；e2e `compile_promise_then_fails`）。HIR 内部仍用 [`TsType::Promise`](crates/trust-hir/src/ir.rs) 表示 awaitable，仅服务 codegen。与 §13.6 A3 相同：**范围决策**，非 backlog 里程碑。
 
 ---
 
 ## 14. 后续工作（backlog）
 
-汇总「接下来要做什么」，可能与 §1.3 附注、§10–§11、README「部分支持/不支持」、§1.3 follow-ups 重复；**以代码为准**，落地后同步删改旧句。
+汇总「接下来要做什么」，可能与 §1.3 附注、§10–§11、README「部分支持/不支持」、§1.3 follow-ups 重复；**以代码为准**，落地后同步删改旧句。文末 **[汇总产品待办](#汇总产品待办-readme--partial--慢车道)** 提供**一条龙勾选清单**（来自 README / 矩阵 / 前文讨论），可逐项慢慢做；与 §3.3.1、§13.7 等处叙述可能重复，落地时请同步勾选并改对应小节。
 
 ### 工具链与体验
 
 **多条诊断收集**（见 [README.zh-CN.md](README.zh-CN.md) §1.1）
 
-- [x] **编译管线（build + sem）**：[`build_module`](crates/trust-hir/src/build.rs) 与 [`check_module`](crates/trust-hir/src/sem.rs) 可聚合多条 [`CompileError`](crates/trust-hir/src/error.rs) 为 [`CompileError::Many`](crates/trust-hir/src/error.rs)（排序后输出）。顶层声明 / 各函数语义错误会尽量收集；**单态化**仍可能在首条错误处停止；[`emit_rust_with_options`](crates/trust-hir/src/codegen.rs) 在 codegen 首条内部错误处停止。
+- [x] **编译管线（build + sem）**：[`build_module`](crates/trust-hir/src/build.rs) 与 [`check_module`](crates/trust-hir/src/sem.rs) 可聚合多条 [`CompileError`](crates/trust-hir/src/error.rs) 为 [`CompileError::Many`](crates/trust-hir/src/error.rs)（排序后输出）。顶层声明 / 各函数语义错误会尽量收集；**单态化**一旦失败会**中止后续 sem**；[`emit_rust_with_options`](crates/trust-hir/src/codegen.rs) 在 codegen 首条内部错误处停止。**体验**：单态 / codegen 错误末尾可附英文短句，提示修复并重新编译后或出现更多诊断（[`with_monomorphization_followup`](crates/trust-hir/src/error.rs) / [`with_codegen_followup`](crates/trust-hir/src/error.rs)）；见 README.zh-CN §1.1。
 - [x] **解析器**：[`parse_typescript_file`](crates/trust-parser/src/lib.rs) 汇总 swc [`take_errors()`](crates/trust-parser/src/lib.rs) **全部**诊断（并与 `parse_program` 主错误合并、排序）。**模块图**仍按文件顺序在首次解析失败时返回（单文件 stderr 可多行）。
 
 **注释与生成 Rust**（见 [README.zh-CN.md](README.zh-CN.md) §1.1「注释」）
@@ -349,11 +394,10 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 ### async / HTTP（MVP；残余 backlog）
 
-- [x] **任意控制流中的 `await`**（不限于当前 async MVP 体约束）。（已移除 [`check_async_mvp_stmts`](crates/trust-hir/src/sem.rs)；[`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `Await` 接受任意推断为 `Promise<T>` 的操作数；[`async_control_flow_ok.ts`](crates/trust-cli/tests/fixtures/async_control_flow_ok.ts)、`compile_async_control_flow_if_while_await_ok`。）
-- [x] **`Promise.all([...])`**（仅数组字面量；同质 `Promise<number>` / `Promise<string>` / `fetch` 的 `Promise<Response>`）。见 [`IRExpr::PromiseAll`](crates/trust-hir/src/ir.rs)、[`promise_all_fetch_ok.ts`](crates/trust-cli/tests/fixtures/promise_all_fetch_ok.ts)、`compile_promise_all_fetch_alias_ok`。
+- [x] **任意控制流中的 `await`**（不限于当前 async MVP 体约束）。（已移除 [`check_async_mvp_stmts`](crates/trust-hir/src/sem.rs)；[`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `Await` 接受内部 awaitable 操作数；[`async_control_flow_ok.ts`](crates/trust-cli/tests/fixtures/async_control_flow_ok.ts)、`compile_async_control_flow_if_while_await_ok`。）
+- [x] **`async_all([...])`**（仅数组字面量；同质 awaitable）。见 [`IRExpr::PromiseAll`](crates/trust-hir/src/ir.rs)、[`async_all_fetch_ok.ts`](crates/trust-cli/tests/fixtures/async_all_fetch_ok.ts)、`compile_async_all_fetch_alias_ok`。
 - [x] **`fetchText`** → `trust_stdlib::http::fetch_text`；**`fetch`** → `trust_stdlib::http::fetch` + `FetchInit`（见 [`crates/trust-stdlib/src/http.rs`](crates/trust-stdlib/src/http.rs)）。
 - [x] **流式响应 body（M3）**：`response.body.getReader()` / `await reader.read()` → `StreamReadResult`；与 `.text()` / `.json()` 互斥；[`fetch_stream_ok.ts`](crates/trust-cli/tests/fixtures/fetch_stream_ok.ts)、`compile_fetch_stream_ok`。
-- [x] **拒绝 `.then`**（明确诊断，建议用 `async`/`await`）。见 [`promise_then_fail.ts`](crates/trust-cli/tests/fixtures/promise_then_fail.ts)、`compile_promise_then_fails`。
 - [x] **TLS / HTTP 说明（非「与 Node 完全一致」）**：临时 crate 使用 **reqwest** + **rustls-tls**；**TLS 1.2+** 与 **HTTP/2**（ALPN 协商成功时）由该栈提供；**根证书、cipher、HTTP/2 细节不保证与某一 Node 或浏览器版本逐字节一致**。**仍为 backlog**：完整 **WHATWG `fetch`**（浏览器级 `ReadableStream`、`Request`/`Headers` 对象、duplex、在非浏览器宿主下的 CORS 等）；trust 子集已支持 **`getReader`/`read` 分块读 body**（见上条）。
 
 ### 语言与类型（trust 强类型子集）
@@ -369,12 +413,57 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 - [x] **模块图**：`import … from "crate_key"` 且键在清单中；`validate_imports` 校验 `[[rust_binding]]`；不对虚构的 Rust 模块做文件系统 DFS。
 - [x] **HIR / sem / codegen**：`TsType::RustExtern`、`IRExpr::RustNew`、带 `inherent_rust_str_ref` 的固有 `MethodCall`（`string` 实参生成 `.as_str()` 以匹配 `&str`）。
 - [x] **E2E**：[`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate`。
-- [ ] **常用 crate 的预置绑定 shim**（社区或 monorepo 可选包）：仍属 backlog。
+- [x] **常用 crate 的预置绑定 shim（入门模板）**：无中央 registry；可复制模板见 [`examples/README.md`](examples/README.md)（Diesel/FFI 示例 + 最小 [`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) `Trust.toml` 模式）。若需「精选列表 / `trust add` 预设」仍为后续可选工作。
 
 ### 文档与示例
 
 - [x] **README + 本清单**：定期对照实现扫一遍（矩阵、§1.3、§2.1 等），避免与已交付特性（如 stdlib、`string[i]`、`Math` 扩展）矛盾。*（本次已对齐 §1.3 / §2.1 与 `.json` 语义；README 矩阵见 [语言功能矩阵](README.zh-CN.md)。）*
 - [x] **[`test-ts/main.ts`](test-ts/main.ts)**：保持在支持子集内；文件头注明预期 I/O，并**刻意不包含** `async`/`fetch`/泛型调用等（由 `fixtures/` 覆盖）。
+
+### 汇总产品待办（README / Partial / 慢车道）
+
+由 [README.zh-CN — 不支持的 TypeScript](README.zh-CN.md)、功能矩阵 **Partial** 行、§1.3 附注、[§3.3.1](PROJECT-TODO.zh-CN.md)、§14 残余项归纳。**强类型、可静态判定、可 codegen** 仍须遵守（[README — Trust: strong typing](README.md)）。建议 **每次 PR 尽量只攻一条主线**。完成某项后，在此打 `[x]`，并更新重复叙述处（§3.3.1、§13.7、README 矩阵等）。
+
+#### 类型与语义（相对完整 `tsc`）
+
+- [ ] **D1 — Discriminated 收窄**：对象联合上 `if (v.kind === 'a')` / `else`；与 `??` / `?.` 协同（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem.rs`](crates/trust-hir/src/sem.rs)）。
+- [ ] **D3 向 — 更宽的联合 / `normalize_union` / 可赋值性**：仅当仍能落到**单一** Rust 类型且可静态判定（[§3.3](PROJECT-TODO.zh-CN.md)）。
+- [ ] **G1 / G2 — 泛型子集扩大**（更多显式实参形态、更多元数或非调用位置单态）（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)）。
+- [ ] **G3 — 类 where 约束**（若做：须全程可静态检查）。
+- [ ] **交集类型 `A & B`**（类型位置；当前拒绝）。
+- [ ] **类型位置的 `bigint` / 模板字面量类型**（当前拒绝）。
+- [ ] **与 `tsc` 对齐的完整结构子类型** — 非目标；若做只接受**有文档的安全子集**。
+- [ ] **异质联合**（如 `number | string`）：codegen 策略或「无法单类型映射」时的诊断更清晰（见 README 矩阵「联合」行）。
+- [ ] **等价于 `strictNullChecks` 的模式**：须为**显式**编译选项，而非默认宽松 JS 语义。
+- [ ] **R1 — `interface` / 对象名义方法**（静态分派；全局 `m__I(receiver,…)` 或固有方法）（[§3.3.1](PROJECT-TODO.zh-CN.md)）。
+- [ ] **R2 — 比一层 `f().g()` 更深的类型驱动链**（[§1.3](PROJECT-TODO.zh-CN.md) 附注）。
+- [ ] **§13.7 B2a + B2+** — `import type`、跨文件 interface/type 名、`interface extends`、对象可调用成员、更丰富的 `readonly`/索引签名等（[§13.7](PROJECT-TODO.zh-CN.md)）。
+
+#### 语言表面
+
+- [ ] **更多 `export` 形态** — 仅当产品范围变更；当前仍拒绝任意 `export default` 表达式、`export const`、`export * as`、无 `from` 的 `export { x }` 等（[README 不支持表](README.zh-CN.md)、§13.6）。
+- [ ] **更广的可选链**（仍被拒的 callee/形态 — 见 [`optional_chain_fail.ts`](crates/trust-cli/tests/fixtures/optional_chain_fail.ts)）。
+- [ ] **`&&` / `||` 的值保留语义** vs 当前结果类型 **`boolean`** — 需先写清**强类型**规格再实现（README 矩阵）。
+- [ ] **`for..of`** 循环。
+- [ ] **带标签的 `break` / `continue`**。
+- [ ] **计算属性成员与调用** `obj[expr]`、`obj[expr](…)`（在可判定前提下）。
+
+#### 异步与闭包
+
+- [ ] **闭包 codegen** 超出当前 **`(number) => number` 式**严格子集（README 矩阵「高阶函数」）。
+- [ ] **WHATWG / 浏览器级 `fetch` 对齐**（`Headers` 遍历、完整 `Request`、duplex 等）— 相对现有 reqwest 子集的残余（README「Web fetch」非目标说明）。
+
+#### 工具链与解析体验
+
+- [ ] **C1 — `--ts-source-comments` 下未附着注释的可选警告**（[§3.3.1](PROJECT-TODO.zh-CN.md)、上文「注释与生成 Rust」）。
+- [ ] **C2 / C3 — Trailing / 行内注释** 与 **大 lowering 后的注释继承**（`switch`→`if`、`for`→`while` 等）。
+- [ ] **模块图：首个解析失败后仍收集其他文件诊断**（相对当前遇错即停）（§14 工具链）。
+- [ ] **解析器 / AST 级 error recovery**（若需要，在 swc 现状之上扩展）。
+
+#### 生态（除非改产品决策，否则多为非目标）
+
+- [ ] **npm / `node_modules` / `paths` 指包** — 当前**不计划**；若做须单独立项（README「非 1.0」）。
+- [ ] **完整 `tsconfig` / `tsc` 行为对齐** — 同上。
 
 ---
 

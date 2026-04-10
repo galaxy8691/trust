@@ -71,7 +71,7 @@ pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
         TsType::TypeParam(_) => unreachable!("type params must be monomorphized before codegen"),
         TsType::Fn { .. } => "std::rc::Rc<dyn Fn(f64) -> f64>",
         TsType::ClassInstance(_) => "std::collections::HashMap<String, f64>",
-        TsType::Promise(_) => unreachable!("rust_ty_scalar: Promise is not a Rust value type"),
+        TsType::Promise(_) => unreachable!("rust_ty_scalar: awaitable wrapper is not a Rust value type"),
         TsType::Union(_) => unreachable!("rust_ty_scalar: use rust_ty_string for unions"),
         TsType::RustExtern { .. } => {
             unreachable!("rust_ty_scalar: use rust_ty_string for Rust extern types")

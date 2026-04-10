@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **不兼容：** TS 表面移除用户可见的 `Promise<T>` 与 `Promise.all`。`async function` 返回类型直接写兑现类型（`number` / `string` / `void`）；并行等待改用内置 **`async_all([...])`**。类型位置写 `Promise<...>` 会报错；`.then` 相关诊断不再出现 `Promise.prototype` 字样。
+
 ### 新增
 
 - 新增 workspace crate `trust_stdlib`，作为生成 Rust 的默认标准库门面（`json`、`uri`、`string` helper）。

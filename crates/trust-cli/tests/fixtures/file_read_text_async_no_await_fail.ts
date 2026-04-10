@@ -1,4 +1,4 @@
-export async function main(): Promise<number> {
+export async function main(): number {
   let s: string = readFileTextAsync("./README.md");
   return s.length;
 }

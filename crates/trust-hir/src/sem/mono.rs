@@ -668,7 +668,7 @@ fn unify_infer(
                 cm,
                 path,
                 span,
-                "type mismatch for generic call (`Promise` expected)",
+                "type mismatch for generic call (awaitable expected)",
             )),
         },
         TsType::Fn {

@@ -92,7 +92,7 @@ trust run --project tsconfig.json
   - `fetchText(url)`
   - `fetch(url, init?)`、`await response.text()`、`await response.json()`
   - `response.body.getReader()` + `await reader.read()`（流式子集）
-- Promise 子集：`await`、`Promise.all([...])`（同质子集）；`.then` 拒绝
+- 异步模型：**`async`/`await`**、**`async_all([...])`**（同质、并行 `await`）；TS 表面**无** **`Promise<T>`** / **`Promise.all`**；**`.then` / `.catch` / `.finally`** 回调**不计划**（[§13.8](PROJECT-TODO.zh-CN.md)）
 
 ---
 
@@ -154,6 +154,8 @@ flowchart LR
 
 样例：[`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — 测试 `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate`。
 
+**可复制模板索引**：[`examples/README.md`](examples/README.md)（维护中的示例 + 指向最小 `trust_regex` fixture）。
+
 **示例（Diesel 式 ORM + C FFI）**：[`examples/orm_ffi_demo.ts`](examples/orm_ffi_demo.ts) — [`examples/crates/trust_orm_facade`](examples/crates/trust_orm_facade) 在 **Rust 内**保留 Diesel 链式查询（`filter(...).load::<User>(...)?` 等），TS 只绑定窄方法；[`examples/crates/trust_ffi_facade`](examples/crates/trust_ffi_facade) 用 `extern "C"` 链接 `native/trust_ffi_add.c`，再暴露 `Cffi::add_nums`。运行：`cargo run -p trust-cli -- run examples/orm_ffi_demo.ts`。**说明：** 当前 Rust extern 的 `[[rust_binding]].new` 要求 **恰好一个 TS `string` 实参**；若 Rust 侧 `new` 不用该参数，可传占位字符串（如 `""`），见示例 crate 的 `new(_: &String)`。
 
 ## 不支持的 TypeScript 特性（trust 强类型拒斥边界）
@@ -162,10 +164,12 @@ flowchart LR
 
 | 用户可见形态 | 说明 |
 |--------------|------|
-| 非 `export function` / 非顶层 `function` / 非相对 **`export * from "./…"`** / 非 **`export { … } from "./…"`** / 非 **`export default function main`** / 非 **`export default main`**（须先有 `function main`）的 `export` | 如无 `from` 的 `export { }`、任意非 `main` 的 `export default`、`export * as`、`export const`、`export class` 等（**顶层、无 `export` 的 `class`** 见矩阵与 [PROJECT-TODO.zh-CN.md §13.3](PROJECT-TODO.zh-CN.md)） |
+| 非 `export function` / 非顶层 `function` / 非相对 **`export * from "./…"`** / 非 **`export { … } from "./…"`** / 非 **`export default function main`** / 非 **`export default main`**（须先有 `function main`）的 `export` | 如无 `from` 的 `export { }`、**任意表达式的 `export default`**（`export default 42`、匿名 `export default function`、`export default () => {}` 等）、非 `main` 的默认导出、`export * as`、`export const`、`export class` 等（**顶层、无 `export` 的 `class`** 见矩阵与 [PROJECT-TODO.zh-CN.md §13.3](PROJECT-TODO.zh-CN.md)）。**产品决策（[§13.6 A3](PROJECT-TODO.zh-CN.md)）**：默认导出仅上述支持形态在范围内。 |
 | 复杂泛型语义 | 高阶推导、复杂约束与完整 TS 泛型语义仍未实现；**调用处显式类型实参的单态化子集**见矩阵「泛型与类型参数」与 [§13.1](PROJECT-TODO.zh-CN.md) |
+| 类型位置的 `Promise<T>`、`Promise.all` | **拒绝** — 使用 `async function …(): T`（只写兑现类型 `T`）与 `async_all([…])`（[§13.8](PROJECT-TODO.zh-CN.md)）。 |
+| `.then` / `.catch` / `.finally` 回调 | **不计划** — 仅用 **`async`/`await`**（[§13.8](PROJECT-TODO.zh-CN.md)）；`promise_then_fail.ts`、`compile_promise_then_fails`。 |
 | 可选链（拒斥边界） | 受限 **`f?.()`** / **`recv?.m()`** 已支持（`optional_call_ok.ts`）；任意 callee、非标识符 callee 等仍可能拒绝（见 `optional_chain_fail.ts`） |
-| `interface extends`、跨依赖文件导入接口/类型**名** | **单文件**具名表；同文件内已支持嵌套 `number` 对象与 `k?: number`（**非**完整 `tsc` 结构规则） |
+| `interface extends`、跨依赖文件导入接口/类型**名**、`import type` / type-only 导入说明符 | **单文件**具名表；同文件内已支持嵌套 `number` 对象与 `k?: number`（**非**完整 `tsc` 结构规则）。**`import type`** 在解析阶段即拒绝（[`import_utils.rs`](crates/trust-parser/src/import_utils.rs)）；负例 `import_type_fail_main.ts`、`compile_import_type_fails`。 |
 | 交集 `A & B` | 拒绝 |
 | `bigint`、类型位置模板字面量类型 | 拒绝 |
 | 完整 `tsc` / TS 结构子类型全集 / 超出 §13.2 的 HOF | 完整类型检查与结构子类型全集未实现；**受限**函数类型与箭头值见矩阵与 [§13.2](PROJECT-TODO.zh-CN.md) |
@@ -179,9 +183,9 @@ flowchart LR
 
 ## 诊断与前端健壮性（§1.1）
 
-- **多条编译错误**：build 与语义阶段可在**一次失败**中收集多条诊断（[`CompileError::Many`](crates/trust-hir/src/error.rs)），按行输出多条 `path:line:col: message`（已排序）。解析器 [`parse_typescript_file`](crates/trust-parser/src/lib.rs) 会输出 swc **`take_errors()` 的全部**诊断。**单态化**与 **codegen** 仍可能在首条内部错误处停止。**成功时**可附带多条 [`CompileWarning`](crates/trust-hir/src/error.rs)（[`trust_lower`](crates/trust-lower/src/lib.rs) 同形）。
+- **多条编译错误**：build 与语义阶段可在**一次失败**中收集多条诊断（[`CompileError::Many`](crates/trust-hir/src/error.rs)），按行输出多条 `path:line:col: message`（已排序）。解析器 [`parse_typescript_file`](crates/trust-parser/src/lib.rs) 会输出 swc **`take_errors()` 的全部**诊断。**单态化**在其余 `sem` 检查之前运行；若失败则**跳过后续语义检查**——诊断末尾可能附简短说明：修复并重新编译后或可出现更多错误。**codegen** 仍为遇错即停，首条 codegen 错误也可能带同类说明。**成功时**可附带多条 [`CompileWarning`](crates/trust-hir/src/error.rs)（[`trust_lower`](crates/trust-lower/src/lib.rs) 同形）。
 - **`export` 形态**：`export function …`、顶层 `function …`、**`export default function main`**、**`export default main`**（同模块须有 `function main`）、相对 **`export * from "./…"`**、**`export { a as b } from "./…"`**（**函数**导出，见 [`build.rs`](crates/trust-hir/src/build.rs)、[`module_graph`](crates/trust-parser/src/module_graph.rs)）；`export class` / `export const` / 其它 `export default` / 无 `from` 的 `export { x }` 等仍**报错**；**顶层、无 `export` 的 `class`** 见矩阵。正例 `export_default_*_ok.ts`，负例 `export_*_fail.ts` 与 [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs)。
-- **注释**：swc 的 `Program` **仍无**注释节点；[`ParsedSource`](crates/trust-parser/src/lib.rs) 含 `source_map` 与解析器收集的 `comments`（swc 注释表）。**将 TS leading 注释写入生成 Rust** 为可选：[`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs)，CLI `trust compile --ts-source-comments`，在语句与顶层函数前输出 `//` 行；trailing 与大粒度 lowering 后的位置不保证（见 [PROJECT-TODO.zh-CN.md §14](PROJECT-TODO.zh-CN.md)）。
+- **注释**：swc 的 `Program` **仍无**注释节点；[`ParsedSource`](crates/trust-parser/src/lib.rs) 含 `source_map` 与解析器收集的 `comments`（swc 注释表）。**将 TS 注释写入生成 Rust** 为可选：[`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs)，CLI `trust compile --ts-source-comments`，仅输出 **leading** 注释，写成 Rust `//` 行，挂在**每条生成语句与每个顶层函数之前**，按 **HIR 语句 `span` 起点**（`span.lo`）在注释表中查找。**Trailing**、**行内**注释，以及大粒度 lowering（如 `switch`→`if` 链、`for`→`while`）之后的**精确**位置**不保证**；部分 TS 语句在 IR 中无对应单条语句时，注释可能表现为「丢失」。未来可选的「未附着注释」警告见 [PROJECT-TODO.zh-CN.md §3.3.1 / §14](PROJECT-TODO.zh-CN.md)，**尚未实现**。
 - **后续与 backlog**（更细粒度注释映射、完整工程工具链等）：见 [PROJECT-TODO.zh-CN.md §14 — 工具链与体验](PROJECT-TODO.zh-CN.md)。
 
 ## 控制流与 return（简化语义 + §3.4）
@@ -237,9 +241,20 @@ flowchart LR
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types_with_errors`](crates/trust-hir/src/build/build_types.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化：可写显式 `f<number>(x)`，或在实参类型可合成时省略（字面量、已注解的 `let`/参数）；不可推、冲突或多处错误会分别报错；`obj.m` 脱糖后的泛型全局函数同样推断；Rust 侧符号为 `name__` + 16 位十六进制指纹 |
 | 高阶函数 | 部分支持 | 函数类型与箭头闭包（`(number) => number` → `(f64) -> f64`）；变量调用 `f(...)` 等 |
-| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`（`trust_stdlib::http::fetch_text`）；**`readFileTextAsync(path)`** → `Promise<string>`（`trust_stdlib::io::read_file_text_async`，须 `await`）；**`fetch(url, init?)`** → `Promise<Response>`（`trust_stdlib::http::fetch` + `FetchInit`；`status` / `ok` / `await .text()` / `await .json()` JSON number → `f64`，`serde_json`）；流式 **`getReader`/`read`** 仍在 codegen 中生成；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
+| `async` / `await` / `fetch` / `fetchText` | 部分支持 | `async function` 返回类型写**兑现后的** `T`（`number` \| `string` \| `void`），**不要**写 `Promise<T>`；**`fetchText`** / **`readFileTextAsync`** / **`fetch`** / **`async_all([...])`** 仅能通过 **`await`** 使用；成员 **`.text()`** / **`.json()`** / **`.read()`** 与上述内置一致（codegen：`tokio` / `reqwest`）；**`async_all`** 对同质 awaitable 数组并行等待；**`fetch` 的 `init`** 可为字面量 `method`、`headers`、可选 `body`；流式 **`getReader`/`read`**；**`.then` / `Promise<T>` / `Promise.all`** 不在 TS 表面（[§13.8](PROJECT-TODO.zh-CN.md)）；TLS **rustls**；见 `fetch_response_ok.ts`、`fetch_stream_ok.ts`、`async_all_fetch_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_async_all_fetch_alias_ok` / `compile_promise_then_fails` |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
+
+#### Web `fetch`：WHATWG / 浏览器一致（非目标）
+
+trust 面向 **CLI / 服务端式**宿主，栈为 **reqwest** + **rustls**。内建 `fetch` **不是**浏览器 WHATWG 实现。尤其**不要**期望：
+
+- **CORS** 或浏览器安全策略在非浏览器宿主下的同等语义；
+- **`Headers` / `Request` / `Response`** 作为完整可变、可迭代的规范对象模型；
+- **双工流**、完整 **`ReadableStream`**、或与某一 **Node** / **浏览器** 版本的**字节级**一致；
+- 与浏览器 **`credentials: "include"`** 等价的 cookie 凭据模型。
+
+已支持子集见矩阵 **`async` / `fetch`** 行与 [PROJECT-TODO.zh-CN.md §14](PROJECT-TODO.zh-CN.md)（async / HTTP）。向 WHATWG 靠拢需单独、大型设计。
 
 ### 矩阵与集成测试对照
 
@@ -251,7 +266,7 @@ flowchart LR
 | `import` / 多文件 / 导出 / default | `import_add_main.ts`+`add_dep.ts`、`export_default_*_ok.ts`、`multi_entry_*`、`export_main.ts` | `run_import_add_main_prints_three`、`run_export_default_function_main_prints_42`、`run_multi_entry_extra_roots_prints_main`、`compile_export_main_writes_ts_main`、`run_reexport_export_star_ok` |
 | `Trust.toml` / Rust extern | `trust_regex/main.ts` + `trust_regex/Trust.toml` | `run_trust_regex_ok_prints_one`、`compile_trust_regex_ok_emits_regex_crate` |
 | 增量 HIR（`--incremental`） | e2e 临时目录 `lib.ts` + `app.ts` | `compile_incremental_rebuilds_only_changed_module` |
-| 负例（import/export/重复） | `import_missing_export_*`、`circular_*`、`dup_*`、`export_*_fail.ts`、`import_fail.ts` | `compile_import_missing_export_fails`、`compile_circular_import_fails` 等 |
+| 负例（import/export/重复） | `import_missing_export_*`、`import_type_fail_main.ts`、`circular_*`、`dup_*`、`export_*_fail.ts`、`import_fail.ts` | `compile_import_missing_export_fails`、`compile_import_type_fails`、`compile_circular_import_fails` 等 |
 | `let`/`const`/块/赋值 | `const_ok.ts`、`assign_simple.ts`、`empty_stmt.ts`、`let_if.ts` | `run_const_ok_prints_42`、`run_assign_simple_prints_five` 等 |
 | 语义边界（重复/shadow/void 分支） | `let_dup_same_block_fail.ts`、`let_shadow_nested_ok.ts`、`param_let_same_name_fail.ts`、`void_log_in_branch.ts` | 对应 `compile_*` / `run_void_log_in_branch_prints_branch` |
 | 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`for_in_*.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`run_for_in_object_keys_ok_prints_three`、`compile_for_in_non_object_fails` 等 |
@@ -266,7 +281,7 @@ flowchart LR
 | class 子集 | `class_basic_ok.ts`、`class_this_method_ok.ts`、`class_extends_ok.ts`、`class_super_ctor_ok.ts`、`class_*_fail.ts` | `run_class_basic_ok_prints_five`、`run_class_extends_ok_prints_seven`、`compile_class_super_invalid_fails`、`compile_class_override_mismatch_fails` |
 | 嵌套函数 | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | 极简 tsconfig / `--project` | `multi_entry_tsconfig.json` + `multi_entry_*.ts` | `run_project_tsconfig_prints_main`、`run_project_tsconfig_extends_include_ok` |
-| async / `Promise` / HTTP | `async_mvp_compile_ok.ts`、`async_control_flow_ok.ts`、`promise_all_fetch_ok.ts`、`fetch_response_ok.ts`、`fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`、`compile_async_control_flow_if_while_await_ok`、`compile_promise_all_fetch_alias_ok`、`compile_fetch_response_ok`、`compile_fetch_post_init_ok`、`compile_promise_then_fails` |
+| async / HTTP | `async_mvp_compile_ok.ts`、`async_control_flow_ok.ts`、`async_all_fetch_ok.ts`、`fetch_response_ok.ts`、`fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`、`compile_async_control_flow_if_while_await_ok`、`compile_async_all_fetch_alias_ok`、`compile_fetch_response_ok`、`compile_fetch_post_init_ok`、`compile_promise_then_fails` |
 | CLI：`check` / `--emit-ir` | `sample.ts`、`switch_fail.ts` | `check_sample_ok`、`compile_emit_ir_stderr_contains_ir_module` |
 | 可选链 / `??` / 对象字段（负例边界） | `optional_chain_fail.ts`、`nullish_fail.ts`、`object_fail.ts` | `compile_optional_call_bad_callee_fails` 等 |
 | 回归锚点（与 fixture 重复语义） | [`tests/regression/switch_fallthrough_regression.ts`](crates/trust-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |
@@ -290,7 +305,7 @@ flowchart LR
 
 ### 与 §1.4 的衔接
 
-字面量类型与联合类型在 HIR 中已与 [`TsType`](crates/trust-hir/src/ir.rs) 对齐；`??` 与 `?.` 在 **sem** 上已实现上述同族 / `Fn` 兼容合并（见 `nullish_ok.ts`、`optional_ok.ts`、`nullish_fn_ok.ts`）。**完整** discriminated 收窄仍属后续；扩展时需与 §1.4 联合类型规则一致，避免与受限 `TsType` 语义冲突。
+字面量类型与联合类型在 HIR 中已与 [`TsType`](crates/trust-hir/src/ir.rs) 对齐；`??` 与 `?.` 在 **sem** 上已实现上述同族 / `Fn` 兼容合并（见 `nullish_ok.ts`、`optional_ok.ts`、`nullish_fn_ok.ts`）。**完整** discriminated 收窄仍属后续；扩展时需与 §1.4 联合类型规则一致，避免与受限 `TsType` 语义冲突。分阶段规格与计划 fixture 名见 [PROJECT-TODO.zh-CN.md §3.3.1](PROJECT-TODO.zh-CN.md)（**D1** 收窄、**R1** interface 方法、**G1/G2** 泛型子集、**C1/C2** 注释映射；实现进度以该节为准）。
 
 ### `null` / `undefined` 与 `strictNullChecks`
 

@@ -206,7 +206,7 @@ pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, Compil
     validate_classes(module, &mut errs);
 
     if let Err(e) = mono::monomorphize_module_functions(module) {
-        errs.push(e);
+        errs.push(crate::error::with_monomorphization_followup(e));
         return Err(CompileError::merge_sorted(errs));
     }
 
@@ -873,7 +873,7 @@ fn reject_naked_fetchtext_in_stmts(
     path: &str,
 ) -> Result<(), CompileError> {
     const AWAIT_MSG: &str =
-        "`fetch` / `fetchText` / `readFileTextAsync` and `Promise.all(...)` must be used as `await ...`";
+        "`fetch` / `fetchText` / `readFileTextAsync` and `async_all(...)` must be used as `await ...`";
     for s in stmts {
         match s {
             IRStmt::Let { init, span, .. } => {
@@ -2699,7 +2699,7 @@ fn infer_expr_mut(
                     cm,
                     path,
                     *span,
-                    "indexing `Promise.all` of `fetch` responses is not supported (responses are not `Clone`)",
+                    "indexing `async_all` of `fetch` responses is not supported (responses are not `Clone`)",
                 ))
             } else if is_stringish(&ot) {
                 *index_kind = Some(IndexKind::StringUtf16);
@@ -2829,7 +2829,7 @@ fn infer_expr_mut(
                     cm,
                     path,
                     *span,
-                    "`Promise.all` requires at least one promise",
+                    "`async_all` requires at least one awaitable",
                 ));
             }
             let mut inners = Vec::with_capacity(elems.len());
@@ -2842,7 +2842,7 @@ fn infer_expr_mut(
                             cm,
                             path,
                             *span,
-                            "`Promise.all` elements must be `Promise<T>`",
+                            "`async_all` elements must be awaitable (`fetch`, `fetchText`, …)",
                         ));
                     }
                 }
@@ -2861,7 +2861,7 @@ fn infer_expr_mut(
                     cm,
                     path,
                     *span,
-                    "`Promise.all` requires all promises to have the same element kind (`number`, `string`, or `Response` from `fetch`)",
+                    "`async_all` requires all elements to have the same awaited kind (`number`, `string`, or `Response` from `fetch`)",
                 ))
             }
         }
@@ -2873,7 +2873,7 @@ fn infer_expr_mut(
                     cm,
                     path,
                     *span,
-                    "`await` expects a `Promise<T>` value",
+                    "`await` expects an awaitable value (e.g. `fetch(...)`, `async_all([...])`, or another `async` call result)",
                 )),
             }
         }

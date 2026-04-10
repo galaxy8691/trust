@@ -7,7 +7,7 @@
 import { Cffi } from "trust_ffi_facade";
 import { OrmFacade } from "trust_orm_facade";
 
-export async function main(): Promise<number> {
+export async function main(): number {
   // Trust：`new RustExtern(...)` 目前固定为**一个 string** 实参；占位即可。
   const orm: OrmFacade = new OrmFacade("");
   const tomRows: number = orm.users_named_tom_count();

@@ -220,25 +220,12 @@ pub(super) fn ts_type_from_ast(
                         return Ok(TsType::Uint8Array);
                     }
                     if name == "Promise" {
-                        let Some(args) = &r.type_params else {
-                            return Err(diag(
-                                cm,
-                                path,
-                                r.span,
-                                "`Promise` requires one type argument: `Promise<T>`",
-                            ));
-                        };
-                        if args.params.len() != 1 {
-                            return Err(diag(
-                                cm,
-                                path,
-                                r.span,
-                                "`Promise<T>` must have exactly one type argument",
-                            ));
-                        }
-                        let inner =
-                            ts_type_from_ast(&args.params[0], cm, path, iface, type_params)?;
-                        return Ok(TsType::Promise(Box::new(inner)));
+                        return Err(diag(
+                            cm,
+                            path,
+                            r.span,
+                            "`Promise` is not a trust type: use `async function …(): T` with the awaited type `T` directly (not `Promise<T>`), and `async_all([...])` instead of `Promise.all`",
+                        ));
                     }
                     let base = iface.get(&name).cloned().ok_or_else(|| {
                         diag(

@@ -64,7 +64,7 @@ pub enum TsType {
     ArrayNumber,
     /// 受限数组：`string[]`
     ArrayString,
-    /// `Promise.all` 等元素为 `Response` 时的同质数组（`Vec<reqwest::Response>`）
+    /// `async_all([...])` 等元素为 `Response` 时的同质数组（`Vec<reqwest::Response>`）
     ArrayHttpResponse,
     /// `fetch()` 返回的 Response（受限子集：`status` / `ok` / `text()` / `json()` / `body.getReader()` 流式读）
     HttpResponse,
@@ -89,7 +89,7 @@ pub enum TsType {
     },
     /// 类实例（OO 子集）
     ClassInstance(String),
-    /// `Promise<T>`（async / `fetch` / `fetchText` 等）
+    /// Awaitable / pending outer type (HIR only; TS surface uses `async` + plain `T`, not `Promise<T>`).
     Promise(Box<TsType>),
     /// Trust.toml `[[rust_binding]]` 映射的外部 Rust 类型（如 `regex::Regex`）。
     RustExtern {
@@ -589,7 +589,7 @@ pub enum IRExpr {
         path: Box<IRExpr>,
         span: Span,
     },
-    /// 异步读取本地文件文本（UTF-8），`Promise<string>`（须由 `await` 包裹）
+    /// 异步读取本地文件文本（UTF-8），awaitable `string`（须由 `await` 包裹）
     ReadFileTextAsync {
         path: Box<IRExpr>,
         span: Span,
@@ -622,23 +622,23 @@ pub enum IRExpr {
     This(Span),
     /// `super`
     Super(Span),
-    /// `await expr`（`arg` 须为 `Promise<T>`，整体类型为 `T`）
+    /// `await expr`（`arg` 须为 awaitable，整体类型为兑现后的 `T`）
     Await {
         arg: Box<IRExpr>,
         span: Span,
     },
-    /// 内建 `fetchText(url)` → `Promise<string>`（须由 `await` 包裹）
+    /// 内建 `fetchText(url)` → awaitable `string`（须由 `await` 包裹）
     FetchText {
         url: Box<IRExpr>,
         span: Span,
     },
-    /// 浏览器式 `fetch(url, init?)` → `Promise<HttpResponse>`（须由 `await` 包裹）
+    /// 浏览器式 `fetch(url, init?)` → awaitable `HttpResponse`（须由 `await` 包裹）
     Fetch {
         url: Box<IRExpr>,
         init: Option<FetchInit>,
         span: Span,
     },
-    /// `response.text()` / `response.json()`（返回 `Promise`，须 `await`）
+    /// `response.text()` / `response.json()`（返回 awaitable，须 `await`）
     HttpResponseMethodBuiltin {
         kind: HttpResponseMethodKind,
         receiver: Box<IRExpr>,
@@ -650,13 +650,13 @@ pub enum IRExpr {
         span: Span,
         stream_slot: Option<u32>,
     },
-    /// `reader.read()`（返回 `Promise<StreamReadResult>`，须 `await`；`reader_slot` 由 sem 填入）
+    /// `reader.read()`（返回 awaitable `StreamReadResult`，须 `await`；`reader_slot` 由 sem 填入）
     ReaderRead {
         reader_name: String,
         span: Span,
         reader_slot: Option<u32>,
     },
-    /// `Promise.all([...])`，元素须为同质 `Promise<T>`
+    /// `async_all([...])`，元素须为同质 awaitable
     PromiseAll {
         elems: Vec<IRExpr>,
         span: Span,
@@ -821,7 +821,7 @@ pub struct IRFunction {
     pub source_path: String,
     /// 单态化实例来源（如 `foo<number>`），用于诊断可读性。
     pub mono_origin: Option<String>,
-    /// `async function`；`ret` 存 **兑现类型** `T`（`Promise<T>` 已剥开）。
+    /// `async function`；`ret` 存 **兑现类型** `T`（与 TS 注解一致，非包装类型）。
     pub is_async: bool,
 }
 

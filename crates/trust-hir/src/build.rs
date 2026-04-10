@@ -1093,35 +1093,17 @@ fn build_named_function(
     )?;
     let (ret, is_async_fn) = if func.is_async {
         match ret_ann {
-            TsType::Promise(inner) => match *inner {
-                TsType::Number | TsType::String | TsType::Void => (*inner, true),
-                _ => {
-                    return Err(diag_spanned(
-                        cm,
-                        path,
-                        ident,
-                        "async function `Promise<T>` requires `T` to be `number`, `string`, or `void`",
-                    ));
-                }
-            },
+            TsType::Number | TsType::String | TsType::Void => (ret_ann, true),
             _ => {
                 return Err(diag_spanned(
                     cm,
                     path,
                     ident,
-                    "async function must have explicit return type `Promise<...>`",
+                    "async function return type must be `number`, `string`, or `void` (the type after `await`, not a `Promise<...>` wrapper)",
                 ));
             }
         }
     } else {
-        if matches!(ret_ann, TsType::Promise(_)) {
-            return Err(diag_spanned(
-                cm,
-                path,
-                ident,
-                "only `async function` may return `Promise<...>`",
-            ));
-        }
         (ret_ann, false)
     };
     let mut params = Vec::new();
@@ -2386,7 +2368,7 @@ fn build_expr(
                                 cm,
                                 path,
                                 c,
-                                "`Promise.prototype.then` is not supported; use `async`/`await` instead",
+                                "`.then` callbacks are not supported; use `async`/`await` instead",
                             ));
                         }
                     }
@@ -2427,6 +2409,51 @@ fn build_expr(
                     }
                     if fname.sym == "fetch" {
                         return build_fetch_ir(c, &type_args, cm, path, iface, in_async, "`fetch`");
+                    }
+                    if fname.sym == "async_all" {
+                        if !type_args.is_empty() {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`async_all` does not take type arguments",
+                            ));
+                        }
+                        if c.args.len() != 1 {
+                            return Err(diag_spanned(
+                                cm,
+                                path,
+                                c,
+                                "`async_all` expects exactly one argument",
+                            ));
+                        }
+                        let a0 = match &c.args[0] {
+                            ExprOrSpread { spread: None, expr } => expr,
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "spread arguments are not supported",
+                                ));
+                            }
+                        };
+                        let inner = build_expr(a0, cm, path, iface, in_async)?;
+                        let elems = match inner {
+                            IRExpr::ArrayLit { elems, .. } => elems,
+                            _ => {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`async_all` requires an array literal `[...]` argument",
+                                ));
+                            }
+                        };
+                        return Ok(IRExpr::PromiseAll {
+                            elems,
+                            span: c.span,
+                        });
                     }
                     if matches!(
                         fname.sym.as_ref(),
@@ -2896,55 +2923,6 @@ fn build_expr(
                 }
                 if let Expr::Member(m) = &**ce {
                     if let Expr::Ident(obj) = &*m.obj {
-                        if obj.sym == "Promise" {
-                            if let MemberProp::Ident(prop) = &m.prop {
-                                if prop.sym == "all" {
-                                    if !type_args.is_empty() {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "`Promise.all` does not take type arguments",
-                                        ));
-                                    }
-                                    if c.args.len() != 1 {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "`Promise.all` expects exactly one argument",
-                                        ));
-                                    }
-                                    let a0 = match &c.args[0] {
-                                        ExprOrSpread { spread: None, expr } => expr,
-                                        _ => {
-                                            return Err(diag_spanned(
-                                                cm,
-                                                path,
-                                                c,
-                                                "spread arguments are not supported",
-                                            ));
-                                        }
-                                    };
-                                    let inner = build_expr(a0, cm, path, iface, in_async)?;
-                                    let elems = match inner {
-                                        IRExpr::ArrayLit { elems, .. } => elems,
-                                        _ => {
-                                            return Err(diag_spanned(
-                                                cm,
-                                                path,
-                                                c,
-                                                "`Promise.all` requires an array literal `[...]` argument",
-                                            ));
-                                        }
-                                    };
-                                    return Ok(IRExpr::PromiseAll {
-                                        elems,
-                                        span: c.span,
-                                    });
-                                }
-                            }
-                        }
                         if obj.sym == "console" {
                             if let MemberProp::Ident(prop) = &m.prop {
                                 let stderr = match prop.sym.as_ref() {
@@ -3618,7 +3596,7 @@ fn build_opt_chain_call_expr(
                     cm,
                     path,
                     c,
-                    "`Promise.prototype.then` is not supported; use `async`/`await` instead",
+                    "`.then` callbacks are not supported; use `async`/`await` instead",
                 ));
             }
         }
@@ -3669,7 +3647,7 @@ fn build_opt_chain_call_expr(
                             cm,
                             path,
                             c,
-                            "`Promise.prototype.then` is not supported; use `async`/`await` instead",
+                            "`.then` callbacks are not supported; use `async`/`await` instead",
                         ));
                     }
                     let receiver = Box::new(build_expr(&m.obj, cm, path, iface, in_async)?);

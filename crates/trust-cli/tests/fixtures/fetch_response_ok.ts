@@ -1,4 +1,4 @@
-export async function main(): Promise<void> {
+export async function main(): void {
   console.log((await fetch("https://example.com")).status);
   console.log((await fetch("https://example.com")).ok);
   await (await fetch("https://example.com")).text();

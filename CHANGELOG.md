@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Removed user-visible `Promise<T>` and `Promise.all` from the trust TS surface. `async function` return types use the awaited type (`number` / `string` / `void`); use builtin **`async_all([...])`** instead of `Promise.all`. Type `Promise<...>` is rejected with a diagnostic; `.then` errors no longer mention `Promise.prototype`.
+
 ### Added
 
 - Added new workspace crate `trust_stdlib` as the default stdlib facade for generated Rust (`json`, `uri`, `string` helpers).

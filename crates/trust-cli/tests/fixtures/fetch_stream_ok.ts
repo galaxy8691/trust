@@ -1,4 +1,4 @@
-export async function main(): Promise<void> {
+export async function main(): void {
   const r: HttpResponse = await fetch("https://example.com");
   const reader: ReadableStreamDefaultReader = r.body.getReader();
   let total: number = 0;

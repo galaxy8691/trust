@@ -13,7 +13,9 @@ pub use build::{
     ModuleIrFragment,
 };
 pub use codegen::{emit_rust, emit_rust_with_options, CodegenOptions, StdlibMode};
-pub use error::{CompileError, CompileWarning};
+pub use error::{
+    with_codegen_followup, with_monomorphization_followup, CompileError, CompileWarning,
+};
 pub use ir::*;
 pub use ir_cache::{
     decode_fragment_from_bytes, encode_fragment_to_bytes, source_map_for_path, IrCacheError,
@@ -42,7 +44,7 @@ pub fn compile_with_options(
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
     let mut module = build_module(program, cm, path, None)?;
     let warnings = sem::check_module(&mut module)?;
-    let rust = emit_rust_with_options(&module, codegen)?;
+    let rust = emit_rust_with_options(&module, codegen).map_err(with_codegen_followup)?;
     Ok((rust, warnings))
 }
 
@@ -90,7 +92,7 @@ pub fn compile_graph_with_options(
     codegen: &CodegenOptions,
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
     let (module, warnings) = build_checked_module(units, entry_path, trust)?;
-    let rust = emit_rust_with_options(&module, codegen)?;
+    let rust = emit_rust_with_options(&module, codegen).map_err(with_codegen_followup)?;
     Ok((rust, warnings))
 }
 
@@ -103,6 +105,6 @@ pub fn compile_merged_fragments_with_options(
 ) -> Result<(String, Vec<CompileWarning>), CompileError> {
     let mut module = crate::build::merge_module_ir_fragments(fragments, entry_path, trust)?;
     let warnings = sem::check_module(&mut module)?;
-    let rust = emit_rust_with_options(&module, codegen)?;
+    let rust = emit_rust_with_options(&module, codegen).map_err(with_codegen_followup)?;
     Ok((rust, warnings))
 }

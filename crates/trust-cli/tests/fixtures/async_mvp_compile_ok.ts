@@ -1,3 +1,3 @@
-export async function main(): Promise<void> {
+export async function main(): void {
   await fetchText("https://example.com");
 }

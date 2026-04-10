@@ -46,7 +46,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 1.3 Expressions
 
-- [x] **`async` / `await` / `Promise` / HTTP `fetch` / `fetchText` (MVP)**: [`IRFunction::is_async`](crates/trust-hir/src/ir.rs), [`IRExpr::Await`](crates/trust-hir/src/ir.rs) / [`FetchText`](crates/trust-hir/src/ir.rs) / [`Fetch`](crates/trust-hir/src/ir.rs) / [`PromiseAll`](crates/trust-hir/src/ir.rs), [`#[tokio::main]`](crates/trust-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/trust-driver/src/crate_writer.rs) and **`futures-util`** when generated Rust uses streaming (`crate_writer` detects `futures_util` in source). **`await` in arbitrary control flow** is implemented; **`fetchText(url)`** → `Promise<string>`; **`fetch(url, init?)`** → `Promise<Response>` with **`status`**, **`ok`**, **`await .text()`**, **`await .json()`** (JSON **number** body → `f64` via **`serde_json`**, same as dynamic `JSON.parse`), **`response.body.getReader()`** + **`await reader.read()`** (chunked body via `bytes_stream()`), and **optional `init`** (`method` string literal, `headers` object with string-literal values, optional `body` string); **`.then`** is rejected with a diagnostic; **`Headers` iteration / Web `Request` parity / byte-level TLS·HTTP2 parity with Node** remain out of scope (see §Async / HTTP backlog).
+- [x] **`async` / `await` / HTTP `fetch` / `fetchText` (MVP)**: [`IRFunction::is_async`](crates/trust-hir/src/ir.rs), [`IRExpr::Await`](crates/trust-hir/src/ir.rs) / [`FetchText`](crates/trust-hir/src/ir.rs) / [`Fetch`](crates/trust-hir/src/ir.rs) / [`PromiseAll`](crates/trust-hir/src/ir.rs) (TS surface: **`async_all([...])`**), [`#[tokio::main]`](crates/trust-hir/src/codegen.rs), driver injects [`tokio` + `reqwest`](crates/trust-driver/src/crate_writer.rs) and **`futures-util`** when generated Rust uses streaming (`crate_writer` detects `futures_util` in source). **`await` in arbitrary control flow** is implemented; **no user `Promise<T>`** — `async function` annotations use the **awaited** type `T` (`number` / `string` / `void`); builtins **`fetchText`**, **`fetch`**, **`readFileTextAsync`**, **`async_all`** are await-only; **`response.body.getReader()`** + **`await reader.read()`** (chunked body via `bytes_stream()`), **optional `init`** on `fetch`; **`.then` / `Promise.all` / `Promise<T>`** are **rejected or absent** on the TS surface ([§13.8](PROJECT-TODO.md)); **`Headers` iteration / Web `Request` parity / byte-level TLS·HTTP2 parity with Node** remain out of scope (see §Async / HTTP backlog).
 - [x] **Member access and call chains**: `string.length` (UTF-16), `string[i]` (single UTF-16 code unit as `string`), `number[]` / `string[]` index, `length` on objects; **`obj.m(args)`** → global `m(receiver,…)` ([`IRExpr::MethodCall`](crates/trust-hir/src/ir.rs)); **one-level** `f().prop` / `f().m()` ([`chain_call_ok.ts`](crates/trust-cli/tests/fixtures/chain_call_ok.ts)); optional **`?.` / `f?.()` / `recv?.m()`** ([`optional_call_ok.ts`](crates/trust-cli/tests/fixtures/optional_call_ok.ts)); fixtures `member_length_ok.ts`, `method_call_ok.ts`, `string_utf16_length.ts`, `stdlib_hir_ok.ts`.
 - [x] **Optional chaining / nullish coalescing**: limited subset (`obj?.prop`, `??`; `optional_ok.ts`, `nullish_ok.ts`); full semantics tied to §3.3.
 - [x] **Logical short-circuit**: `&&`, `||`; `boolean` and `number` truthiness (`!= 0`), result type `boolean` (`logical_bool.ts`, `logical_truthy_ok.ts`); differs from TS value-preserving `&&`/`||`; under **strong typing** result is `boolean`; more complex truthiness or unions still limited.
@@ -127,6 +127,45 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 - [x] **`null` / `undefined`**: [`TsType`](crates/trust-hir/src/ir.rs) has `Null`/`Undefined` variants; checks follow **current sem static rules**, not tsc’s default “everything nullable”. Done: README §3.3; **no** `strictNullChecks`-style switch. If added later, make it an **explicit** compiler mode, not implicit JS looseness.
 - [x] **Structural vs nominal**: **trust** uses nominal table + static shape checks; Rust mapping strategy (mostly primitives today). Done: README §3.3; **not** implementing full TS structural subtyping as a goal.
 - [x] **Function types and HOF**: Align with [§13.2](PROJECT-TODO.md) and README — a **restricted** subset is implemented (function types, arrow values, calls, passing/returning functions); closure codegen remains the strict `(number) => number` subset. **Do not** claim “no first-class functions / no HOF”; distinguish “supported HOF subset” vs “further generalization / codegen work”.
+
+### 3.3.1 Extension roadmap — pillar pick and specifications (implementation TBD)
+
+Single-PR rule: land **one** pillar at a time; each needs fixtures + README §3.3 / matrix touch-up.
+
+**Recommended order**
+
+1. **D1** — discriminated narrowing (localized to `sem`, high leverage for `if` + unions).
+2. **R1** — nominal `interface` methods (build + sem; may touch codegen for call shape).
+3. **G1 / G2** — broader monomorphization surface (touches `sem/mono.rs` + build rejects).
+4. **C1 / C2** — TS comment fidelity (mostly `codegen` + parser comment maps; weak coupling to sem).
+
+#### D1 — Discriminated union narrowing (spec)
+
+- **Goal**: Inside `if (v.tag === 'a')` / `else`, refine static type of `v` when `v` is a `Union` of `ObjectNum`-like arms that share a **required** discriminant field (same name on each arm) with **pairwise-distinct literal** types (`string` / `boolean` / `number` literals only for v0).
+- **Condition shape (v0)**: `Binary` with `Eq` / `StrictEq`, left = `Member` or `OptionalMember` on identifier `v` + literal property name, right = **literal** matching one arm’s discriminant value. (Computed member / arbitrary expr left side: later.)
+- **Semantics**: In **then** branch, bind `v` (and copies?) to narrowed object type; **else** optional v0.1: narrow to remaining union arms. Merge with existing `??` / `?.` rules without breaking `nullish_ok.ts`, `optional_ok.ts`, `nullish_fn_ok.ts`.
+- **Implementation sketch**: flow-sensitive map `ident -> TsType` per block stack in [`check_stmts`](crates/trust-hir/src/sem.rs) / `check_stmt` for `IRStmt::If`; or optional `narrow_ty` on [`Binding`](crates/trust-hir/src/sem.rs) entries.
+- **Fixtures (planned)**: `discriminated_narrow_ok.ts`, `discriminated_narrow_else_ok.ts`, `discriminated_narrow_non_literal_fail.ts`; e2e `run_*` / `compile_*`.
+
+#### G1 / G2 — Generics subset expansion (spec)
+
+- **G1 (explicit args)**: Extend **documented** allowed patterns for `f<T>(…)` calls — e.g. explicit `T` on chained / nested calls where callee and args are already monomorph-safe; each addition needs a proof case in `mono.rs` + fixture.
+- **G2 (inference)**: Only extend inference when **every** type parameter is fixed uniquely from argument types that are already supported for synthesis (literals, annotated locals, etc.); reject unions / ambiguous args.
+- **Still out of scope**: Higher-kinded types, `extends` constraints, default type params, inference from heterogeneous unions, call-site partial application of type args.
+- **Regression**: retain [`generic_function_*_fail.ts`](crates/trust-cli/tests/fixtures/), [`compile_generic_function_multi_infer_fail_reports_multiple_errors`](crates/trust-cli/tests/cli_e2e.rs); add new positives only with e2e.
+
+#### R1 — `interface` instance methods (nominal; spec)
+
+- **Syntax subset (v0)**: Inside top-level `interface I { foo(): number; bar(x: number): void; }` — **no** overloads, **no** generic methods, **no** `this` typing beyond current class subset rules if reused.
+- **Lowering strategy**: Prefer **global desugar** `foo__I(receiver: &IShape, …)` (name mangled) over `serde_json::Value` dispatch; receiver type is the existing nominal `ObjectNum` / named interface shape for **one compilation unit** (cross-file `I`: [§13.7 B2a](PROJECT-TODO.md)).
+- **Interaction**: `obj.m(args)` today becomes `m(obj, args)`; R1 must not break [`method_call_ok.ts`](crates/trust-cli/tests/fixtures/method_call_ok.ts) / [`chain_call_ok.ts`](crates/trust-cli/tests/fixtures/chain_call_ok.ts) for non-interface receivers.
+- **Fixtures (planned)**: `interface_method_ok.ts`, `interface_method_bad_args_fail.ts`.
+
+#### C1 / C2 — TS source comments in Rust (spec)
+
+- **C1 (documentation)**: See README §1.1 — leading comments attach by **HIR statement span start**; many lowerings move or split spans.
+- **C2 (future)**: Trailing / interior comments need range lookup (`span.lo` / `span.hi` vs swc comment tables) and policy for `switch`→`if`, `for`→`while`, etc.
+- **Optional future warning**: emit [`CompileWarning`](crates/trust-hir/src/error.rs) when `--ts-source-comments` is on and a file has frozen comments that **no** emitted stmt consumed (needs cheap global pass); not implemented yet.
 
 ### 3.4 Control-flow analysis (advanced)
 
@@ -308,7 +347,7 @@ Trust keeps a **callable entry named `main`**. Default export is supported only 
 - [x] **A1 — default function**: `export default function main` / `export default async function main` → same IR as `export function main` ([`build.rs`](crates/trust-hir/src/build.rs)); module graph records `main` as export ([`module_graph.rs`](crates/trust-parser/src/module_graph.rs)); fixtures `export_default_function_main_ok.ts`, `export_default_async_main_ok.ts` + `cli_e2e`.
 - [x] **A2 — default references `main`**: `export default main` when a top-level `function main` exists; validated after scan ([`build.rs`](crates/trust-hir/src/build.rs)); fixture `export_default_main_ref_ok.ts`.
 - [x] **Default import**: `import main from "./dep.ts"` requires binding name `main` and target default export `main` ([`import_utils.rs`](crates/trust-parser/src/import_utils.rs)); negative `import_default_wrong_binding_fail.ts`.
-- [ ] **A3 — arbitrary default expressions** (`export default 42`, anonymous arrows, etc.): **still rejected** unless they reduce to the supported shapes above; document in README “Unsupported / Partial”.
+- [x] **A3 — arbitrary default expressions** (`export default 42`, `export default () => {}`, anonymous `export default function`, etc.): **explicitly out of scope** (by product decision). Only **A1/A2** shapes are supported; see README [Unsupported TypeScript](README.md) and **`export` shapes** under Diagnostics (§1.1). No plan to add general expression default exports unless the entry contract changes.
 
 ### 13.7 Structural typing milestones (not full `tsc`)
 
@@ -316,18 +355,23 @@ Trust keeps a **callable entry named `main`**. Default export is supported only 
 
 - [x] **B1 — nested `ObjectNum` + optional props**: [`ObjectProp`](crates/trust-hir/src/ir.rs), [`object_shape_assignable`](crates/trust-hir/src/sem/helpers.rs), object literals as `serde_json::Value` in codegen; fixture `nested_object_ok.ts`.
 - [ ] **B2+ — cross-file interface names in type position, callable members on object types, richer `readonly`/index signatures**: **backlog**; README documents current limits and differences from `tsc`.
+- **B2a (next milestone)** — cross-file **type-only** / nominal reuse: e.g. `import type { I } from "./dep.ts"` and using `I` in annotations **across files**. **Current boundary**: `import type` and type-only specifiers are **rejected** at import resolution ([`import_utils.rs`](crates/trust-parser/src/import_utils.rs)); negative fixture [`import_type_fail_main.ts`](crates/trust-cli/tests/fixtures/import_type_fail_main.ts) + e2e `compile_import_type_fails`. Implementing B2a requires extending the module graph + merged type table, not only parser tweaks.
+
+### 13.8 Async surface — no user `Promise` / no `.then` (product decision)
+
+**User-visible `Promise<T>`**, **`Promise.all`**, and **`.then` / `.catch` / `.finally`** callback chaining are **not part of trust**. Write **`async function …(): T`** with the **awaited** type `T` (`number` / `string` / `void`); use **`async_all([...])`** for homogeneous parallel awaits (same lowering as former `Promise.all`). The type name **`Promise`** in type position is **rejected** with a diagnostic ([`build_types.rs`](crates/trust-hir/src/build/build_types.rs)). **`.then`** on calls is **rejected** ([`build.rs`](crates/trust-hir/src/build.rs); [`promise_then_fail.ts`](crates/trust-cli/tests/fixtures/promise_then_fail.ts); e2e `compile_promise_then_fails`). HIR still uses an internal awaitable wrapper ([`TsType::Promise`](crates/trust-hir/src/ir.rs)) for codegen only. Same product stance as §13.6 A3: **permanent scope**, not a deferred milestone.
 
 ---
 
 ## 14. Next steps (follow-up backlog)
 
-Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, README “Partial” / “Unsupported”, and §1.3 follow-ups — **code wins**; update stale bullets when landing features.
+Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, README “Partial” / “Unsupported”, and §1.3 follow-ups — **code wins**; update stale bullets when landing features. For a **single checkbox list** of remaining gaps (from README + matrix + roadmap discussion), see **[Consolidated product backlog](#consolidated-product-backlog-readme--partial--slow-track)** at the end of this section — work through it incrementally; some rows duplicate narrative elsewhere (e.g. §3.3.1, §13.7).
 
 ### Toolchain and UX
 
 **Multi-diagnostic collection** (see [README §1.1 — Diagnostics and surface](README.md))
 
-- [x] **Compile pipeline (build + sem)**: [`build_module`](crates/trust-hir/src/build.rs) and [`check_module`](crates/trust-hir/src/sem.rs) collect multiple [`CompileError`](crates/trust-hir/src/error.rs) into [`CompileError::Many`](crates/trust-hir/src/error.rs) (sorted). Top-level declaration / per-function sem errors are aggregated; **monomorphization** may still stop at the first error; [`emit_rust_with_options`](crates/trust-hir/src/codegen.rs) remains fail-fast on first codegen issue.
+- [x] **Compile pipeline (build + sem)**: [`build_module`](crates/trust-hir/src/build.rs) and [`check_module`](crates/trust-hir/src/sem.rs) collect multiple [`CompileError`](crates/trust-hir/src/error.rs) into [`CompileError::Many`](crates/trust-hir/src/error.rs) (sorted). Top-level declaration / per-function sem errors are aggregated; **monomorphization** still aborts the rest of `sem` on failure; [`emit_rust_with_options`](crates/trust-hir/src/codegen.rs) remains fail-fast on the first codegen issue. **UX**: mono / codegen errors may append a short English note that further diagnostics can appear after fix + recompile ([`with_monomorphization_followup`](crates/trust-hir/src/error.rs) / [`with_codegen_followup`](crates/trust-hir/src/error.rs)); see README §1.1.
 - [x] **Parser**: [`parse_typescript_file`](crates/trust-parser/src/lib.rs) reports **all** swc [`take_errors()`](crates/trust-parser/src/lib.rs) diagnostics (plus primary `parse_program` error when present), merged and sorted. **Module graph** still returns on the first file parse failure (per-file output can be multi-line).
 
 **Comments vs generated Rust** (see [README §1.1 — Comments](README.md))
@@ -351,12 +395,11 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 
 ### Async / HTTP (MVP; residual backlog)
 
-- [x] **`await` in arbitrary control flow** (not limited to current async MVP body rules). (Removed [`check_async_mvp_stmts`](crates/trust-hir/src/sem.rs); [`infer_expr_mut`](crates/trust-hir/src/sem.rs) `Await` accepts any `Promise<T>` operand; [`async_control_flow_ok.ts`](crates/trust-cli/tests/fixtures/async_control_flow_ok.ts), `compile_async_control_flow_if_while_await_ok`.)
-- [x] **`Promise.all([...])`** (array literal only; homogeneous `Promise<number>` / `Promise<string>` / `Promise<Response>` from `fetch`). ([`IRExpr::PromiseAll`](crates/trust-hir/src/ir.rs), [`promise_all_fetch_ok.ts`](crates/trust-cli/tests/fixtures/promise_all_fetch_ok.ts), `compile_promise_all_fetch_alias_ok`.)
-- [x] **`fetchText(url)`** — `Promise<string>` via [`IRExpr::FetchText`](crates/trust-hir/src/ir.rs) → `trust_stdlib::http::fetch_text` ([`crates/trust-stdlib/src/http.rs`](crates/trust-stdlib/src/http.rs)).
-- [x] **`fetch(url, init?)`** — `Promise<Response>` via [`IRExpr::Fetch`](crates/trust-hir/src/ir.rs) → `trust_stdlib::http::fetch` + `trust_stdlib::http::FetchInit`; Response members and `text`/`json` as above; fixtures [`fetch_response_ok.ts`](crates/trust-cli/tests/fixtures/fetch_response_ok.ts), [`fetch_post_init_ok.ts`](crates/trust-cli/tests/fixtures/fetch_post_init_ok.ts).
+- [x] **`await` in arbitrary control flow** (not limited to current async MVP body rules). (Removed [`check_async_mvp_stmts`](crates/trust-hir/src/sem.rs); [`infer_expr_mut`](crates/trust-hir/src/sem.rs) `Await` accepts any internal awaitable operand; [`async_control_flow_ok.ts`](crates/trust-cli/tests/fixtures/async_control_flow_ok.ts), `compile_async_control_flow_if_while_await_ok`.)
+- [x] **`async_all([...])`** (array literal only; homogeneous awaitables from `fetch` / `fetchText` / …). ([`IRExpr::PromiseAll`](crates/trust-hir/src/ir.rs), [`async_all_fetch_ok.ts`](crates/trust-cli/tests/fixtures/async_all_fetch_ok.ts), `compile_async_all_fetch_alias_ok`.)
+- [x] **`fetchText(url)`** — awaitable `string` via [`IRExpr::FetchText`](crates/trust-hir/src/ir.rs) → `trust_stdlib::http::fetch_text` ([`crates/trust-stdlib/src/http.rs`](crates/trust-stdlib/src/http.rs)).
+- [x] **`fetch(url, init?)`** — awaitable `HttpResponse` via [`IRExpr::Fetch`](crates/trust-hir/src/ir.rs) → `trust_stdlib::http::fetch` + `trust_stdlib::http::FetchInit`; Response members and `text`/`json` as above; fixtures [`fetch_response_ok.ts`](crates/trust-cli/tests/fixtures/fetch_response_ok.ts), [`fetch_post_init_ok.ts`](crates/trust-cli/tests/fixtures/fetch_post_init_ok.ts).
 - [x] **Streaming response body (M3)** — `response.body.getReader()` / `await reader.read()` → `StreamReadResult` (`done`, `value` as `Uint8Array`); `reqwest::Response::bytes_stream()`; semantic mutex with `.text()` / `.json()`; built-in type names `HttpResponse`, `ReadableStreamDefaultReader`, `StreamReadResult`, `Uint8Array`; fixture [`fetch_stream_ok.ts`](crates/trust-cli/tests/fixtures/fetch_stream_ok.ts), test `compile_fetch_stream_ok`.
-- [x] **Reject `.then`** calls with a clear diagnostic (`Promise.prototype.then` is not supported). ([`build.rs`](crates/trust-hir/src/build.rs) call lowering, [`promise_then_fail.ts`](crates/trust-cli/tests/fixtures/promise_then_fail.ts), `compile_promise_then_fails`.)
 - [x] **TLS / HTTP stack (documented, not “Node parity”)**: generated crates use **reqwest** with **`rustls-tls`** ([`crate_writer.rs`](crates/trust-driver/src/crate_writer.rs)). **TLS 1.2+** and **HTTP/2** (when the server and stack negotiate ALPN) are provided by that stack; **root stores, cipher suites, and HTTP/2 prioritization are not guaranteed to match any specific Node or browser version**. **Still backlog**: full **WHATWG** `fetch` (browser `ReadableStream` / `Request`/`Headers` objects, duplex, CORS in non-browser hosts, etc.); trust subset already supports **chunked body** via `getReader`/`read` (see streaming item above).
 
 ### Language and typing (trust strong-typing subset)
@@ -372,12 +415,57 @@ Consolidated **what to do next**. Items may overlap §1.3 notes, §10–§11, RE
 - [x] **Module graph**: `import … from "crate_key"` when the key is in the manifest; `validate_imports` checks `[[rust_binding]]`; no filesystem DFS into a fake Rust module tree.
 - [x] **HIR / sem / codegen**: `TsType::RustExtern`, `IRExpr::RustNew`, inherent `MethodCall` with `inherent_rust_str_ref` for `string` → `&str` (`.as_str()` at call sites).
 - [x] **E2E**: [`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate`.
-- [ ] **Prebuilt binding shims** for popular crates (optional community crates / monorepo packages): backlog.
+- [x] **Prebuilt binding shims** (starter patterns): no central registry; copy-paste templates are documented in [`examples/README.md`](examples/README.md) (Diesel/FFI examples + minimal [`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) `Trust.toml` pattern). Optional future: curated registry / `trust add` presets — still backlog if desired.
 
 ### Documentation and examples
 
 - [x] **README + this file**: periodic sweep so matrix / §1.3 / §2.1 lines match shipped features (e.g. stdlib, `string[i]`, `Math.*` extensions). *(This sweep: §1.3 / §2.1 bullets above + `.json()`/`JSON.parse` serde_json wording; README matrix already lists member/`JSON`/URI/async — see [Language feature matrix](README.md).)*
 - [x] **[`test-ts/main.ts`](test-ts/main.ts)**: kept within supported subset; header documents expected I/O and **intentionally omits** `async`/`fetch`/generic call sites (covered by `fixtures/` instead).
+
+### Consolidated product backlog (README / Partial / slow track)
+
+Checkbox list derived from [README — Unsupported TypeScript](README.md), matrix **Partial** rows, §1.3 follow-ups, [§3.3.1](PROJECT-TODO.md), and residual §14 notes. **Strong typing / decidable sem / codegen** still apply ([README — Trust: strong typing](README.md)). Prefer **one main pillar per PR** where possible. When an item is done, tick it here **and** update the section it duplicates (§3.3.1, §13.7, README matrix, etc.).
+
+#### Types and semantics (vs full `tsc`)
+
+- [ ] **D1 — Discriminated narrowing** on object unions (`if (v.kind === 'a')` / `else`); coordinate with `??` / `?.` ([§3.3.1](PROJECT-TODO.md), [`sem.rs`](crates/trust-hir/src/sem.rs)).
+- [ ] **D3-style — Broader unions / `normalize_union` / assignability** only where still **one** Rust type and statically decidable ([§3.3](PROJECT-TODO.md)).
+- [ ] **G1 / G2 — Generics subset expansion** (more explicit type-arg patterns; more arity / non-call monomorphization) ([§3.3.1](PROJECT-TODO.md), [`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)).
+- [ ] **G3 — Where-like constraints** (if introduced: must remain fully static).
+- [ ] **Intersection types `A & B`** in type positions (currently rejected).
+- [ ] **`bigint` / template literal types** in type positions (rejected today).
+- [ ] **Full structural subtyping parity with `tsc`** — not a goal; only **documented safe chips** if any.
+- [ ] **Heterogeneous unions** (`number | string`, …): clearer codegen strategy or diagnostics when a single Rust type is impossible ([README matrix — Union](README.md)).
+- [ ] **`strictNullChecks`-equivalent mode** as an **explicit** compiler option (not implicit TS looseness).
+- [ ] **R1 — Nominal methods on `interface` / object types** (static dispatch; global `m__I(receiver,…)` or inherent) ([§3.3.1](PROJECT-TODO.md)).
+- [ ] **R2 — Deeper type-driven call/member chains** than one `f().g()` ([§1.3 follow-ups](PROJECT-TODO.md)).
+- [ ] **§13.7 B2a + B2+** — `import type`, cross-file interface/type names in annotations, callable members on object types, `interface extends`, richer `readonly` / index signatures ([§13.7](PROJECT-TODO.md)).
+
+#### Language surface
+
+- [ ] **More `export` shapes** only if product scope changes — today: arbitrary `export default`, `export const`, `export * as`, local `export { x }` without `from`, etc. ([README Unsupported](README.md), §13.6).
+- [ ] **Wider optional chaining** (callees / forms still rejected — see [`optional_chain_fail.ts`](crates/trust-cli/tests/fixtures/optional_chain_fail.ts)).
+- [ ] **`&&` / `||` value-preserving** semantics vs current **`boolean`** result — requires an explicit **strong-typing** spec before implementation ([README matrix](README.md)).
+- [ ] **`for..of`** loops.
+- [ ] **Labeled `break` / `continue`**.
+- [ ] **Computed member / call** `obj[expr]`, `obj[expr](…)` where decidable.
+
+#### Async and closures
+
+- [ ] **Closure codegen** beyond the current **`(number) => number`-style** strict subset ([README — HOF / matrix](README.md)).
+- [ ] **WHATWG / browser `fetch` parity** (`Headers` iteration, full `Request`, duplex, etc.) — residual vs current reqwest subset ([README — Web fetch](README.md)).
+
+#### Toolchain and parser UX
+
+- [ ] **C1 — Optional warning** for TS comments not attached when `--ts-source-comments` ([§3.3.1](PROJECT-TODO.md), Comments in §14 above).
+- [ ] **C2 / C3 — Trailing / inline comments** and **comment inheritance** after large lowerings (`switch` → `if`, `for` → `while`, …).
+- [ ] **Module graph: collect diagnostics from multiple files** after a parse failure (vs stop at first bad file) ([§14 Toolchain](PROJECT-TODO.md)).
+- [ ] **Parser / AST error recovery** beyond current swc + multi-line per file (if desired).
+
+#### Ecosystem (non-goals unless policy changes)
+
+- [ ] **npm / `node_modules` / `compilerOptions.paths` → packages** — today **not planned**; revisit only with an explicit product decision ([README — Scope (1.0)](README.md)).
+- [ ] **Full `tsconfig` / `tsc` behavior parity** — same.
 
 ---
 

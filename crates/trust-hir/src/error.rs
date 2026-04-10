@@ -102,6 +102,44 @@ impl fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+/// Appends a short note that other diagnostics may appear after the user fixes and recompiles.
+pub fn with_monomorphization_followup(err: CompileError) -> CompileError {
+    append_followup_to_diagnostics(
+        err,
+        " Further semantic errors are not reported until monomorphization succeeds; fix and recompile.",
+    )
+}
+
+/// Same idea for the first codegen failure (codegen is otherwise fail-fast).
+pub fn with_codegen_followup(err: CompileError) -> CompileError {
+    append_followup_to_diagnostics(
+        err,
+        " Further codegen errors may appear after this one is fixed; recompile to see them.",
+    )
+}
+
+fn append_followup_to_diagnostics(err: CompileError, note: &'static str) -> CompileError {
+    match err {
+        CompileError::Diag {
+            path,
+            line,
+            col,
+            message,
+        } => CompileError::Diag {
+            path,
+            line,
+            col,
+            message: format!("{message}{note}"),
+        },
+        CompileError::Many(items) => CompileError::Many(
+            items
+                .into_iter()
+                .map(|e| append_followup_to_diagnostics(e, note))
+                .collect(),
+        ),
+    }
+}
+
 pub fn diag(cm: &SourceMap, path: &str, span: Span, message: impl Into<String>) -> CompileError {
     let loc = cm.lookup_char_pos(span.lo);
     CompileError::Diag {
@@ -140,4 +178,24 @@ pub fn diag_spanned(
     message: impl Into<String>,
 ) -> CompileError {
     diag(cm, path, spanned.span(), message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codegen_followup_appends_to_message() {
+        let e = CompileError::Diag {
+            path: "a.ts".into(),
+            line: 1,
+            col: 0,
+            message: "oops".into(),
+        };
+        let CompileError::Diag { message, .. } = with_codegen_followup(e) else {
+            panic!("expected Diag");
+        };
+        assert!(message.contains("oops"));
+        assert!(message.contains("recompile"));
+    }
 }

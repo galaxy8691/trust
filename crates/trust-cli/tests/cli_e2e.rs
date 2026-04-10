@@ -291,9 +291,9 @@ fn compile_async_control_flow_if_while_await_ok() {
 }
 
 #[test]
-fn compile_promise_all_fetch_alias_ok() {
+fn compile_async_all_fetch_alias_ok() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
-    let ts = fixture("promise_all_fetch_ok.ts");
+    let ts = fixture("async_all_fetch_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
     let rs_path = dir.path().join("out.rs");
     let status = Command::new(exe)
@@ -314,7 +314,7 @@ fn compile_promise_all_fetch_alias_ok() {
 
 #[test]
 fn compile_promise_then_fails() {
-    assert_compile_fails_stderr("promise_then_fail.ts", "Promise.prototype.then");
+    assert_compile_fails_stderr("promise_then_fail.ts", ".then` callbacks are not supported");
 }
 
 #[test]
@@ -419,7 +419,10 @@ fn compile_file_read_text_async_ok() {
         .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("trust_stdlib::io::read_file_text_async"), "{body}");
+    assert!(
+        body.contains("trust_stdlib::io::read_file_text_async"),
+        "{body}"
+    );
     assert!(body.contains(".await"), "{body}");
 }
 
@@ -468,7 +471,7 @@ fn run_file_read_text_async_ok() {
     std::fs::write(&file_path, "hello").expect("write input");
     let ts_path = dir.path().join("main.ts");
     let ts_src = format!(
-        "export async function main(): Promise<number> {{ let s: string = await readFileTextAsync({:?}); return s.length; }}\n",
+        "export async function main(): number {{ let s: string = await readFileTextAsync({:?}); return s.length; }}\n",
         file_path.to_string_lossy()
     );
     std::fs::write(&ts_path, ts_src).expect("write ts");
@@ -883,6 +886,11 @@ fn compile_export_named_fails() {
 #[test]
 fn compile_export_default_fails() {
     assert_compile_fails_stderr("export_default_fail.ts", "export default");
+}
+
+#[test]
+fn compile_import_type_fails() {
+    assert_compile_fails_stderr("import_type_fail_main.ts", "`import type`");
 }
 
 #[test]
@@ -1326,7 +1334,7 @@ fn compile_std_http_namespace_ok() {
     let ts = dir.path().join("main.ts");
     let rs_path = dir.path().join("out.rs");
     let src = r#"import std from "std";
-export async function main(): Promise<number> {
+export async function main(): number {
   const r: HttpResponse = await std.http.fetch("http://127.0.0.1:9/nope");
   let _t: string = await std.http.text(r);
   return 0;

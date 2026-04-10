@@ -1,8 +1,8 @@
-export async function other(): Promise<string> {
+export async function other(): string {
   return "x";
 }
 
-export async function main(): Promise<void> {
+export async function main(): void {
   let flag: number = 1;
   if (flag === 1) {
     await fetchText("https://example.com/a");

@@ -1,3 +1,3 @@
-export default async function main(): Promise<void> {
+export default async function main(): void {
   await fetchText("https://example.com");
 }

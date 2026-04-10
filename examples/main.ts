@@ -65,7 +65,7 @@ function void_log_once(): void {
   std.console.log("void_fn", 1);
 }
 
-export async function main(): Promise<number> {
+export async function main(): number {
   let acc: number = 0;
 
   const seed: number = 1;

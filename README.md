@@ -91,7 +91,7 @@ Default implementation mode is `trust_stdlib` (stable facade crate). Runtime **H
   - `fetchText(url)`
   - `fetch(url, init?)`, `await response.text()`, `await response.json()`
   - `response.body.getReader()` + `await reader.read()` (streaming subset)
-- Promise subset: `await`, `Promise.all([...])` (homogeneous subset), `.then` is rejected
+- Async model: **`async`/`await`**, **`async_all([...])`** (homogeneous, parallel `await`); **no** user-visible **`Promise<T>`** or **`Promise.all`**; **`.then` / `.catch` / `.finally`** callbacks are **not planned** ([§13.8](PROJECT-TODO.md))
 
 ---
 
@@ -153,6 +153,8 @@ So: **dependencies = build-time Cargo graph**; **rust_binding = TS ↔ Rust surf
 
 Fixture: [`tests/fixtures/trust_regex/`](crates/trust-cli/tests/fixtures/trust_regex/) — tests `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate`.
 
+**Copy-paste templates**: [`examples/README.md`](examples/README.md) lists maintained examples and points at the minimal `trust_regex` fixture pattern.
+
 **Examples (Diesel-style ORM + C FFI)**: [`examples/orm_ffi_demo.ts`](examples/orm_ffi_demo.ts) — [`examples/crates/trust_orm_facade`](examples/crates/trust_orm_facade) keeps the real Diesel chain (`filter(...).load::<User>(...)?`, etc.) inside Rust and exposes a narrow bound method; [`examples/crates/trust_ffi_facade`](examples/crates/trust_ffi_facade) links `native/trust_ffi_add.c` via `extern "C"` and exposes `Cffi::add_nums`. Run: `cargo run -p trust-cli -- run examples/orm_ffi_demo.ts`. **Note:** `[[rust_binding]].new` for Rust extern types currently requires **exactly one TS `string` argument**; use a placeholder (e.g. `""`) when the Rust `fn new` ignores it (see the example crates’ `new(_: &String)`).
 
 ## Unsupported TypeScript (trust rejection boundary)
@@ -161,10 +163,12 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 
 | User-visible form | Notes |
 |-------------------|--------|
-| `export` other than `export function` / top-level `function` / relative **`export * from "./x.ts"`** / **`export { … } from "./x.ts"`** / **`export default function main`** / **`export default main`** (after `function main`) | e.g. `export { }` without `from`, default export of non-`main`, `export * as`, `export const`, `export class` (**top-level `class` without `export`** is in the matrix and [PROJECT-TODO.md §13.3](PROJECT-TODO.md)) |
+| `export` other than `export function` / top-level `function` / relative **`export * from "./x.ts"`** / **`export { … } from "./x.ts"`** / **`export default function main`** / **`export default main`** (after `function main`) | e.g. `export { }` without `from`, **`export default` of arbitrary expressions** (`export default 42`, anonymous `export default function`, `export default () => {}`, …), default export of non-`main`, `export * as`, `export const`, `export class` (**top-level `class` without `export`** is in the matrix and [PROJECT-TODO.md §13.3](PROJECT-TODO.md)). **Product decision ([§13.6 A3](PROJECT-TODO.md))**: only the listed default-export shapes are in scope. |
 | Advanced generics | Full TS inference/constraints remain out of scope; **simple monomorphization** with optional explicit type args or **local inference** from argument types (literals + `let`/`param` annotations) — see matrix “Generics” and [§13.1](PROJECT-TODO.md) |
+| `Promise<T>` in type position, `Promise.all` | **Rejected** — use `async function …(): T` (awaited type `T` only) and `async_all([…])` ([§13.8](PROJECT-TODO.md)). |
+| `.then` / `.catch` / `.finally` callbacks | **Not planned** — **`async`/`await`** only ([§13.8](PROJECT-TODO.md)); `promise_then_fail.ts`, `compile_promise_then_fails`. |
 | Optional chaining (rejection boundary) | Restricted **`f?.()`** / **`recv?.m()`** are supported (`optional_call_ok.ts`); other callees / shapes may still be rejected (`optional_chain_fail.ts`) |
-| `interface` `extends`, imported interface / type names **across dependency modules** | Single-file nominal table only; nested `number` objects and `k?: number` in **one file** are supported — see matrix “Array / object literals” / `interface` (**not** full `tsc` structural rules) |
+| `interface` `extends`, imported interface / type names **across dependency modules**, `import type` / type-only import specifiers | Single-file nominal table only; nested `number` objects and `k?: number` in **one file** are supported — see matrix “Array / object literals” / `interface` (**not** full `tsc` structural rules). **`import type`** is rejected ([`import_utils.rs`](crates/trust-parser/src/import_utils.rs)); negative [`import_type_fail_main.ts`](crates/trust-cli/tests/fixtures/import_type_fail_main.ts) / `compile_import_type_fails`. |
 | Intersection `A & B` | Rejected |
 | `bigint`, template literal types in type positions | Rejected |
 | Full `tsc` / full structural typing / HOF beyond §13.2 | Full checker and structural subtyping are not implemented; **restricted** function types and arrows — matrix and [§13.2](PROJECT-TODO.md) |
@@ -178,9 +182,9 @@ Common forms that are **explicitly rejected** (diagnostics are English; see [`bu
 
 ## Diagnostics and surface (§1.1)
 
-- **Multiple compile errors**: build and semantic phases may collect **several** diagnostics in one failed run ([`CompileError::Many`](crates/trust-hir/src/error.rs)), printed as multiple `path:line:col: message` lines (sorted). Parser [`parse_typescript_file`](crates/trust-parser/src/lib.rs) surfaces **all** swc `take_errors()` diagnostics. **Monomorphization** and **codegen** can still stop at the first internal error. On success, multiple [`CompileWarning`](crates/trust-hir/src/error.rs) may be returned (same shape in [`trust_lower`](crates/trust-lower/src/lib.rs)).
+- **Multiple compile errors**: build and semantic phases may collect **several** diagnostics in one failed run ([`CompileError::Many`](crates/trust-hir/src/error.rs)), printed as multiple `path:line:col: message` lines (sorted). Parser [`parse_typescript_file`](crates/trust-parser/src/lib.rs) surfaces **all** swc `take_errors()` diagnostics. **Monomorphization** runs before the rest of `sem`; if it fails, **remaining semantic checks are skipped** — the diagnostic may end with a note that other errors can appear after you fix and recompile. **Codegen** is fail-fast on the first error; the message may include a similar note. On success, multiple [`CompileWarning`](crates/trust-hir/src/error.rs) may be returned (same shape in [`trust_lower`](crates/trust-lower/src/lib.rs)).
 - **`export` shapes**: `export function …`, top-level `function …`, **`export default function main`**, **`export default main`** (with `function main` in the module), relative **`export * from "./…"`**, and **`export { a as b } from "./…"`** for **function** exports (see [`build.rs`](crates/trust-hir/src/build.rs), [`module_graph.rs`](crates/trust-parser/src/module_graph.rs)); `export class` / `export const` / other `export default` / local `export { x }` without `from` / etc. are still rejected; **top-level `class` without `export`** is in the matrix. Fixtures `export_default_*_ok.ts`, negatives `export_*_fail.ts`, and [`cli_e2e.rs`](crates/trust-cli/tests/cli_e2e.rs).
-- **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/trust-parser/src/lib.rs) includes `source_map`, `comments` (swc leading/trailing tables via [`SingleThreadedComments`](https://rustdoc.swc.rs/swc_common/comments/struct.SingleThreadedComments.html)), and the parser always collects comments for downstream use. **TS comment text in generated Rust** is opt-in: [`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs) (CLI `trust compile --ts-source-comments`) emits leading comments as Rust `//` lines before statements and top-level functions; trailing comments and exact placement after large desugarings are not guaranteed (see [PROJECT-TODO.md §14](PROJECT-TODO.md)).
+- **Comments**: swc `Program` has **no** comment nodes; [`ParsedSource`](crates/trust-parser/src/lib.rs) includes `source_map`, `comments` (swc leading/trailing tables via [`SingleThreadedComments`](https://rustdoc.swc.rs/swc_common/comments/struct.SingleThreadedComments.html)), and the parser always collects comments for downstream use. **TS comment text in generated Rust** is opt-in: [`CodegenOptions::emit_ts_source_comments`](crates/trust-hir/src/codegen.rs) (CLI `trust compile --ts-source-comments`) emits **leading** comments only, as Rust `//` lines **before** each emitted statement and top-level function, keyed off the statement’s **HIR span start** (`span.lo`) in the comment table. **Trailing** comments, **inline** comments, and **exact** placement after large desugarings (e.g. `switch` → `if` chain, `for` → `while`) are **not** guaranteed; some TS statements may produce **no** matching emitted stmt at that span (comments can appear “missing”). A future optional warning for unattached comments is specified in [PROJECT-TODO.md §3.3.1 / §14](PROJECT-TODO.md) but **not** implemented yet.
 - **Follow-up backlog** (finer-grained comment mapping, project-scale tooling): see [PROJECT-TODO.md §14 — Toolchain and UX](PROJECT-TODO.md).
 
 ## Control flow and return (§3.4)
@@ -231,9 +235,20 @@ Fixture pointers: `let_dup_same_block_fail.ts`, `let_shadow_nested_ok.ts`, `para
 | `type` alias | Partial | Shared table with `interface`; `type_alias_*.ts` |
 | Generics / type args | Partial | Monomorphization: explicit `f<number>(x)` or inferred from args where each parameter type is inferable (`id(3)`, `p.m(...)` with generic `m`); conflicting/uninferable calls rejected; mangled Rust symbols use a stable fingerprint; multiple mono diagnostics may be reported in one run |
 | Higher-order functions | Partial | Function type annotations and typed arrow closures are supported in current subset (`(number) => number` → `(f64) -> f64`); variable-call `f(...)`, function args/returns covered by e2e fixtures |
-| `async` / `await` / `Promise` / `fetch` / `fetchText` | Partial | `async function` with return `Promise<T>` (`T` is `number` \| `string` \| `void`); **`fetchText(url)`** → `Promise<string>` (`trust_stdlib::http::fetch_text`); **`readFileTextAsync(path)`** → `Promise<string>` via `trust_stdlib::io::read_file_text_async` (must be `await`-ed); **`fetch(url, init?)`** → `Promise<Response>` (`trust_stdlib::http::fetch` + `FetchInit`; `reqwest::Response`: `status`, `ok`, `await .text()`, `await .json()` JSON **number** body → `f64` via `serde_json`); **`response.body.getReader()`** + **`await reader.read()`** → `{ done, value }` with **`Uint8Array`** as `Vec<u8>` (`bytes_stream()` + `futures-util` `StreamExt`, still emitted in codegen); optional **`init`** with string-literal `method`, `headers` map (string literal values), optional `body` string; **`Promise.all([...])`** homogeneous `number` / `string` / `fetch` responses (sequential `.await`); **`.then`** rejected; TLS via **rustls**; HTTP/2 when negotiated — **not** byte-parity with a specific Node release; full WHATWG `fetch` (`Headers`, duplex, etc.) still backlog; see `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, and other `compile_async_*` / `promise_*` tests |
+| `async` / `await` / `fetch` / `fetchText` | Partial | `async function` with return type the **awaited** `T` (`number` \| `string` \| `void`), not `Promise<T>`; **`fetchText(url)`**, **`readFileTextAsync(path)`**, **`fetch(url, init?)`**, **`async_all([...])`** are **await**-only; **`readFileTextAsync`** / **`fetch`** / **`fetchText`** / member `.text()` / `.json()` / `.read()` behave as async builtins (codegen uses `tokio` / `reqwest`); **`async_all`** runs a homogeneous array of those in parallel (sequential `.await` in Rust); optional **`init`** on `fetch` (string-literal `method`, `headers`, optional `body`); streaming **`getReader`/`read`**; **`.then` / `Promise<T>` / `Promise.all`** are **not** in the TS surface ([§13.8](PROJECT-TODO.md)); TLS **rustls**; see `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `async_all_fetch_ok.ts`, `compile_async_*`, `compile_fetch_*`, `compile_async_all_fetch_alias_ok`, `compile_promise_then_fails` |
 | Class / this / extends / super | Partial | Class subset is lowered to constructor/method functions, with sem checks for extends graph, `super(...)` placement, and baseline `override`; e2e: `class_*` fixtures |
 | Full TypeScript / `tsc` | Not implemented | Long-term |
+
+#### Web `fetch`: WHATWG / browser parity (non-goals)
+
+trust targets **CLI / server-style** hosts with **reqwest** + **rustls**. The built-in `fetch` subset is **not** a browser WHATWG implementation. In particular, do **not** expect:
+
+- **CORS** or other browser security policies (no browser sandbox; not applicable the same way).
+- **`Headers` / `Request` / `Response`** as live spec objects with full mutable semantics and iteration.
+- **Duplex streaming**, **full `ReadableStream`**, or byte-level parity with a specific **Node** or **browser** release.
+- **Credential / cookie jars** matching `credentials: "include"` browser behavior.
+
+The supported surface is documented in the **`async` / `fetch`** matrix row and [`PROJECT-TODO.md`](PROJECT-TODO.md) §14 (Async / HTTP). Expanding toward WHATWG would be a separate, large design effort.
 
 ### Matrix vs integration tests
 
@@ -245,7 +260,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Import / multi-file / default export | `import_add_main.ts` + `add_dep.ts`, `export_default_*_ok.ts`, `multi_entry_*`, `export_main.ts` | `run_import_add_main_prints_three`, `run_export_default_function_main_prints_42`, … |
 | `Trust.toml` / Rust extern | `trust_regex/main.ts` + `trust_regex/Trust.toml` | `run_trust_regex_ok_prints_one`, `compile_trust_regex_ok_emits_regex_crate` |
 | Incremental HIR cache (`--incremental`) | ad hoc `lib.ts` + `app.ts` in e2e tempdir | `compile_incremental_rebuilds_only_changed_module` |
-| Negative import/export | `import_missing_export_*`, `circular_*`, `dup_*`, `export_*_fail.ts` | `compile_import_missing_export_fails`, … |
+| Negative import/export | `import_missing_export_*`, `import_type_fail_main.ts`, `circular_*`, `dup_*`, `export_*_fail.ts` | `compile_import_missing_export_fails`, `compile_import_type_fails`, … |
 | `let` / `const` / blocks | `const_ok.ts`, `assign_simple.ts`, `empty_stmt.ts`, `let_if.ts` | `run_const_ok_prints_42`, … |
 | Semantics (shadow, void branch) | `let_dup_same_block_fail.ts`, `void_log_in_branch.ts`, … | `compile_*`, `run_void_log_in_branch_prints_branch` |
 | Control flow / unreachable | `while_early.ts`, `for_loop.ts`, `for_in_*.ts`, `early_return_unreachable.ts`, … | `run_while_early_prints_three`, `run_for_in_object_keys_ok_prints_three`, `compile_for_in_non_object_fails`, … |
@@ -260,7 +275,7 @@ Theme → fixture → `cli_e2e` test names (`run_*`, `compile_*`, `check_*`). Fu
 | Class subset | `class_basic_ok.ts`, `class_this_method_ok.ts`, `class_extends_ok.ts`, `class_super_ctor_ok.ts`, `class_*_fail.ts` | `run_class_basic_ok_prints_five`, `run_class_extends_ok_prints_seven`, `compile_class_super_invalid_fails`, `compile_class_override_mismatch_fails` |
 | Nested function | `nested_fn.ts` | `run_nested_fn_prints_nine` |
 | Minimal tsconfig / `--project` | `multi_entry_tsconfig.json`, `multi_entry_*.ts` | `run_project_tsconfig_prints_main`, `run_project_tsconfig_extends_include_ok` |
-| Async / `Promise` / HTTP | `async_mvp_compile_ok.ts`, `async_control_flow_ok.ts`, `promise_all_fetch_ok.ts`, `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`, `compile_async_control_flow_if_while_await_ok`, `compile_promise_all_fetch_alias_ok`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, `compile_promise_then_fails` |
+| Async / HTTP | `async_mvp_compile_ok.ts`, `async_control_flow_ok.ts`, `async_all_fetch_ok.ts`, `fetch_response_ok.ts`, `fetch_stream_ok.ts`, `fetch_post_init_ok.ts` | `compile_async_mvp_writes_tokio_and_await`, `compile_async_control_flow_if_while_await_ok`, `compile_async_all_fetch_alias_ok`, `compile_fetch_response_ok`, `compile_fetch_stream_ok`, `compile_fetch_post_init_ok`, `compile_promise_then_fails` |
 | CLI `check` / `--emit-ir` | `sample.ts`, `switch_fail.ts` | `check_sample_ok`, `compile_emit_ir_stderr_contains_ir_module` |
 | Negative optional / nullish / object | `optional_chain_fail.ts`, `nullish_fail.ts`, `object_fail.ts` | `compile_optional_call_bad_callee_fails`, … |
 | Regression anchor | [`tests/regression/switch_fallthrough_regression.ts`](crates/trust-cli/tests/regression/switch_fallthrough_regression.ts) | `regression_switch_fallthrough_check_fails` |
@@ -280,7 +295,7 @@ Literal types, unions, limited `interface` / `type`, and generics roadmap: [PROJ
 
 ## Semantics roadmap (§3.3)
 
-See [PROJECT-TODO.md §3.3](PROJECT-TODO.md). **Implemented in `sem`**: after stripping `null`/`undefined` from a `Union`, nullish coalescing merges with the right operand when types are the same primitive family or **mutually assignable `Fn` types** (`unify_ternary_branches`). **Still future**: discriminated narrowing driven by a discriminant; no `strictNullChecks` switch; nominal `interface`/`type` vs full structural TS. HOFs are a **restricted** typed subset (see README above), not “no first-class functions.” Heterogeneous unions may still fail Rust codegen when a binding cannot map to one Rust type; `nullish_fn_ok.ts` is validated with `trust check`.
+See [PROJECT-TODO.md §3.3](PROJECT-TODO.md) and the staged extension specs in [§3.3.1](PROJECT-TODO.md) (discriminated narrowing **D1**, `interface` methods **R1**, generics subset **G1/G2**, comment mapping **C1/C2** — specifications and fixture names; implementation is tracked there). **Implemented in `sem`**: after stripping `null`/`undefined` from a `Union`, nullish coalescing merges with the right operand when types are the same primitive family or **mutually assignable `Fn` types** (`unify_ternary_branches`). **Still future**: discriminated narrowing driven by a discriminant; no `strictNullChecks` switch; nominal `interface`/`type` vs full structural TS. HOFs are a **restricted** typed subset (see README above), not “no first-class functions.” Heterogeneous unions may still fail Rust codegen when a binding cannot map to one Rust type; `nullish_fn_ok.ts` is validated with `trust check`.
 
 ## Arithmetic, `/`, overflow (§4.1)
 
