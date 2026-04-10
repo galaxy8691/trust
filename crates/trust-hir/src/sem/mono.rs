@@ -983,6 +983,13 @@ fn subst_type(t: &TsType, subst: &BTreeMap<String, TsType>) -> TsType {
     match t {
         TsType::TypeParam(n) => subst.get(n).cloned().unwrap_or_else(|| t.clone()),
         TsType::Union(v) => normalize_union(v.iter().map(|x| subst_type(x, subst)).collect()),
+        TsType::Intersection(v) => {
+            let substituted: Vec<TsType> = v.iter().map(|x| subst_type(x, subst)).collect();
+            match normalize_intersection(substituted) {
+                Ok(t) => t,
+                Err(_) => TsType::Intersection(v.iter().map(|x| subst_type(x, subst)).collect()),
+            }
+        }
         TsType::Fn { params, ret } => TsType::Fn {
             params: params.iter().map(|x| subst_type(x, subst)).collect(),
             ret: Box::new(subst_type(ret, subst)),
@@ -994,7 +1001,17 @@ fn subst_type(t: &TsType, subst: &BTreeMap<String, TsType>) -> TsType {
                 .map(|p| ObjectProp {
                     name: p.name.clone(),
                     optional: p.optional,
-                    ty: Box::new(subst_type(&p.ty, subst)),
+                    kind: match &p.kind {
+                        crate::ir::ObjectMemberKind::Field(ty) => {
+                            crate::ir::ObjectMemberKind::Field(Box::new(subst_type(ty, subst)))
+                        }
+                        crate::ir::ObjectMemberKind::Method { params, ret } => {
+                            crate::ir::ObjectMemberKind::Method {
+                                params: params.iter().map(|t| subst_type(t, subst)).collect(),
+                                ret: Box::new(subst_type(ret, subst)),
+                            }
+                        }
+                    },
                 })
                 .collect(),
         ),
@@ -1052,11 +1069,24 @@ fn type_key(t: &TsType) -> String {
                 s.push('_');
                 s.push(if p.optional { '1' } else { '0' });
                 s.push('_');
-                s.push_str(&type_key(&p.ty));
+                // R1: 区分字段和方法的 type key
+                match &p.kind {
+                    crate::ir::ObjectMemberKind::Field(ty) => {
+                        s.push('f');
+                        s.push_str(&type_key(ty));
+                    }
+                    crate::ir::ObjectMemberKind::Method { params, ret } => {
+                        s.push('m');
+                        s.push_str(&params.iter().map(type_key).collect::<Vec<_>>().join("_"));
+                        s.push_str("_r");
+                        s.push_str(&type_key(ret));
+                    }
+                }
             }
             s
         }
         TsType::Union(m) => format!("u{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
+        TsType::Intersection(m) => format!("i{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
         TsType::TypeParam(n) => format!("tp{n}"),
         TsType::ClassInstance(n) => format!("cls{n}"),
         TsType::Fn { params, ret } => format!(

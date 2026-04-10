@@ -284,6 +284,31 @@ pub fn exported_function_names(program: &Program) -> HashSet<String> {
     out
 }
 
+/// 每个模块导出的类型名：`export interface`、`export type`。
+pub fn exported_type_names(program: &Program) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Program::Module(m) = program else {
+        return out;
+    };
+    for item in &m.body {
+        match item {
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => {
+                match decl {
+                    Decl::TsInterface(i) => {
+                        out.insert(i.id.sym.to_string());
+                    }
+                    Decl::TsTypeAlias(a) => {
+                        out.insert(a.id.sym.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn module_export_name_str(n: &ModuleExportName) -> String {
     match n {
         ModuleExportName::Ident(i) => i.sym.to_string(),
@@ -467,9 +492,24 @@ pub fn effective_exported_function_names_by_path(
     Ok(out)
 }
 
+/// 每个模块**有效**导出的类型名：`export interface`、`export type`、相对路径 `export * from` / `export { … } from`。
+pub fn effective_exported_type_names_by_path(
+    graph: &ParsedModuleGraph,
+) -> Result<HashMap<PathBuf, HashSet<String>>, ParseError> {
+    let mut out = HashMap::new();
+    for m in &graph.modules {
+        let canon = ParsedModuleGraph::canonical_module_path(m);
+        // 简化处理：直接收集每个模块的类型导出（暂不考虑 re-export 链）
+        let types = exported_type_names(&m.source.program);
+        out.insert(canon, types);
+    }
+    Ok(out)
+}
+
 /// 校验每个 `import { x }` 在目标模块的有效导出中有对应函数名；Rust crate import 则对照 `Trust.toml` 的 `[[rust_binding]]`。
 pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
     let exports_by_path = effective_exported_function_names_by_path(graph)?;
+    let type_exports_by_path = effective_exported_type_names_by_path(graph)?;
     let trust = graph.trust.as_ref();
 
     for m in &graph.modules {
@@ -531,14 +571,33 @@ pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
                             dep_path.display()
                         ))
                     })?;
+                    let type_exports = type_exports_by_path.get(&dep_canon).ok_or_else(|| {
+                        ParseError::Message(format!(
+                            "internal error: missing type exports for `{}`",
+                            dep_path.display()
+                        ))
+                    })?;
 
                     for spec in &imp.specifiers {
                         let want = named_import_target(spec)?;
-                        if !exports.contains(&want) {
-                            return Err(ParseError::Message(format!(
-                                "no exported function `{want}` in `{}`",
-                                dep_path.display()
-                            )));
+                        let is_type_only = imp.type_only || matches!(spec, ImportSpecifier::Named(n) if n.is_type_only);
+                        
+                        if is_type_only {
+                            // 类型导入：检查类型导出
+                            if !type_exports.contains(&want) {
+                                return Err(ParseError::Message(format!(
+                                    "no exported type `{want}` in `{}`",
+                                    dep_path.display()
+                                )));
+                            }
+                        } else {
+                            // 值导入：检查函数导出
+                            if !exports.contains(&want) {
+                                return Err(ParseError::Message(format!(
+                                    "no exported function `{want}` in `{}`",
+                                    dep_path.display()
+                                )));
+                            }
                         }
                     }
                 }

@@ -118,6 +118,8 @@ struct Binding {
     http_body: Option<HttpBodyUsage>,
     /// 仅 [`TsType::ReadableStreamDefaultReader`]：对应 `bytes_stream` 槽位（codegen）。
     reader_stream_slot: Option<u32>,
+    /// D1: Discriminated narrowing — 在当前作用域内收窄后的类型。
+    narrow_ty: Option<TsType>,
 }
 
 fn is_numberish(t: &TsType) -> bool {
@@ -170,18 +172,60 @@ fn object_num_member_ty(
         return None;
     };
     let p = object_prop_by_name(props, prop)?;
-    *object_member_access = Some(if matches!(&*p.ty, TsType::Number) {
-        ObjectMemberAccessKind::NumberLeaf
+    *object_member_access = Some(if let ObjectMemberKind::Field(ty) = &p.kind {
+        if matches!(ty.as_ref(), TsType::Number) {
+            ObjectMemberAccessKind::NumberLeaf
+        } else {
+            ObjectMemberAccessKind::NestedObject
+        }
     } else {
         ObjectMemberAccessKind::NestedObject
     });
-    Some((*p.ty).clone())
+    p.ty().cloned()
+}
+
+/// R1: 方法签名（用于 interface 名义方法）
+#[derive(Debug, Clone)]
+struct MethodSig {
+    params: Vec<TsType>,
+    ret: Box<TsType>,
+}
+
+/// R1: 在 ObjectNum 中查找方法签名
+fn find_interface_method(receiver_ty: &TsType, method_name: &str) -> Option<MethodSig> {
+    let TsType::ObjectNum(props) = receiver_ty else {
+        return None;
+    };
+    let prop = props.iter().find(|p| p.name == method_name)?;
+    match &prop.kind {
+        ObjectMemberKind::Method { params, ret } => Some(MethodSig {
+            params: params.clone(),
+            ret: ret.clone(),
+        }),
+        _ => None,
+    }
+}
+
+/// R1: 生成修饰后的方法函数名（mangle method name）
+/// 格式: {method}__{interface_name}
+/// 对于 ObjectNum，我们使用一个简化的 mangling 策略
+fn mangle_method_name(method: &str, receiver_ty: &TsType) -> String {
+    // 简化实现：使用 receiver 类型的 fingerprint
+    // 实际场景下可能需要更复杂的 mangling 来区分不同 interface
+    format!("{}__obj", method)
 }
 
 fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
     match t {
         TsType::TypeParam(n) => subst.get(n).cloned().unwrap_or_else(|| t.clone()),
         TsType::Union(v) => normalize_union(v.iter().map(|x| subst_type_local(x, subst)).collect()),
+        TsType::Intersection(v) => {
+            let substituted: Vec<TsType> = v.iter().map(|x| subst_type_local(x, subst)).collect();
+            match normalize_intersection(substituted) {
+                Ok(t) => t,
+                Err(_) => TsType::Intersection(v.iter().map(|x| subst_type_local(x, subst)).collect()),
+            }
+        }
         TsType::Fn { params, ret } => TsType::Fn {
             params: params.iter().map(|x| subst_type_local(x, subst)).collect(),
             ret: Box::new(subst_type_local(ret, subst)),
@@ -193,7 +237,13 @@ fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
                 .map(|p| ObjectProp {
                     name: p.name.clone(),
                     optional: p.optional,
-                    ty: Box::new(subst_type_local(&p.ty, subst)),
+                    kind: match &p.kind {
+                        ObjectMemberKind::Field(ty) => ObjectMemberKind::Field(Box::new(subst_type_local(ty, subst))),
+                        ObjectMemberKind::Method { params, ret } => ObjectMemberKind::Method {
+                            params: params.iter().map(|t| subst_type_local(t, subst)).collect(),
+                            ret: Box::new(subst_type_local(ret, subst)),
+                        },
+                    },
                 })
                 .collect(),
         ),
@@ -219,6 +269,9 @@ pub fn check_module(module: &mut IRModule) -> Result<Vec<CompileWarning>, Compil
             ret: f.ret.clone(),
             is_async: f.is_async,
         };
+        if f.name.contains("_new") {
+            eprintln!("DEBUG: globals fn {} ret: {:?}", f.name, f.ret);
+        }
         if seen_name.contains_key(&f.name) {
             push_diag(
                 &mut errs,
@@ -459,6 +512,7 @@ fn check_function(
                         None
                     },
                     reader_stream_slot: None,
+                    narrow_ty: None,
                 },
             )
             .is_some()
@@ -542,6 +596,7 @@ fn insert_let(
                 initialized,
                 http_body,
                 reader_stream_slot: None,
+                narrow_ty: None,
             },
         )
         .is_some()
@@ -560,6 +615,21 @@ fn mark_initialized(stack: &mut Vec<HashMap<String, Binding>>, name: &str) {
     for m in stack.iter_mut().rev() {
         if let Some(b) = m.get_mut(name) {
             b.initialized = true;
+            return;
+        }
+    }
+}
+
+/// D1: 更新指定 binding 的 narrow_ty（在当前作用域内）。
+/// 如果 binding 已存在，更新其 narrow_ty；否则不执行任何操作。
+fn update_binding_narrow_ty(
+    stack: &mut Vec<HashMap<String, Binding>>,
+    name: &str,
+    narrow_ty: TsType,
+) {
+    for m in stack.iter_mut().rev() {
+        if let Some(b) = m.get_mut(name) {
+            b.narrow_ty = Some(narrow_ty);
             return;
         }
     }
@@ -1252,6 +1322,76 @@ fn tail_returns_last_only(stmts: &[IRStmt]) -> bool {
     }
 }
 
+/// D1: 尝试从条件表达式中提取 discriminant narrowing 信息。
+/// 
+/// 识别模式: `v.field === literal` 或 `v.field == literal`
+/// 
+/// 返回: `Some((var_name, field_name, literal_ty))` 如果匹配模式
+///       `None` 如果不匹配
+fn try_extract_discriminant_narrowing(
+    cond: &IRExpr,
+    stack: &[HashMap<String, Binding>],
+) -> Option<(String, String, TsType)> {
+    use crate::ir::IRBinOp;
+
+    let (left, right) = match cond {
+        // 匹配 === 或 == (在 HIR 中都映射为 Eq)
+        IRExpr::Binary { op: IRBinOp::Eq, left, right, .. } => (left, right),
+        _ => return None,
+    };
+
+    // 左操作数必须是成员访问: v.field
+    let (obj_name, field_name) = match left.as_ref() {
+        IRExpr::Member { obj, prop, .. } => {
+            // 对象必须是纯标识符
+            let name = match obj.as_ref() {
+                IRExpr::Ident(n, _) => n.clone(),
+                _ => return None,
+            };
+            (name, prop.clone())
+        }
+        IRExpr::OptionalMember { obj, prop, .. } => {
+            // 可选链也支持: v?.field
+            let name = match obj.as_ref() {
+                IRExpr::Ident(n, _) => n.clone(),
+                _ => return None,
+            };
+            (name, prop.clone())
+        }
+        _ => return None,
+    };
+
+    // 右操作数必须是字面量
+    let literal_ty = match right.as_ref() {
+        IRExpr::Number(n, _) => {
+            if n.fract() == 0.0 && *n >= (i32::MIN as f64) && *n <= (i32::MAX as f64) {
+                TsType::NumberLit(*n as i32)
+            } else {
+                return None; // 非整数或超出 i32 范围，不处理
+            }
+        }
+        IRExpr::Bool(b, _) => TsType::BoolLit(*b),
+        IRExpr::Str(s, _) => TsType::StringLit(s.clone()),
+        _ => return None,
+    };
+
+    // 检查变量当前类型是否是联合类型（使用 effective type，优先 narrow_ty）
+    let is_union = match lookup(stack, &obj_name) {
+        Some(b) => {
+            let effective_ty = b.narrow_ty.as_ref().unwrap_or(&b.ty);
+            matches!(effective_ty, TsType::Union(_))
+        }
+        None => false,
+    };
+
+    // 必须是联合类型（且成员是 ObjectNum）
+    if is_union {
+        Some((obj_name, field_name, literal_ty))
+    } else {
+        None
+    }
+}
+
 fn check_stmts(
     stmts: &mut [IRStmt],
     stack: &mut Vec<HashMap<String, Binding>>,
@@ -1526,9 +1666,44 @@ fn check_stmt(
                 ));
             }
             *cond_ty = ct.clone();
+
+            // D1: 尝试提取 discriminant narrowing 信息
+            let narrowing = try_extract_discriminant_narrowing(cond, stack);
+            let (then_narrow_ty, else_narrow_ty) = match &narrowing {
+                Some((var_name, field_name, literal_ty)) => {
+                    // 获取变量的联合类型（使用 effective type，优先 narrow_ty）
+                    if let Some(binding) = lookup(stack, var_name) {
+                        let effective_ty = binding.narrow_ty.as_ref().unwrap_or(&binding.ty);
+                        if let TsType::Union(_) = effective_ty {
+                            // 尝试收窄
+                            if let Some((then_ty, else_ty)) =
+                                helpers::narrow_union_by_discriminant(
+                                    effective_ty,
+                                    field_name,
+                                    literal_ty,
+                                )
+                            {
+                                (Some(then_ty), else_ty)
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            (None, None)
+                        }
+                    } else {
+                        (None, None)
+                    }
+                }
+                None => (None, None),
+            };
+
             let pre = snapshot_inits(stack);
             let pre_http = snapshot_http_body(stack);
             push_scope(stack);
+            // D1: 在 then 分支应用收窄类型
+            if let (Some((var_name, _, _)), Some(then_ty)) = (&narrowing, then_narrow_ty) {
+                update_binding_narrow_ty(stack, var_name, then_ty);
+            }
             let mut then_r = true;
             check_stmts(
                 then_b,
@@ -1549,6 +1724,10 @@ fn check_stmt(
             restore_http_body(stack, &pre_http);
             if let Some(else_b) = else_b {
                 push_scope(stack);
+                // D1: 在 else 分支应用收窄类型
+                if let (Some((var_name, _, _)), Some(else_ty)) = (&narrowing, else_narrow_ty) {
+                    update_binding_narrow_ty(stack, var_name, else_ty);
+                }
                 let mut else_r = true;
                 check_stmts(
                     else_b,
@@ -1758,7 +1937,9 @@ fn infer_expr_mut(
                         "stream reader is not a first-class value; use only `await reader.read()`",
                     ));
                 }
-                return Ok(b.ty.clone());
+                // D1: 优先使用收窄后的类型（如果存在）
+                let effective_ty = b.narrow_ty.as_ref().unwrap_or(&b.ty);
+                return Ok(effective_ty.clone());
             }
             if let Some(sig) = globals.get(name) {
                 let ret = if sig.is_async {
@@ -1951,6 +2132,9 @@ fn infer_expr_mut(
                 }
             }
             let ret = subst_type_local(&sig_ret, &subst);
+            if callee.contains("_new") {
+                eprintln!("DEBUG: Call {} ret: {:?}", callee, ret);
+            }
             if callee_is_async {
                 Ok(TsType::Promise(Box::new(ret)))
             } else {
@@ -2052,6 +2236,40 @@ fn infer_expr_mut(
                         }
                     }
                 }
+            }
+            // R1: 检查 receiver 类型是否为 ObjectNum 且有对应的方法签名
+            if let Some(method_sig) = find_interface_method(&rt, method) {
+                // 校验参数数量
+                if method_sig.params.len() != args.len() {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        format!(
+                            "wrong argument count for method `{method}`: expected {}, got {}",
+                            method_sig.params.len(),
+                            args.len()
+                        ),
+                    ));
+                }
+                // 校验参数类型
+                for (idx, (a, pt)) in args.iter_mut().zip(method_sig.params.iter()).enumerate() {
+                    let at = infer_expr_mut(a, stack, globals, cm, path)?;
+                    if !type_assignable(pt, &at) {
+                        return Err(diag(
+                            cm,
+                            path,
+                            *span,
+                            format!(
+                                "argument type mismatch for method `{method}`: param {} expected `{pt:?}`, got `{at:?}`",
+                                idx
+                            ),
+                        ));
+                    }
+                }
+                // 设置修饰后的函数名 m__InterfaceName
+                *inherent_rust = Some(mangle_method_name(method, &rt));
+                return Ok(*method_sig.ret.clone());
             }
             let sig = globals.get(method).ok_or_else(|| {
                 diag(
@@ -2204,6 +2422,29 @@ fn infer_expr_mut(
                 }
             } else if let Some(t) = object_num_member_ty(&ot, prop, object_member_access) {
                 return Ok(t);
+            }
+            // D1: 支持联合类型的成员访问（用于 discriminated narrowing）
+            else if let TsType::Union(members) = &ot {
+                // 尝试从所有 union 成员中提取字段类型
+                let mut field_types: Vec<TsType> = Vec::new();
+                let mut all_number = true;
+                for member in members {
+                    if let Some(t) = object_num_member_ty(member, prop, &mut None) {
+                        if !matches!(t, TsType::Number | TsType::NumberLit(_)) {
+                            all_number = false;
+                        }
+                        field_types.push(t);
+                    }
+                }
+                // 如果所有成员都有该字段，返回字段类型的联合
+                if field_types.len() == members.len() {
+                    *object_member_access = Some(if all_number {
+                        ObjectMemberAccessKind::NumberLeaf
+                    } else {
+                        ObjectMemberAccessKind::NestedObject
+                    });
+                    return Ok(crate::ir::normalize_union(field_types));
+                }
             }
             Err(diag(
                 cm,
@@ -2601,7 +2842,7 @@ fn infer_expr_mut(
                 props.push(ObjectProp {
                     name: k.clone(),
                     optional: false,
-                    ty: Box::new(t),
+                    kind: ObjectMemberKind::Field(Box::new(t)),
                 });
             }
             props.sort_by(|a, b| a.name.cmp(&b.name));

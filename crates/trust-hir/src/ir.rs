@@ -36,13 +36,35 @@ impl AsRef<SourceMap> for SendSourceMap {
     }
 }
 
-/// 对象类型中的单个属性（`interface` / 对象字面量类型）。
+/// 对象类型中的成员类型（字段或方法）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ObjectMemberKind {
+    /// 字段（属性）
+    Field(Box<TsType>),
+    /// 方法签名（R1）
+    Method {
+        params: Vec<TsType>,
+        ret: Box<TsType>,
+    },
+}
+
+/// 对象类型中的单个成员（`interface` / 对象字面量类型）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectProp {
     pub name: String,
     pub optional: bool,
-    /// 仅支持 `number` 或嵌套的 [`TsType::ObjectNum`]。
-    pub ty: Box<TsType>,
+    /// R1: 支持字段或方法签名
+    pub kind: ObjectMemberKind,
+}
+
+// 向后兼容：提供 ty() 方法获取字段类型（非方法）
+impl ObjectProp {
+    pub fn ty(&self) -> Option<&TsType> {
+        match &self.kind {
+            ObjectMemberKind::Field(ty) => Some(ty),
+            ObjectMemberKind::Method { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +102,8 @@ pub enum TsType {
     ObjectNum(Vec<ObjectProp>),
     /// 联合类型 `A | B`（成员已规范化：扁平化、去重、按 [`cmp_ts_type`] 排序）。
     Union(Vec<TsType>),
+    /// 交集类型 `A & B`（成员已规范化：扁平化、去重、按 [`cmp_ts_type`] 排序）。
+    Intersection(Vec<TsType>),
     /// 类型参数（泛型）
     TypeParam(String),
     /// 函数类型（高阶函数子集）
@@ -116,12 +140,38 @@ fn cmp_object_props(a: &[ObjectProp], b: &[ObjectProp]) -> Ordering {
         if c != Equal {
             return c;
         }
-        let c = cmp_ts_type(&x.ty, &y.ty);
+        // R1: 比较 kind（字段或方法）
+        let c = cmp_object_member_kind(&x.kind, &y.kind);
         if c != Equal {
             return c;
         }
     }
     Equal
+}
+
+fn cmp_object_member_kind(a: &ObjectMemberKind, b: &ObjectMemberKind) -> Ordering {
+    use Ordering::*;
+    match (a, b) {
+        (ObjectMemberKind::Field(ty_a), ObjectMemberKind::Field(ty_b)) => cmp_ts_type(ty_a, ty_b),
+        (ObjectMemberKind::Field(_), ObjectMemberKind::Method { .. }) => Less,
+        (ObjectMemberKind::Method { .. }, ObjectMemberKind::Field(_)) => Greater,
+        (
+            ObjectMemberKind::Method { params: pa, ret: ra },
+            ObjectMemberKind::Method { params: pb, ret: rb },
+        ) => {
+            let c = pa.len().cmp(&pb.len());
+            if c != Equal {
+                return c;
+            }
+            for (a, b) in pa.iter().zip(pb.iter()) {
+                let c = cmp_ts_type(a, b);
+                if c != Equal {
+                    return c;
+                }
+            }
+            cmp_ts_type(ra, rb)
+        }
+    }
 }
 
 /// 将扁平 `number` 字段名列表转为 [`TsType::ObjectNum`]（兼容旧 IR）。
@@ -132,7 +182,7 @@ pub fn object_num_from_field_names(mut keys: Vec<String>) -> TsType {
             .map(|name| ObjectProp {
                 name,
                 optional: false,
-                ty: Box::new(TsType::Number),
+                kind: ObjectMemberKind::Field(Box::new(TsType::Number)),
             })
             .collect(),
     )
@@ -219,6 +269,23 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
                 }
             }
         }
+        (Intersection(x), Intersection(y)) => {
+            let mut ita = x.iter();
+            let mut itb = y.iter();
+            loop {
+                match (ita.next(), itb.next()) {
+                    (None, None) => return Equal,
+                    (None, Some(_)) => return Less,
+                    (Some(_), None) => return Greater,
+                    (Some(a), Some(b)) => {
+                        let c = cmp_ts_type(a, b);
+                        if c != Equal {
+                            return c;
+                        }
+                    }
+                }
+            }
+        }
         _ => Equal,
     }
 }
@@ -249,6 +316,7 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::Promise(_) => 21,
         TsType::RustExtern { .. } => 22,
         TsType::Union(_) => 23,
+        TsType::Intersection(_) => 24,
     }
 }
 
@@ -275,6 +343,96 @@ pub fn normalize_union(members: Vec<TsType>) -> TsType {
         0 => TsType::Void,
         1 => flat.pop().expect("len checked"),
         _ => TsType::Union(flat),
+    }
+}
+
+fn collect_intersection_flat(t: TsType, out: &mut Vec<TsType>) {
+    match t {
+        TsType::Intersection(inner) => {
+            for x in inner {
+                collect_intersection_flat(x, out);
+            }
+        }
+        other => out.push(other),
+    }
+}
+
+/// 合并 ObjectNum 的属性，返回合并后的属性列表。
+/// 如果存在同名但不同类型的属性，返回 None 表示冲突。
+fn merge_object_props(a: &[ObjectProp], b: &[ObjectProp]) -> Option<Vec<ObjectProp>> {
+    let mut result: Vec<ObjectProp> = a.to_vec();
+    for bp in b {
+        if let Some(ap) = result.iter().find(|p| p.name == bp.name) {
+            // 同名属性/方法，检查类型是否兼容
+            if ap.kind != bp.kind {
+                return None; // 冲突
+            }
+            // 类型相同，取更严格的 optional（false 比 true 严格）
+            if !ap.optional && bp.optional {
+                continue; // 保留 a 的 non-optional
+            }
+            if ap.optional && !bp.optional {
+                // 用 b 的 non-optional 替换
+                if let Some(idx) = result.iter().position(|p| p.name == bp.name) {
+                    result[idx] = bp.clone();
+                }
+            }
+        } else {
+            result.push(bp.clone());
+        }
+    }
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    Some(result)
+}
+
+/// 扁平化嵌套 `&`、去重、排序，并尝试合并 ObjectNum 类型。
+/// 如果存在冲突的属性，返回 Err 包含冲突信息。
+/// 空单成员返回原类型；单成员折叠为标量。
+pub fn normalize_intersection(members: Vec<TsType>) -> Result<TsType, String> {
+    let mut flat = Vec::new();
+    for m in members {
+        collect_intersection_flat(m, &mut flat);
+    }
+    flat.sort_by(cmp_ts_type);
+    flat.dedup();
+    
+    match flat.len() {
+        0 => Ok(TsType::Void),
+        1 => Ok(flat.pop().expect("len checked")),
+        _ => {
+            // 尝试合并所有 ObjectNum 类型
+            let mut object_props: Option<Vec<ObjectProp>> = None;
+            let mut non_objects: Vec<TsType> = Vec::new();
+            
+            for t in &flat {
+                match t {
+                    TsType::ObjectNum(props) => {
+                        match &object_props {
+                            None => object_props = Some(props.clone()),
+                            Some(existing) => {
+                                match merge_object_props(existing, props) {
+                                    Some(merged) => object_props = Some(merged),
+                                    None => return Err("intersection contains conflicting object properties".to_string()),
+                                }
+                            }
+                        }
+                    }
+                    _ => non_objects.push(t.clone()),
+                }
+            }
+            
+            // 构建最终结果
+            let mut result = non_objects;
+            if let Some(props) = object_props {
+                result.push(TsType::ObjectNum(props));
+            }
+            
+            match result.len() {
+                0 => Ok(TsType::Void),
+                1 => Ok(result.pop().expect("len checked")),
+                _ => Ok(TsType::Intersection(result)),
+            }
+        }
     }
 }
 

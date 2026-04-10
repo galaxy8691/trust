@@ -9,9 +9,9 @@ use swc_ecma_ast::{
 };
 
 use crate::error::{diag, CompileError};
-use crate::ir::{normalize_union, ObjectProp, TsType};
+use crate::ir::{normalize_intersection, normalize_union, ObjectMemberKind, ObjectProp, TsType};
 
-/// `interface` / 对象字面量类型中允许的字段类型：`number` 或嵌套 `ObjectNum`。
+/// `interface` / 对象字面量类型中允许的字段类型：`number`、字面量类型或嵌套 `ObjectNum`。
 fn validate_object_field_ty(
     ty: &TsType,
     cm: &Lrc<SourceMap>,
@@ -20,9 +20,14 @@ fn validate_object_field_ty(
 ) -> Result<(), CompileError> {
     match ty {
         TsType::Number => Ok(()),
+        // D1: 支持字面量类型作为 discriminant
+        TsType::NumberLit(_) | TsType::BoolLit(_) | TsType::StringLit(_) => Ok(()),
         TsType::ObjectNum(inner) => {
             for p in inner {
-                validate_object_field_ty(&p.ty, cm, path, span)?;
+                // R1: 只验证字段类型，方法签名不参与字段验证
+                if let ObjectMemberKind::Field(ty) = &p.kind {
+                    validate_object_field_ty(ty, cm, path, span)?;
+                }
             }
             Ok(())
         }
@@ -66,6 +71,37 @@ pub(super) fn ts_type_from_ann(
         return Err(diag(cm, path, fallback_span, "type annotation is required"));
     };
     ts_type_from_ast(&ann.type_ann, cm, path, iface, type_params)
+}
+
+/// R1: 从函数参数提取类型
+pub(super) fn ts_type_from_fn_param(
+    param: &TsFnParam,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    type_params: Option<&HashSet<String>>,
+) -> Result<TsType, CompileError> {
+    match param {
+        TsFnParam::Ident(i) => ts_type_from_ann(&i.type_ann, cm, path, i.span, iface, type_params),
+        TsFnParam::Array(_) => Err(diag(
+            cm,
+            path,
+            param.span(),
+            "array destructuring parameters are not supported",
+        )),
+        TsFnParam::Object(_) => Err(diag(
+            cm,
+            path,
+            param.span(),
+            "object destructuring parameters are not supported",
+        )),
+        TsFnParam::Rest(_) => Err(diag(
+            cm,
+            path,
+            param.span(),
+            "rest parameters are not supported",
+        )),
+    }
 }
 
 pub(super) fn ts_type_from_ast(
@@ -294,14 +330,24 @@ pub(super) fn ts_type_from_ast(
                 }
                 Ok(normalize_union(members))
             }
-            TsUnionOrIntersectionType::TsIntersectionType(TsIntersectionType { span, .. }) => Err(
-                diag(
-                    cm,
-                    path,
-                    *span,
-                    "intersection types are not supported",
-                ),
-            ),
+            TsUnionOrIntersectionType::TsIntersectionType(TsIntersectionType { types, span }) => {
+                if types.is_empty() {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "intersection type must have at least one member",
+                    ));
+                }
+                let mut members = Vec::with_capacity(types.len());
+                for t in types {
+                    members.push(ts_type_from_ast(t.as_ref(), cm, path, iface, type_params)?);
+                }
+                match normalize_intersection(members) {
+                    Ok(t) => Ok(t),
+                    Err(e) => Err(diag(cm, path, *span, e)),
+                }
+            }
         },
         _ => Err(diag(
             cm,
@@ -424,7 +470,7 @@ fn collect_one_class(
             props.push(ObjectProp {
                 name: id.sym.to_string(),
                 optional: false,
-                ty: Box::new(ty),
+                kind: ObjectMemberKind::Field(Box::new(ty)),
             });
         }
     }
@@ -477,6 +523,8 @@ fn collect_one_interface(
             "interface extends clauses are not supported",
         ));
     }
+    // R1: 先插入空壳以支持前向引用（方法参数中引用自身类型）
+    map.insert(name.clone(), TsType::ObjectNum(vec![]));
     let ty = object_num_from_type_elements(&d.body.body, cm, path, d.body.span, map, None)?;
     map.insert(name, ty);
     Ok(())
@@ -524,41 +572,97 @@ fn object_num_from_type_elements(
 ) -> Result<TsType, CompileError> {
     let mut props: Vec<ObjectProp> = Vec::new();
     for m in members {
-        let TsTypeElement::TsPropertySignature(p) = m else {
-            return Err(diag(
-                cm,
-                path,
-                m.span(),
-                "only property signatures are supported in object type literal",
-            ));
-        };
-        let key = match &*p.key {
-            Expr::Ident(i) => i.sym.to_string(),
-            Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+        match m {
+            TsTypeElement::TsPropertySignature(p) => {
+                let key = match &*p.key {
+                    Expr::Ident(i) => i.sym.to_string(),
+                    Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                    _ => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            p.span,
+                            "object type field key must be identifier or string literal",
+                        ));
+                    }
+                };
+                let Some(type_ann) = &p.type_ann else {
+                    return Err(diag(
+                        cm,
+                        path,
+                        p.span,
+                        "object type field annotation is required",
+                    ));
+                };
+                let ft = ts_type_from_ast(&type_ann.type_ann, cm, path, iface, type_params)?;
+                validate_object_field_ty(&ft, cm, path, p.span)?;
+                props.push(ObjectProp {
+                    name: key,
+                    optional: p.optional,
+                    kind: crate::ir::ObjectMemberKind::Field(Box::new(ft)),
+                });
+            }
+            TsTypeElement::TsMethodSignature(m) => {
+                // R1: 支持 interface 方法签名
+                let key = match &*m.key {
+                    Expr::Ident(i) => i.sym.to_string(),
+                    _ => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            m.span,
+                            "method name must be an identifier",
+                        ));
+                    }
+                };
+                // R1 v0: 拒绝泛型方法
+                if m.type_params.is_some() {
+                    return Err(diag(
+                        cm,
+                        path,
+                        m.span,
+                        "generic methods are not supported in interface (R1 v0)",
+                    ));
+                }
+                // R1 v0: 拒绝方法重载（通过检查重复名）
+                if props.iter().any(|p| p.name == key) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        m.span,
+                        format!("method `{}` conflicts with existing field or method", key),
+                    ));
+                }
+                // 解析参数类型
+                let mut params = Vec::new();
+                for param in &m.params {
+                    let ty = ts_type_from_fn_param(param, cm, path, iface, type_params)?;
+                    params.push(ty);
+                }
+                // 解析返回类型
+                let ret = if let Some(type_ann) = &m.type_ann {
+                    ts_type_from_ast(&type_ann.type_ann, cm, path, iface, type_params)?
+                } else {
+                    TsType::Void
+                };
+                props.push(ObjectProp {
+                    name: key,
+                    optional: false, // 方法默认非可选
+                    kind: crate::ir::ObjectMemberKind::Method {
+                        params,
+                        ret: Box::new(ret),
+                    },
+                });
+            }
             _ => {
                 return Err(diag(
                     cm,
                     path,
-                    p.span,
-                    "object type field key must be identifier or string literal",
+                    m.span(),
+                    "only property and method signatures are supported in interface",
                 ));
             }
-        };
-        let Some(type_ann) = &p.type_ann else {
-            return Err(diag(
-                cm,
-                path,
-                p.span,
-                "object type field annotation is required",
-            ));
-        };
-        let ft = ts_type_from_ast(&type_ann.type_ann, cm, path, iface, type_params)?;
-        validate_object_field_ty(&ft, cm, path, p.span)?;
-        props.push(ObjectProp {
-            name: key,
-            optional: p.optional,
-            ty: Box::new(ft),
-        });
+        }
     }
     props.sort_by(|a, b| a.name.cmp(&b.name));
     for w in props.windows(2) {
@@ -567,7 +671,7 @@ fn object_num_from_type_elements(
                 cm,
                 path,
                 dup_span,
-                format!("duplicate object type field `{}`", w[0].name),
+                format!("duplicate object type member `{}`", w[0].name),
             ));
         }
     }

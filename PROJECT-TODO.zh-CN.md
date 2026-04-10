@@ -56,7 +56,7 @@
 **§1.3 仍待后续（原因备忘）**
 
 - **方法 / 链式类型**：`obj.m` 与一层 `f().g` 已实现；**更一般的实例方法类型**（任意 class 实例）仍受 class 子集限制 — 见 README 矩阵。
-- **`??` / `?.`**：同族 `Union` 与可选调用/成员已支持；**完整 discriminated 收窄**仍属 §3.3 后续。
+- **`??` / `?.`**：同族 `Union` 与可选调用/成员已支持；**discriminated 收窄**已实现（D1；§3.3.1）。
 - **数组/对象字面量的「完整」类型**：更丰富的元素与字段类型、`TsType`/IR 演进见 §1.4、§2.1，不单属表达式扩展层。
 
 ### 1.4 类型语法（仅类型层）
@@ -121,7 +121,7 @@
 
 ### 3.3 类型系统加深
 
-- [x] **与 §1.4 的衔接**：字面量类型、联合类型与 `??` / `?.` **静态**收窄应与 §1.4 子项一致（避免与受限 `TsType` 冲突）。联合类型已入 HIR。**已实现（sem）**：在 `Union` 上去除 `null`/`undefined` 后，若与 `??` 右侧为**同族**（`number`/`string`/`boolean` 或**结构一致**的 `Fn`），则 [`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `IRExpr::NullishCoalesce` 路径会调用 `unify_ternary_branches` 得到单一结果类型。**仍为后续**：依赖 **discriminant** 的 discriminated union 收窄（大范围，非本子项一次完成）。验收：README §3.3；`nullish_ok.ts` / `optional_ok.ts`；`??` 与函数类型联合的 sem 见 `nullish_fn_ok.ts`（`trust check`）。
+- [x] **与 §1.4 的衔接**：字面量类型、联合类型与 `??` / `?.` **静态**收窄应与 §1.4 子项一致（避免与受限 `TsType` 冲突）。联合类型已入 HIR。**已实现（sem）**：在 `Union` 上去除 `null`/`undefined` 后，若与 `??` 右侧为**同族**（`number`/`string`/`boolean` 或**结构一致**的 `Fn`），则 [`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `IRExpr::NullishCoalesce` 路径会调用 `unify_ternary_branches` 得到单一结果类型。**已完成（D1）**：依赖 **discriminant** 的 discriminated union 收窄，通过 `Binding::narrow_ty` 实现（§3.3.1）。验收：README §3.3；`nullish_ok.ts` / `optional_ok.ts`；`??` 与函数类型联合的 sem 见 `nullish_fn_ok.ts`（`trust check`）。
 - [x] **`null` / `undefined`**：[`TsType`](crates/trust-hir/src/ir.rs) 已含 `Null` / `Undefined` 等变体；检查以 **当前 sem 静态规则**为准，**不设** tsc 默认「万物可空」式软语义。验收：README §3.3；**未**实现 `strictNullChecks` 式开关。若将来增加模式，应为**显式编译选项**（如 strict 空值），**非**隐式放宽或兼容 JS 动态性。
 - [x] **结构类型 vs 名义类型**：**trust 以名义表 + 静态形状检查为界**；与 Rust 后端映射策略（当前以基础类型为主）。验收：README §3.3 已说明具名表/语义检查与 Rust 生成侧边界；**未**实现 TS 结构子类型全集，**不**将其列为路线目标。
 - [x] **函数类型与高阶函数**：与 [§13.2](PROJECT-TODO.zh-CN.md) 及 README 一致——已实现**受限**静态函数类型、箭头值、`f(...)`、传参/返回函数等；codegen 闭包仍为 `(number) => number` 的严格子集。**勿**再写「无一等函数值 / 未做 HOF」；应区分「已支持的 HOF 子集」与「仍为后续的泛化 / codegen 扩展」。
@@ -139,12 +139,12 @@
 
 #### D1 — discriminated union 收窄（规格）
 
-- **目标**：在 `if (v.tag === 'a')` / `else` 内，当 `v` 为若干 `ObjectNum` 形联合臂且共享**必填** discriminant 字段、各臂字面量**互斥**时，静态收窄 `v` 的类型。
-- **条件形态（v0）**：`Eq` / `StrictEq`，左侧为标识符 `v` 的 `Member` / `OptionalMember` + 字面量属性名，右侧为与某一臂 discriminant **匹配的字面量**。（任意左式 / 计算属性：后续。）
-- **字面量 discriminant**：仅 `string` / `boolean` / `number` **字面量类型**（与 §1.4 一致）。
-- **与现有 `??` / `?.` 协同**：不得破坏 `nullish_ok.ts`、`optional_ok.ts`、`nullish_fn_ok.ts`。
-- **实现草图**：在 [`check_stmts`](crates/trust-hir/src/sem.rs) / `If` 分支上维护 `ident -> TsType` 流敏感环境，或 `Binding` 上可选 `narrow_ty`。
-- **计划 fixture**：`discriminated_narrow_ok.ts`、`discriminated_narrow_else_ok.ts`、`discriminated_narrow_non_literal_fail.ts` 等 + e2e。
+- [x] **目标**：在 `if (v.tag === 'a')` / `else` 内，当 `v` 为若干 `ObjectNum` 形联合臂且共享**必填** discriminant 字段、各臂字面量**互斥**时，静态收窄 `v` 的类型。
+- [x] **条件形态（v0）**：`Eq` / `StrictEq`，左侧为标识符 `v` 的 `Member` / `OptionalMember` + 字面量属性名，右侧为与某一臂 discriminant **匹配的字面量**。（任意左式 / 计算属性：后续。）
+- [x] **字面量 discriminant**：仅 `string` / `boolean` / `number` **字面量类型**（与 §1.4 一致）。
+- [x] **与现有 `??` / `?.` 协同**：不破坏 `nullish_ok.ts`、`optional_ok.ts`、`nullish_fn_ok.ts`。
+- [x] **实现**：[`Binding`](crates/trust-hir/src/sem.rs) 上增加 `narrow_ty: Option<TsType>`；[`check_stmt`](crates/trust-hir/src/sem.rs) 对 `IRStmt::If` 通过 `try_extract_discriminant_narrowing` 提取条件并经由 `update_binding_narrow_ty` 应用收窄；嵌套收窄使用 effective type（`narrow_ty.unwrap_or(ty)`）。
+- [x] **Fixture**：`discriminated_narrow_ok.ts`、`discriminated_narrow_else_ok.ts`、`discriminated_narrow_nested_ok.ts`；e2e `run_discriminated_narrow_ok_prints_42`、`run_discriminated_narrow_else_ok_prints_100`、`run_discriminated_narrow_nested_ok_prints_100`。
 
 #### G1 / G2 — 泛型子集扩展（规格）
 
@@ -155,10 +155,10 @@
 
 #### R1 — `interface` 实例方法（名义；规格）
 
-- **语法子集（v0）**：顶层 `interface I { m(): number; … }`，**无**重载、**无**方法级泛型。
-- **Lowering**：优先 **全局脱糖** `m__I(receiver, …)`（名称修饰），而非 `serde_json::Value` 分发；接收者为**单编译单元**内名义 `interface`（跨文件见 §13.7 B2a）。
-- **兼容**：不破坏现有非 interface 的 `method_call_ok.ts`、`chain_call_ok.ts`。
-- **计划 fixture**：`interface_method_ok.ts`、`interface_method_bad_args_fail.ts`。
+- [x] **语法子集（v0）**：顶层 `interface I { m(): number; … }`，**无**重载、**无**方法级泛型。
+- [x] **Lowering**：全局脱糖 `m__I(receiver, …)` 通过 `IRExpr::MethodCall` 的 `inherent_rust` 字段；接收者为包含方法签名的 `ObjectNum`，使用 `ObjectMemberKind::Method`。
+- [x] **兼容**：`obj.m(args)` 优先检查 interface 方法签名，找不到则回退到全局函数；不破坏现有方法调用。
+- [x] **Fixture**：`interface_method_ok.ts`、`interface_method_bad_args_fail.ts`。
 
 #### C1 / C2 — TS 注释写入生成 Rust（规格）
 
@@ -426,7 +426,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 #### 类型与语义（相对完整 `tsc`）
 
-- [ ] **D1 — Discriminated 收窄**：对象联合上 `if (v.kind === 'a')` / `else`；与 `??` / `?.` 协同（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem.rs`](crates/trust-hir/src/sem.rs)）。
+- [x] **D1 — Discriminated 收窄**：对象联合上 `if (v.kind === 'a')` / `else`；与 `??` / `?.` 协同（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem.rs`](crates/trust-hir/src/sem.rs)）。已完成：通过 `Binding` 上的 `narrow_ty` 支持嵌套收窄。
 - [ ] **D3 向 — 更宽的联合 / `normalize_union` / 可赋值性**：仅当仍能落到**单一** Rust 类型且可静态判定（[§3.3](PROJECT-TODO.zh-CN.md)）。
 - [ ] **G1 / G2 — 泛型子集扩大**（更多显式实参形态、更多元数或非调用位置单态）（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)）。
 - [ ] **G3 — 类 where 约束**（若做：须全程可静态检查）。
@@ -435,7 +435,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 - [ ] **与 `tsc` 对齐的完整结构子类型** — 非目标；若做只接受**有文档的安全子集**。
 - [ ] **异质联合**（如 `number | string`）：codegen 策略或「无法单类型映射」时的诊断更清晰（见 README 矩阵「联合」行）。
 - [ ] **等价于 `strictNullChecks` 的模式**：须为**显式**编译选项，而非默认宽松 JS 语义。
-- [ ] **R1 — `interface` / 对象名义方法**（静态分派；全局 `m__I(receiver,…)` 或固有方法）（[§3.3.1](PROJECT-TODO.zh-CN.md)）。
+- [x] **R1 — `interface` / 对象名义方法**（静态分派；全局 `m__I(receiver,…)` 或固有方法）（[§3.3.1](PROJECT-TODO.zh-CN.md)）。已完成：interface 支持方法签名，方法调用类型检查。
 - [ ] **R2 — 比一层 `f().g()` 更深的类型驱动链**（[§1.3](PROJECT-TODO.zh-CN.md) 附注）。
 - [ ] **§13.7 B2a + B2+** — `import type`、跨文件 interface/type 名、`interface extends`、对象可调用成员、更丰富的 `readonly`/索引签名等（[§13.7](PROJECT-TODO.zh-CN.md)）。
 

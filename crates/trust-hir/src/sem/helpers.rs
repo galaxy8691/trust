@@ -5,26 +5,28 @@ use swc_common::Span;
 use crate::error::{diag, CompileError};
 use crate::ir::{ObjectProp, SendSourceMap, TsType};
 
-/// 宽度子类型：`got` 的每个字段须出现在 `expected` 中且类型可赋；**不**要求 `expected` 的必填字段在 `got` 中均出现（与完整 TS 赋值检查不同，见 README）。
+/// R1: 宽度子类型检查（只比较字段，方法不参与）
+/// `got` 的每个字段必须在 `expected` 中存在且类型可赋。
+/// 不强制要求 `expected` 的所有字段都在 `got` 中（支持类继承）。
 fn object_shape_assignable(expected: &[ObjectProp], got: &[ObjectProp]) -> bool {
-    for g in got {
-        let Some(e) = expected.iter().find(|x| x.name == g.name) else {
+    // 只比较字段（跳过方法）
+    let expected_fields: Vec<_> = expected.iter().filter_map(|e| {
+        e.ty().map(|ty| (e.name.clone(), ty))
+    }).collect();
+    let got_fields: Vec<_> = got.iter().filter_map(|g| {
+        g.ty().map(|ty| (g.name.clone(), ty))
+    }).collect();
+    
+    // got 的每个字段必须在 expected 中存在且类型可赋
+    for (g_name, g_ty) in &got_fields {
+        let Some((_, e_ty)) = expected_fields.iter().find(|(n, _)| n == g_name) else {
             return false;
         };
-        if !type_assignable(&e.ty, &g.ty) {
+        if !type_assignable(e_ty, g_ty) {
             return false;
         }
     }
-    for e in expected {
-        if !e.optional {
-            continue;
-        }
-        if let Some(g) = got.iter().find(|x| x.name == e.name) {
-            if !type_assignable(&e.ty, &g.ty) {
-                return false;
-            }
-        }
-    }
+    
     true
 }
 
@@ -32,6 +34,7 @@ pub(super) fn is_numberish(t: &TsType) -> bool {
     match t {
         TsType::Number | TsType::NumberLit(_) => true,
         TsType::Union(m) => m.iter().all(is_numberish),
+        TsType::Intersection(m) => m.iter().any(is_numberish),
         _ => false,
     }
 }
@@ -40,6 +43,7 @@ pub(super) fn is_booleanish(t: &TsType) -> bool {
     match t {
         TsType::Boolean | TsType::BoolLit(_) => true,
         TsType::Union(m) => m.iter().all(is_booleanish),
+        TsType::Intersection(m) => m.iter().any(is_booleanish),
         _ => false,
     }
 }
@@ -48,6 +52,7 @@ pub(super) fn is_stringish(t: &TsType) -> bool {
     match t {
         TsType::String | TsType::StringLit(_) => true,
         TsType::Union(m) => m.iter().all(is_stringish),
+        TsType::Intersection(m) => m.iter().any(is_stringish),
         _ => false,
     }
 }
@@ -70,6 +75,14 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
     }
     if let TsType::Union(members) = got {
         return members.iter().all(|g| type_assignable(expected, g));
+    }
+    // 交集类型: 值必须满足所有成员类型
+    if let TsType::Intersection(members) = expected {
+        return members.iter().all(|e| type_assignable(e, got));
+    }
+    // 值如果是交集类型，则满足 expected 当且仅当任一成员满足
+    if let TsType::Intersection(members) = got {
+        return members.iter().any(|g| type_assignable(expected, g));
     }
     if let (
         TsType::Fn {
@@ -101,6 +114,10 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
         return a == b;
     }
     if let (TsType::ObjectNum(exp), TsType::ObjectNum(got)) = (expected, got) {
+        // R1: 如果 expected 是空的（前向引用占位符），认为匹配
+        if exp.is_empty() {
+            return true;
+        }
         return object_shape_assignable(exp, got);
     }
     matches!(
@@ -149,4 +166,175 @@ pub(super) fn paths_equal_file(a: &str, b: &str) -> bool {
     let ca = pa.canonicalize().unwrap_or_else(|_| pa.to_path_buf());
     let cb = pb.canonicalize().unwrap_or_else(|_| pb.to_path_buf());
     ca == cb
+}
+
+/// D1: 尝试根据 discriminant 字段值收窄联合类型。
+/// 
+/// 参数:
+/// - `union_ty`: 联合类型 (应为 TsType::Union)
+/// - `field_name`: discriminant 字段名
+/// - `literal_ty`: 要匹配的字面量类型
+/// 
+/// 返回:
+/// - `Some(TsType)`: 收窄后的类型（单个 ObjectNum 或剩余成员的 Union）
+/// - `None`: 无法收窄（不满足 discriminated union 条件）
+pub(super) fn narrow_union_by_discriminant(
+    union_ty: &TsType,
+    field_name: &str,
+    literal_ty: &TsType,
+) -> Option<(TsType, Option<TsType>)> {
+    // 必须是联合类型
+    let members = match union_ty {
+        TsType::Union(m) => m,
+        _ => return None,
+    };
+
+    // 所有成员必须是 ObjectNum
+    let object_members: Vec<&Vec<ObjectProp>> = members
+        .iter()
+        .filter_map(|t| match t {
+            TsType::ObjectNum(props) => Some(props),
+            _ => None,
+        })
+        .collect();
+
+    if object_members.len() != members.len() {
+        return None; // 不是所有成员都是对象
+    }
+
+    // 检查每个成员是否有 discriminant 字段，且是字面量类型
+    let mut discriminant_values: Vec<(&Vec<ObjectProp>, TsType)> = Vec::new();
+    for props in &object_members {
+        let field = props.iter().find(|p| p.name == field_name)?;
+        if field.optional {
+            return None; // discriminant 字段必须是必需的
+        }
+        // R1: discriminant 必须是字段（方法不能作为 discriminant）
+        let field_ty = field.ty()?;
+        let lit_ty = match field_ty {
+            TsType::NumberLit(n) => TsType::NumberLit(*n),
+            TsType::BoolLit(b) => TsType::BoolLit(*b),
+            TsType::StringLit(s) => TsType::StringLit(s.clone()),
+            _ => return None, // 不是字面量类型
+        };
+        discriminant_values.push((props, lit_ty));
+    }
+
+    // 验证字面量值互不相同（pairwise-distinct）
+    for i in 0..discriminant_values.len() {
+        for j in (i + 1)..discriminant_values.len() {
+            if discriminant_values[i].1 == discriminant_values[j].1 {
+                return None; // 字面量值不唯一，不是有效的 discriminated union
+            }
+        }
+    }
+
+    // 找到匹配的成员（then 分支）
+    let then_member = discriminant_values
+        .iter()
+        .find(|(_, lit)| lit == literal_ty)
+        .map(|(props, _)| (*props).clone());
+
+    // 计算 else 分支的剩余类型
+    let else_members: Vec<TsType> = discriminant_values
+        .iter()
+        .filter(|(_, lit)| lit != literal_ty)
+        .map(|(props, _)| TsType::ObjectNum((*props).clone()))
+        .collect();
+
+    let then_ty = then_member.map(TsType::ObjectNum);
+    let else_ty = match else_members.len() {
+        0 => None,
+        1 => Some(else_members.into_iter().next().unwrap()),
+        _ => Some(TsType::Union(else_members)),
+    };
+
+    Some((then_ty?, else_ty))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::ObjectMemberKind;
+
+    #[test]
+    fn test_narrow_union_by_discriminant_basic() {
+        // type Shape = { kind: 'circle', radius: number } | { kind: 'square', side: number }
+        let circle = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::StringLit("circle".to_string()))) },
+            ObjectProp { name: "radius".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::Number)) },
+        ]);
+        let square = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::StringLit("square".to_string()))) },
+            ObjectProp { name: "side".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::Number)) },
+        ]);
+        let union = TsType::Union(vec![circle.clone(), square.clone()]);
+
+        // 匹配 'circle'
+        let result = narrow_union_by_discriminant(&union, "kind", &TsType::StringLit("circle".to_string()));
+        assert!(result.is_some());
+        let (then_ty, else_ty) = result.unwrap();
+        assert_eq!(then_ty, circle); // then 分支收窄为 circle
+        assert_eq!(else_ty, Some(square)); // else 分支收窄为 square
+    }
+
+    #[test]
+    fn test_narrow_union_by_discriminant_three_arms() {
+        // type ABC = A | B | C
+        let a = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::StringLit("a".to_string()))) },
+            ObjectProp { name: "val".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::Number)) },
+        ]);
+        let b = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::StringLit("b".to_string()))) },
+            ObjectProp { name: "str".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::String)) },
+        ]);
+        let c = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::StringLit("c".to_string()))) },
+            ObjectProp { name: "flag".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::Boolean)) },
+        ]);
+        let union = TsType::Union(vec![a.clone(), b.clone(), c.clone()]);
+
+        // 匹配 'a'
+        let result = narrow_union_by_discriminant(&union, "kind", &TsType::StringLit("a".to_string()));
+        assert!(result.is_some());
+        let (then_ty, else_ty) = result.unwrap();
+        assert_eq!(then_ty, a); // then 分支收窄为 a
+        // else 分支应该是 b | c
+        assert_eq!(else_ty, Some(TsType::Union(vec![b, c])));
+    }
+
+    #[test]
+    fn test_narrow_union_by_discriminant_not_literal() {
+        // discriminant 不是字面量类型
+        let a = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::String)) }, // 不是 StringLit
+            ObjectProp { name: "val".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::Number)) },
+        ]);
+        let b = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::String)) },
+            ObjectProp { name: "str".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::String)) },
+        ]);
+        let union = TsType::Union(vec![a, b]);
+
+        let result = narrow_union_by_discriminant(&union, "kind", &TsType::StringLit("a".to_string()));
+        assert!(result.is_none()); // 无法收窄，因为 kind 是 string 不是字面量
+    }
+
+    #[test]
+    fn test_narrow_union_by_discriminant_duplicate_values() {
+        // discriminant 值不唯一
+        let a = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::StringLit("x".to_string()))) },
+            ObjectProp { name: "val".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::Number)) },
+        ]);
+        let b = TsType::ObjectNum(vec![
+            ObjectProp { name: "kind".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::StringLit("x".to_string()))) }, // 重复的 'x'
+            ObjectProp { name: "str".to_string(), optional: false, kind: ObjectMemberKind::Field(Box::new(TsType::String)) },
+        ]);
+        let union = TsType::Union(vec![a, b]);
+
+        let result = narrow_union_by_discriminant(&union, "kind", &TsType::StringLit("x".to_string()));
+        assert!(result.is_none()); // 无法收窄，因为字面量值不唯一
+    }
 }

@@ -8,7 +8,7 @@ use crate::build::ModuleIrFragment;
 use crate::ir::*;
 use crate::ir_cache::disk::*;
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug)]
 pub enum IrCacheError {
@@ -1014,6 +1014,7 @@ pub fn encode_fragment_to_bytes(frag: &ModuleIrFragment) -> Result<Vec<u8>, IrCa
         fns: frag.fns.iter().map(|f| encode_function(cmr, f)).collect(),
         classes: frag.classes.iter().map(|c| encode_class(cmr, c)).collect(),
         ts_comments: frag.ts_comments.clone(),
+        exported_types: frag.exported_types.clone(),
     };
     bincode::serialize(&disk).map_err(|e| IrCacheError::Bincode(e.to_string()))
 }
@@ -1042,6 +1043,7 @@ pub fn decode_fragment_from_bytes(
             .map(|c| decode_class(&cm, base, c))
             .collect(),
         ts_comments: disk.ts_comments,
+        exported_types: disk.exported_types,
     })
 }
 

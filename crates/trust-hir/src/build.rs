@@ -94,6 +94,154 @@ fn merge_trust_rust_imports_into_iface(
     }
 }
 
+/// 处理 import type { X } from "./module.ts"，将导入的类型合并到 iface。
+fn merge_imported_types_into_iface(
+    program: &Program,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &mut HashMap<String, TsType>,
+    global_types: &HashMap<String, TsType>,
+    errs: &mut Vec<CompileError>,
+) {
+    use swc_ecma_ast::{ModuleItem, ModuleDecl, ImportSpecifier, ModuleExportName};
+    
+    let m = match program {
+        Program::Module(m) => m,
+        _ => return,
+    };
+    
+    for item in &m.body {
+        let ModuleItem::ModuleDecl(ModuleDecl::Import(imp)) = item else {
+            continue;
+        };
+        
+        let raw = imp.src.value.to_string_lossy();
+        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        
+        // 只处理相对路径的类型导入
+        if !(raw.starts_with("./") || raw.starts_with("../")) {
+            continue;
+        }
+        
+        for spec in &imp.specifiers {
+            let is_type_import = imp.type_only || matches!(spec, ImportSpecifier::Named(n) if n.is_type_only);
+            
+            if !is_type_import {
+                continue;
+            }
+            
+            let (local_sym, target_sym) = match spec {
+                ImportSpecifier::Named(named) => {
+                    let local = named.local.sym.to_string();
+                    let target = match &named.imported {
+                        Some(ModuleExportName::Ident(id)) => id.sym.to_string(),
+                        Some(ModuleExportName::Str(s)) => s.value.to_string_lossy().into_owned(),
+                        None => local.clone(),
+                    };
+                    (local, target)
+                }
+                _ => continue,
+            };
+            
+            // 从全局类型表中查找目标类型
+            match global_types.get(&target_sym) {
+                Some(ty) => {
+                    if iface.contains_key(&local_sym) {
+                        push_diag(
+                            errs,
+                            cm.as_ref(),
+                            path,
+                            imp.span,
+                            format!(
+                                "name `{local_sym}` conflicts with an existing type"
+                            ),
+                        );
+                    } else {
+                        iface.insert(local_sym, ty.clone());
+                    }
+                }
+                None => {
+                    push_diag(
+                        errs,
+                        cm.as_ref(),
+                        path,
+                        imp.span,
+                        format!(
+                            "cannot find type `{target_sym}` in imported module"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// 收集模块导出的类型（interface, type alias）
+fn collect_exported_types(
+    program: &Program,
+    iface: &HashMap<String, TsType>,
+) -> HashMap<String, TsType> {
+    let mut exported = HashMap::new();
+    
+    match program {
+        Program::Module(m) => {
+            for item in &m.body {
+                use swc_ecma_ast::{ModuleItem, ModuleDecl, ExportDecl};
+                
+                let maybe_exported_name = match item {
+                    // export interface X {...}
+                    ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl: Decl::TsInterface(i), .. })) => {
+                        Some(i.id.sym.to_string())
+                    }
+                    // export type X = ...
+                    ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl: Decl::TsTypeAlias(a), .. })) => {
+                        Some(a.id.sym.to_string())
+                    }
+                    // interface X {...}（顶层声明）
+                    ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(i))) => {
+                        Some(i.id.sym.to_string())
+                    }
+                    // type X = ...（顶层声明）
+                    ModuleItem::Stmt(Stmt::Decl(Decl::TsTypeAlias(a))) => {
+                        Some(a.id.sym.to_string())
+                    }
+                    _ => None,
+                };
+                
+                if let Some(name) = maybe_exported_name {
+                    if let Some(ty) = iface.get(&name) {
+                        exported.insert(name, ty.clone());
+                    }
+                }
+            }
+        }
+        Program::Script(s) => {
+            for stmt in &s.body {
+                use swc_ecma_ast::Stmt;
+                
+                let maybe_exported_name = match stmt {
+                    // interface X {...}（顶层声明）
+                    Stmt::Decl(Decl::TsInterface(i)) => {
+                        Some(i.id.sym.to_string())
+                    }
+                    // type X = ...（顶层声明）
+                    Stmt::Decl(Decl::TsTypeAlias(a)) => {
+                        Some(a.id.sym.to_string())
+                    }
+                    _ => None,
+                };
+                
+                if let Some(name) = maybe_exported_name {
+                    if let Some(ty) = iface.get(&name) {
+                        exported.insert(name, ty.clone());
+                    }
+                }
+            }
+        }
+    }
+    exported
+}
+
 fn freeze_leading_comments(c: &SingleThreadedComments) -> TsLeadingComments {
     let mut out = TsLeadingComments::new();
     let (leading, _) = c.borrow_all();
@@ -188,6 +336,8 @@ pub struct ModuleIrFragment {
     pub fns: Vec<IRFunction>,
     pub classes: Vec<IRClass>,
     pub ts_comments: Option<TsLeadingComments>,
+    /// 该模块导出的类型定义（interface, type alias）
+    pub exported_types: HashMap<String, TsType>,
 }
 
 /// 从单个已解析模块构建 IR 片段；`multi_file` 为 true 时与 [`build_program_multi`] 中单文件语义一致。
@@ -216,10 +366,56 @@ pub fn build_module_ir_fragment(
     } else {
         Some(frozen)
     };
+    // 收集该模块导出的类型
+    let exported_types = collect_exported_types(program, &iface);
     Ok(ModuleIrFragment {
         fns,
         classes,
         ts_comments,
+        exported_types,
+    })
+}
+
+/// 从单个已解析模块构建 IR 片段，传入全局类型表用于解析跨文件 import type。
+pub fn build_module_ir_fragment_with_types(
+    path: &str,
+    program: &Program,
+    cm: &Lrc<SourceMap>,
+    file_comments: &SingleThreadedComments,
+    multi_file: bool,
+    next_id: &mut u32,
+    trust: Option<&TrustManifest>,
+    global_types: &HashMap<String, TsType>,
+) -> Result<ModuleIrFragment, CompileError> {
+    let mut errs = Vec::new();
+    let mut iface = build_types::collect_named_types_with_errors(program, cm, path, &mut errs);
+    
+    merge_trust_rust_imports_into_iface(program, cm, path, &mut iface, trust, &mut errs);
+    
+    // 处理 import type { X } from "./module.ts"
+    // 这会将需要的类型从 global_types 导入到 iface
+    merge_imported_types_into_iface(program, cm, path, &mut iface, global_types, &mut errs);
+    
+    let classes = collect_class_decls(program, cm, path, &iface, &mut errs);
+    let mut fns = collect_fn_decls(program, cm, path, multi_file, next_id, &iface, &mut errs);
+    let mut lowered = lower_classes_to_functions(&classes, cm, path, next_id, &iface)?;
+    fns.append(&mut lowered);
+    if !errs.is_empty() {
+        return Err(CompileError::merge_sorted(errs));
+    }
+    let frozen = freeze_leading_comments(file_comments);
+    let ts_comments = if frozen.is_empty() {
+        None
+    } else {
+        Some(frozen)
+    };
+    // 收集该模块导出的类型
+    let exported_types = collect_exported_types(program, &iface);
+    Ok(ModuleIrFragment {
+        fns,
+        classes,
+        ts_comments,
+        exported_types,
     })
 }
 
@@ -280,8 +476,21 @@ pub fn build_program_multi(
 ) -> Result<IRModule, CompileError> {
     let mut next_id = 0u32;
     let mut fragments: Vec<(String, ModuleIrFragment)> = Vec::with_capacity(units.len());
+    
+    // 第一轮：收集所有模块的类型定义（用于跨文件 import type）
+    let mut all_types: HashMap<String, TsType> = HashMap::new();
+    for (path, program, cm, _) in units {
+        let mut errs = Vec::new();
+        let iface = build_types::collect_named_types_with_errors(program, cm, path, &mut errs);
+        // 合并到全局类型表
+        for (name, ty) in iface {
+            all_types.insert(name, ty);
+        }
+    }
+    
+    // 第二轮：构建每个模块的 IR，传入全局类型表用于解析 import type
     for (path, program, cm, file_comments) in units {
-        let frag = build_module_ir_fragment(
+        let frag = build_module_ir_fragment_with_types(
             path.as_str(),
             program,
             cm,
@@ -289,11 +498,15 @@ pub fn build_program_multi(
             true,
             &mut next_id,
             trust,
+            &all_types,
         )?;
         fragments.push((path.clone(), frag));
     }
     merge_module_ir_fragments(&fragments, entry_path, trust.map(|t| Arc::new(t.clone())))
 }
+
+/// 多文件模块图：合并各模块中的顶层函数，要求全局函数名唯一；`entry_path` 用于语义上定位 `main`。
+/// 保留旧版函数签名，使用 build_module_ir_fragment_with_types 实现。
 
 fn collect_class_decls(
     program: &Program,

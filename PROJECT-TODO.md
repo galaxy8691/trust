@@ -58,7 +58,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 **§1.3 follow-ups (notes)**
 
 - **Method / chain typing**: `obj.m` and one-level `f().g` are implemented; **richer receiver typing** (e.g. arbitrary class instance methods) remains limited — see class subset in README matrix.
-- **`??` / `?.`**: same-family `Union` narrowing for `??` and optional call/member are implemented; **full discriminated narrowing** still future (§3.3).
+- **`??` / `?.`**: same-family `Union` narrowing for `??` and optional call/member are implemented; **discriminated narrowing** implemented (D1; §3.3.1).
 - **“Full” types for array/object literals**: richer elements/fields and `TsType`/IR evolution in §1.4, §2.1 — not only expression layer.
 
 ### 1.4 Type syntax (types only)
@@ -123,7 +123,7 @@ Here, “narrowing”, “assignable”, and “structural / shape” mean **sta
 
 ### 3.3 Deeper type system
 
-- [x] **Tie-in with §1.4**: literal and union types and **static** `??` / `?.` narrowing must stay consistent with §1.4 (avoid conflict with limited `TsType`). Unions are in HIR. **Implemented (sem)**: when `Union` minus `null`/`undefined` matches the right-hand side of `??` as the same “family” (`number` / `string` / `boolean`, or **structurally matching** `Fn`), [`infer_expr_mut`](crates/trust-hir/src/sem.rs) on `IRExpr::NullishCoalesce` calls `unify_ternary_branches` for a single result type. **Still future**: discriminated-union narrowing that relies on a **discriminant** (large scope). Done: README §3.3; `nullish_ok` / `optional_ok`; sem + `Fn` unions covered by `nullish_fn_ok.ts` (`trust check`).
+- [x] **Tie-in with §1.4**: literal and union types and **static** `??` / `?.` narrowing must stay consistent with §1.4 (avoid conflict with limited `TsType`). Unions are in HIR. **Implemented (sem)**: when `Union` minus `null`/`undefined` matches the right-hand side of `??` as the same “family” (`number` / `string` / `boolean`, or **structurally matching** `Fn`), [`infer_expr_mut`](crates/trust-hir/src/sem.rs) on `IRExpr::NullishCoalesce` calls `unify_ternary_branches` for a single result type. **Completed (D1)**: discriminated-union narrowing that relies on a **discriminant** via `Binding::narrow_ty` (§3.3.1). Done: README §3.3; `nullish_ok` / `optional_ok`; sem + `Fn` unions covered by `nullish_fn_ok.ts` (`trust check`).
 - [x] **`null` / `undefined`**: [`TsType`](crates/trust-hir/src/ir.rs) has `Null`/`Undefined` variants; checks follow **current sem static rules**, not tsc’s default “everything nullable”. Done: README §3.3; **no** `strictNullChecks`-style switch. If added later, make it an **explicit** compiler mode, not implicit JS looseness.
 - [x] **Structural vs nominal**: **trust** uses nominal table + static shape checks; Rust mapping strategy (mostly primitives today). Done: README §3.3; **not** implementing full TS structural subtyping as a goal.
 - [x] **Function types and HOF**: Align with [§13.2](PROJECT-TODO.md) and README — a **restricted** subset is implemented (function types, arrow values, calls, passing/returning functions); closure codegen remains the strict `(number) => number` subset. **Do not** claim “no first-class functions / no HOF”; distinguish “supported HOF subset” vs “further generalization / codegen work”.
@@ -156,10 +156,10 @@ Single-PR rule: land **one** pillar at a time; each needs fixtures + README §3.
 
 #### R1 — `interface` instance methods (nominal; spec)
 
-- **Syntax subset (v0)**: Inside top-level `interface I { foo(): number; bar(x: number): void; }` — **no** overloads, **no** generic methods, **no** `this` typing beyond current class subset rules if reused.
-- **Lowering strategy**: Prefer **global desugar** `foo__I(receiver: &IShape, …)` (name mangled) over `serde_json::Value` dispatch; receiver type is the existing nominal `ObjectNum` / named interface shape for **one compilation unit** (cross-file `I`: [§13.7 B2a](PROJECT-TODO.md)).
-- **Interaction**: `obj.m(args)` today becomes `m(obj, args)`; R1 must not break [`method_call_ok.ts`](crates/trust-cli/tests/fixtures/method_call_ok.ts) / [`chain_call_ok.ts`](crates/trust-cli/tests/fixtures/chain_call_ok.ts) for non-interface receivers.
-- **Fixtures (planned)**: `interface_method_ok.ts`, `interface_method_bad_args_fail.ts`.
+- [x] **Syntax subset (v0)**: Inside top-level `interface I { foo(): number; bar(x: number): void; }` — **no** overloads, **no** generic methods.
+- [x] **Lowering strategy**: Global desugar `foo__I(receiver: &IShape, …)` via `inherent_rust` field in `IRExpr::MethodCall`; receiver type is `ObjectNum` with method signatures in `ObjectMemberKind::Method`.
+- [x] **Interaction**: `obj.m(args)` checks interface method signature first, falls back to global function if not found; does not break existing method calls.
+- [x] **Fixtures**: `interface_method_ok.ts`, `interface_method_bad_args_fail.ts`.
 
 #### C1 / C2 — TS source comments in Rust (spec)
 
@@ -428,7 +428,7 @@ Checkbox list derived from [README — Unsupported TypeScript](README.md), matri
 
 #### Types and semantics (vs full `tsc`)
 
-- [ ] **D1 — Discriminated narrowing** on object unions (`if (v.kind === 'a')` / `else`); coordinate with `??` / `?.` ([§3.3.1](PROJECT-TODO.md), [`sem.rs`](crates/trust-hir/src/sem.rs)).
+- [x] **D1 — Discriminated narrowing** on object unions (`if (v.kind === 'a')` / `else`); coordinate with `??` / `?.` ([§3.3.1](PROJECT-TODO.md), [`sem.rs`](crates/trust-hir/src/sem.rs)). Completed: nested narrowing supported via `narrow_ty` on `Binding`.
 - [ ] **D3-style — Broader unions / `normalize_union` / assignability** only where still **one** Rust type and statically decidable ([§3.3](PROJECT-TODO.md)).
 - [ ] **G1 / G2 — Generics subset expansion** (more explicit type-arg patterns; more arity / non-call monomorphization) ([§3.3.1](PROJECT-TODO.md), [`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)).
 - [ ] **G3 — Where-like constraints** (if introduced: must remain fully static).

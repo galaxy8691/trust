@@ -557,8 +557,8 @@ fn compile_union_heterogeneous_main_fails() {
 #[test]
 fn compile_intersection_type_fails() {
     assert_compile_fails_stderr(
-        "intersection_type_fail.ts",
-        "intersection types are not supported",
+        "intersection_hetero_fail.ts",
+        "return type mismatch",
     );
 }
 
@@ -890,7 +890,8 @@ fn compile_export_default_fails() {
 
 #[test]
 fn compile_import_type_fails() {
-    assert_compile_fails_stderr("import_type_fail_main.ts", "`import type`");
+    // import type 现在被支持，但当导入不存在的类型时会报错
+    assert_compile_fails_stderr("import_type_fail_main.ts", "no exported type");
 }
 
 #[test]

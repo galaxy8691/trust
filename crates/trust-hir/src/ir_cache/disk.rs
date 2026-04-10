@@ -337,4 +337,5 @@ pub struct DiskModuleFragment {
     pub fns: Vec<DiskIRFunction>,
     pub classes: Vec<DiskIRClass>,
     pub ts_comments: Option<crate::ir::TsLeadingComments>,
+    pub exported_types: std::collections::HashMap<String, crate::ir::TsType>,
 }

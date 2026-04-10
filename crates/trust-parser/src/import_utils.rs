@@ -19,11 +19,7 @@ pub fn resolve_module_specifier(
     imp: &ImportDecl,
     trust: Option<&TrustManifest>,
 ) -> Result<ModuleSpecifierResolution, ParseError> {
-    if imp.type_only {
-        return Err(ParseError::Message(
-            "`import type` is not supported for import resolution".to_string(),
-        ));
-    }
+    // `import type` 现在被支持，用于类型导入
     let raw = imp.src.value.to_string_lossy();
     let raw = raw.trim_matches(|c| c == '"' || c == '\'');
     if raw.starts_with("./") || raw.starts_with("../") {
@@ -86,11 +82,7 @@ pub fn resolve_supported_import_path_with_trust(
 pub(crate) fn named_import_target(spec: &ImportSpecifier) -> Result<String, ParseError> {
     match spec {
         ImportSpecifier::Named(named) => {
-            if named.is_type_only {
-                return Err(ParseError::Message(
-                    "type-only import specifiers are not supported".to_string(),
-                ));
-            }
+            // type-only import specifiers 现在被支持
             let want = match &named.imported {
                 Some(ModuleExportName::Ident(id)) => id.sym.to_string(),
                 Some(ModuleExportName::Str(s)) => s.value.to_string_lossy().into_owned(),
