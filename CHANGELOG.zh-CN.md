@@ -8,7 +8,9 @@
 
 ### 新增
 
-- （尚无）
+- 新增 workspace crate `trust_stdlib`，作为生成 Rust 的默认标准库门面（`json`、`uri`、`string` helper）。
+- CLI 新增兼容开关 `--stdlib-mode trust_stdlib|legacy`（`compile` / `run`）用于迁移期回退。
+- `trust-driver` 生成临时 `Cargo.toml` 时默认注入 `trust_stdlib` 依赖。
 
 ## [0.1.0] - 2026-04-08
 

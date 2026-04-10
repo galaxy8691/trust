@@ -38,6 +38,7 @@ fn run(cli: Cli) -> RunOutcome {
                 c.exec,
                 c.span_comments,
                 c.ts_source_comments,
+                c.stdlib_mode,
                 c.link_trust_rt,
                 release,
                 c.emit_ir,
@@ -56,6 +57,7 @@ fn run(cli: Cli) -> RunOutcome {
                 r.link_trust_rt,
                 release,
                 r.incremental.as_ref(),
+                r.stdlib_mode,
                 quiet,
             )
         }

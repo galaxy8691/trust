@@ -2417,6 +2417,12 @@ fn infer_expr_mut(
                 ));
             }
             match kind {
+                StringMethodKind::Length => {
+                    if !args.is_empty() {
+                        return Err(diag(cm, path, *span, "internal: string.length arity"));
+                    }
+                    Ok(TsType::Number)
+                }
                 StringMethodKind::CharAt => {
                     if args.len() != 1 {
                         return Err(diag(cm, path, *span, "internal: charAt arity"));
@@ -2779,7 +2785,7 @@ fn infer_expr_mut(
                     cm,
                     path,
                     *span,
-                    "`body.getReader()` requires a `fetch` Response value before `.body`",
+                    "`body.getReader()` / `std.http.bodyGetReader(response)` requires a `fetch` Response value",
                 ));
             }
             mark_http_response_body_stream(stack, response, *span, cm, path)?;
@@ -2803,7 +2809,7 @@ fn infer_expr_mut(
                     cm,
                     path,
                     *span,
-                    "`read()` is only valid on a value from `response.body.getReader()`",
+                    "`read()` / `std.http.read(reader)` is only valid on a value from `response.body.getReader()` or `std.http.bodyGetReader`",
                 ));
             }
             let slot = b.reader_stream_slot.ok_or_else(|| {

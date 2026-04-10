@@ -128,6 +128,7 @@ fn program_direct_deps(
                         }
                     }
                     ModuleSpecifierResolution::RustCrate(_) => {}
+                    ModuleSpecifierResolution::BuiltinStd => {}
                 }
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) if !ea.type_only => {
@@ -220,6 +221,7 @@ fn visit_module(
                             visit_module(&dep, trust, visited, stack, modules)?;
                         }
                         ModuleSpecifierResolution::RustCrate(_) => {}
+                        ModuleSpecifierResolution::BuiltinStd => {}
                     }
                 }
                 ModuleItem::ModuleDecl(ModuleDecl::ExportAll(ea)) if !ea.type_only => {
@@ -503,6 +505,21 @@ pub fn validate_imports(graph: &ParsedModuleGraph) -> Result<(), ParseError> {
                             return Err(ParseError::Message(format!(
                                 "no rust_binding for `{want}` from crate `{crate_name}` in Trust.toml (add `[[rust_binding]]` with type_name = \"{want}\")"
                             )));
+                        }
+                    }
+                }
+                ModuleSpecifierResolution::BuiltinStd => {
+                    if imp.specifiers.len() != 1 {
+                        return Err(ParseError::Message(
+                            "builtin std import must be `import std from \"std\"`".to_string(),
+                        ));
+                    }
+                    match &imp.specifiers[0] {
+                        ImportSpecifier::Default(d) if d.local.sym == "std" => {}
+                        _ => {
+                            return Err(ParseError::Message(
+                                "builtin std import must be `import std from \"std\"`".to_string(),
+                            ));
                         }
                     }
                 }

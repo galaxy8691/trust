@@ -199,8 +199,8 @@ fn compile_console_stderr_writes_eprintln() {
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
-        body.contains("eprintln!"),
-        "expected console.error/debug to lower to eprintln!: {body}"
+        body.contains("trust_stdlib::console::log_joined(true"),
+        "expected console.error/debug to lower to trust_stdlib::console with stderr=true: {body}"
     );
 }
 
@@ -238,7 +238,7 @@ fn compile_void_main_has_no_println_value() {
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("fn ts_main() -> ()"));
-    assert!(body.contains("println!"));
+    assert!(body.contains("trust_stdlib::console::log_joined(false"));
     assert!(!body.contains("println!(\"{}\", ts_main())"));
 }
 
@@ -262,7 +262,7 @@ fn compile_async_mvp_writes_tokio_and_await() {
     assert!(body.contains("#[tokio::main]"), "{body}");
     assert!(body.contains("async fn ts_main"), "{body}");
     assert!(body.contains(".await"), "{body}");
-    assert!(body.contains("__trust_fetch_text"), "{body}");
+    assert!(body.contains("trust_stdlib::http::fetch_text"), "{body}");
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn compile_async_control_flow_if_while_await_ok() {
     assert!(body.contains(".await"), "{body}");
     assert!(body.contains("if ("), "{body}");
     assert!(body.contains("while "), "{body}");
-    assert!(body.contains("__trust_fetch_text"), "{body}");
+    assert!(body.contains("trust_stdlib::http::fetch_text"), "{body}");
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn compile_promise_all_fetch_alias_ok() {
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(body.contains("vec!["), "{body}");
-    assert!(body.contains("__trust_fetch("), "{body}");
+    assert!(body.contains("trust_stdlib::http::fetch("), "{body}");
     assert!(body.contains(".await"), "{body}");
 }
 
@@ -334,7 +334,7 @@ fn compile_fetch_response_ok() {
         .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("__trust_fetch("), "{body}");
+    assert!(body.contains("trust_stdlib::http::fetch("), "{body}");
     assert!(body.contains(".status()"), "{body}");
     assert!(body.contains(".text()"), "{body}");
 }
@@ -378,7 +378,7 @@ fn compile_fetch_post_init_ok() {
         .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("__TrustFetchInit"), "{body}");
+    assert!(body.contains("trust_stdlib::http::FetchInit"), "{body}");
     assert!(body.contains("\"POST\""), "{body}");
 }
 
@@ -399,7 +399,7 @@ fn compile_file_read_text_sync_ok() {
         .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("std::fs::read_to_string"), "{body}");
+    assert!(body.contains("trust_stdlib::io::read_file_text"), "{body}");
 }
 
 #[test]
@@ -419,7 +419,7 @@ fn compile_file_read_text_async_ok() {
         .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("tokio::fs::read_to_string"), "{body}");
+    assert!(body.contains("trust_stdlib::io::read_file_text_async"), "{body}");
     assert!(body.contains(".await"), "{body}");
 }
 
@@ -518,7 +518,7 @@ fn compile_void_log_in_branch_ok() {
         .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("println!"));
+    assert!(body.contains("trust_stdlib::console::log_joined(false"));
 }
 
 #[test]
@@ -1238,7 +1238,7 @@ fn run_stdlib_hir_ok_prints_expected() {
 }
 
 #[test]
-fn compile_stdlib_hir_ok_writes_utf16_and_json_helpers() {
+fn compile_stdlib_hir_ok_uses_trust_stdlib_calls() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("stdlib_hir_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1254,14 +1254,104 @@ fn compile_stdlib_hir_ok_writes_utf16_and_json_helpers() {
         .expect("spawn trust compile");
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
-    assert!(body.contains("__trust_utf16_slice"));
-    assert!(body.contains("__trust_utf16_index_of"));
-    assert!(body.contains("__trust_json_escape_string"));
+    assert!(body.contains("trust_stdlib::string::utf16_slice"));
+    assert!(body.contains("trust_stdlib::string::utf16_index_of"));
+    assert!(body.contains("trust_stdlib::"));
+}
+
+#[test]
+fn compile_stdlib_hir_ok_legacy_mode_still_uses_trust_stdlib() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
+    let ts = fixture("stdlib_hir_ok.ts");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rs_path = dir.path().join("out.rs");
+    let status = Command::new(&exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+            "--stdlib-mode",
+            "legacy",
+        ])
+        .status()
+        .expect("spawn trust compile");
+    assert!(status.success());
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(body.contains("trust_stdlib::string::utf16_slice"));
+    assert!(body.contains("trust_stdlib::string::utf16_index_of"));
+    assert!(body.contains("trust_stdlib::"));
 }
 
 #[test]
 fn run_json_uri_trust_ok_prints_expected() {
     assert_run_stdout("json_uri_trust_ok.ts", "162.5\n");
+}
+
+#[test]
+fn run_std_namespace_import_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ts = dir.path().join("main.ts");
+    let src = r#"import std from "std";
+export function main(): number {
+  let n: number = std.json.parse("12" + "3");
+  let s: string = std.string.slice("abcd", 1, 3);
+  let u: string = std.uri.decodeComponent(std.uri.encodeURIComponent("a b"));
+  std.console.log("std", s, u);
+  let lenFn: number = std.string.length("ab");
+  let m: number = std.math.abs(-2.0);
+  let p: number = std.number.parseInt("10", 10);
+  return n + s.length + u.length + lenFn + m + p;
+}
+"#;
+    std::fs::write(&ts, src).expect("write ts");
+    let out = Command::new(exe)
+        .args(["run", ts.to_str().unwrap()])
+        .output()
+        .expect("spawn trust run");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // 128 + 2 (length fn) + 2 (abs) + 10 (parseInt) = 142
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "std bc a b\n142\n");
+}
+
+#[test]
+fn compile_std_http_namespace_ok() {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ts = dir.path().join("main.ts");
+    let rs_path = dir.path().join("out.rs");
+    let src = r#"import std from "std";
+export async function main(): Promise<number> {
+  const r: HttpResponse = await std.http.fetch("http://127.0.0.1:9/nope");
+  let _t: string = await std.http.text(r);
+  return 0;
+}
+"#;
+    std::fs::write(&ts, src).expect("write ts");
+    let status = Command::new(&exe)
+        .args([
+            "compile",
+            ts.to_str().unwrap(),
+            "-o",
+            rs_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("spawn trust compile");
+    assert!(status.success(), "compile std.http should succeed");
+    let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
+    assert!(
+        body.contains("trust_stdlib::http::fetch("),
+        "expected fetch helper in output: {body}"
+    );
+    assert!(
+        body.contains(".text().await"),
+        "expected response text await in output: {body}"
+    );
 }
 
 #[test]
@@ -1308,7 +1398,7 @@ fn compile_trust_regex_ok_emits_regex_crate() {
 }
 
 #[test]
-fn compile_json_uri_trust_ok_emits_serde_json_and_urlencoding() {
+fn compile_json_uri_trust_ok_uses_trust_stdlib_json_and_uri() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_trust"));
     let ts = fixture("json_uri_trust_ok.ts");
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1325,12 +1415,12 @@ fn compile_json_uri_trust_ok_emits_serde_json_and_urlencoding() {
     assert!(status.success());
     let body = std::fs::read_to_string(&rs_path).expect("read out.rs");
     assert!(
-        body.contains("serde_json::"),
-        "expected dynamic JSON.parse to use serde_json: {body}"
+        body.contains("trust_stdlib::json::"),
+        "expected dynamic JSON.parse to use trust_stdlib::json: {body}"
     );
     assert!(
-        body.contains("urlencoding::"),
-        "expected URI builtins to use urlencoding: {body}"
+        body.contains("trust_stdlib::uri::"),
+        "expected URI builtins to use trust_stdlib::uri: {body}"
     );
 }
 

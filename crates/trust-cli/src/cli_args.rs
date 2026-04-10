@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args, ColorChoice, Parser, Subcommand};
+use clap::{ArgAction, Args, ColorChoice, Parser, Subcommand, ValueEnum};
 
 /// Apply `--color never|always` before [`Cli::parse`] so subcommand `--help` respects it (via `NO_COLOR`).
 pub(crate) fn preapply_color_from_argv() {
@@ -79,6 +79,13 @@ pub(crate) struct GraphInput {
     pub(crate) project: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum StdlibModeArg {
+    Legacy,
+    #[value(name = "trust_stdlib")]
+    TrustStdlib,
+}
+
 #[derive(Args)]
 pub(crate) struct CompileCmd {
     #[command(flatten)]
@@ -95,6 +102,9 @@ pub(crate) struct CompileCmd {
     /// 将 TS 源码中的 leading 注释（`//` / `/* */`）写入生成的 Rust 行注释
     #[arg(long)]
     pub(crate) ts_source_comments: bool,
+    /// 标准库实现模式：`trust_stdlib`（默认）或 `legacy`（回退）
+    #[arg(long, value_enum, default_value = "trust_stdlib")]
+    pub(crate) stdlib_mode: StdlibModeArg,
     /// 仅在 `--exec` 时生效：临时 crate 的 Cargo.toml 中加入可选 path 依赖 `trust_rt`
     #[arg(long)]
     pub(crate) link_trust_rt: bool,
@@ -148,6 +158,9 @@ pub(crate) struct RunCmd {
         default_missing_value = ".trust-cache"
     )]
     pub(crate) incremental: Option<PathBuf>,
+    /// 标准库实现模式：`trust_stdlib`（默认）或 `legacy`（回退）
+    #[arg(long, value_enum, default_value = "trust_stdlib")]
+    pub(crate) stdlib_mode: StdlibModeArg,
 }
 
 #[derive(Args)]

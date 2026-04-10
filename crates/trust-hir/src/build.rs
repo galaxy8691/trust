@@ -1810,6 +1810,318 @@ fn call_type_args(
     Ok(out)
 }
 
+/// `std.ns.method(...)`：callee 为以标识符 `std` 为根的 `MemberExpr` 链。
+fn collect_std_member_chain(expr: &Expr) -> Option<Vec<&str>> {
+    let mut segments = Vec::new();
+    let mut cur = expr;
+    loop {
+        match cur {
+            Expr::Member(m) => {
+                let MemberProp::Ident(id) = &m.prop else {
+                    return None;
+                };
+                segments.push(id.sym.as_ref());
+                cur = &m.obj;
+            }
+            Expr::Ident(i) => {
+                segments.push(i.sym.as_ref());
+                segments.reverse();
+                if segments.first().copied() != Some("std") {
+                    return None;
+                }
+                return Some(segments);
+            }
+            _ => return None,
+        }
+    }
+}
+
+const STD_API_HINT: &str = "supported `std` paths: `std.console.*`, `std.math.*`, `std.number.*`, `std.io.*`, `std.http.*`, `std.json.*`, `std.uri.*`, `std.string.*` / `std.str.*`";
+
+fn build_call_args_irexpr(
+    c: &CallExpr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+) -> Result<Vec<IRExpr>, CompileError> {
+    let mut args = Vec::new();
+    for a in &c.args {
+        match a {
+            ExprOrSpread { spread: None, expr } => {
+                args.push(build_expr(expr, cm, path, iface, in_async)?);
+            }
+            _ => {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    c,
+                    "spread arguments are not supported",
+                ));
+            }
+        }
+    }
+    Ok(args)
+}
+
+fn build_read_file_text_ir(
+    c: &CallExpr,
+    type_args: &[TsType],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+    err_label: &str,
+) -> Result<IRExpr, CompileError> {
+    if !type_args.is_empty() {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} does not take type arguments"),
+        ));
+    }
+    if c.args.len() != 1 {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} expects exactly one argument (path: string)"),
+        ));
+    }
+    let a0 = match &c.args[0] {
+        ExprOrSpread { spread: None, expr } => expr,
+        _ => {
+            return Err(diag_spanned(
+                cm,
+                path,
+                c,
+                "spread arguments are not supported",
+            ));
+        }
+    };
+    let path_expr = build_expr(a0, cm, path, iface, in_async)?;
+    Ok(IRExpr::ReadFileText {
+        path: Box::new(path_expr),
+        span: c.span,
+    })
+}
+
+fn build_read_file_text_async_ir(
+    c: &CallExpr,
+    type_args: &[TsType],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+    err_label: &str,
+) -> Result<IRExpr, CompileError> {
+    if !type_args.is_empty() {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} does not take type arguments"),
+        ));
+    }
+    if c.args.len() != 1 {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} expects exactly one argument (path: string)"),
+        ));
+    }
+    let a0 = match &c.args[0] {
+        ExprOrSpread { spread: None, expr } => expr,
+        _ => {
+            return Err(diag_spanned(
+                cm,
+                path,
+                c,
+                "spread arguments are not supported",
+            ));
+        }
+    };
+    let path_expr = build_expr(a0, cm, path, iface, in_async)?;
+    Ok(IRExpr::ReadFileTextAsync {
+        path: Box::new(path_expr),
+        span: c.span,
+    })
+}
+
+fn build_fetch_text_ir(
+    c: &CallExpr,
+    type_args: &[TsType],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+    err_label: &str,
+) -> Result<IRExpr, CompileError> {
+    if !type_args.is_empty() {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} does not take type arguments"),
+        ));
+    }
+    if c.args.len() != 1 {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} expects exactly one argument (url: string)"),
+        ));
+    }
+    let a0 = match &c.args[0] {
+        ExprOrSpread { spread: None, expr } => expr,
+        _ => {
+            return Err(diag_spanned(
+                cm,
+                path,
+                c,
+                "spread arguments are not supported",
+            ));
+        }
+    };
+    let url = build_expr(a0, cm, path, iface, in_async)?;
+    Ok(IRExpr::FetchText {
+        url: Box::new(url),
+        span: c.span,
+    })
+}
+
+fn build_fetch_ir(
+    c: &CallExpr,
+    type_args: &[TsType],
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+    err_label: &str,
+) -> Result<IRExpr, CompileError> {
+    if !type_args.is_empty() {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} does not take type arguments"),
+        ));
+    }
+    if c.args.is_empty() || c.args.len() > 2 {
+        return Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("{err_label} expects one argument (url: string) or two (url, init object)"),
+        ));
+    }
+    let a0 = match &c.args[0] {
+        ExprOrSpread { spread: None, expr } => expr,
+        _ => {
+            return Err(diag_spanned(
+                cm,
+                path,
+                c,
+                "spread arguments are not supported",
+            ));
+        }
+    };
+    let url = build_expr(a0, cm, path, iface, in_async)?;
+    let init = if c.args.len() == 2 {
+        let a1 = match &c.args[1] {
+            ExprOrSpread { spread: None, expr } => expr,
+            _ => {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    c,
+                    "spread arguments are not supported",
+                ));
+            }
+        };
+        Some(build_fetch_init(a1, cm, path, iface, in_async)?)
+    } else {
+        None
+    };
+    Ok(IRExpr::Fetch {
+        url: Box::new(url),
+        init,
+        span: c.span,
+    })
+}
+
+fn resolve_math_builtin_kind(
+    c: &CallExpr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    method: &str,
+    label: &str,
+) -> Result<MathBuiltinKind, CompileError> {
+    match (method, c.args.len()) {
+        ("abs", 1) => Ok(MathBuiltinKind::Abs),
+        ("floor", 1) => Ok(MathBuiltinKind::Floor),
+        ("ceil", 1) => Ok(MathBuiltinKind::Ceil),
+        ("min", 2) => Ok(MathBuiltinKind::Min),
+        ("max", 2) => Ok(MathBuiltinKind::Max),
+        ("sign", 1) => Ok(MathBuiltinKind::Sign),
+        ("trunc", 1) => Ok(MathBuiltinKind::Trunc),
+        ("round", 1) => Ok(MathBuiltinKind::Round),
+        ("pow", 2) => Ok(MathBuiltinKind::Pow),
+        ("abs" | "floor" | "ceil" | "sign" | "trunc" | "round", _) => Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("this `{label}` method expects exactly 1 argument"),
+        )),
+        ("min" | "max" | "pow", _) => Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("`{label}.min`, `{label}.max`, and `{label}.pow` expect exactly 2 arguments"),
+        )),
+        _ => Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("unsupported `{label}` builtin (see README for supported methods)"),
+        )),
+    }
+}
+
+fn resolve_number_builtin_kind(
+    c: &CallExpr,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    method: &str,
+    label: &str,
+) -> Result<NumberBuiltinKind, CompileError> {
+    match (method, c.args.len()) {
+        ("parseInt", 1 | 2) => Ok(NumberBuiltinKind::ParseInt),
+        ("parseFloat", 1) => Ok(NumberBuiltinKind::ParseFloat),
+        ("parseInt", _) => Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("`{label}.parseInt` expects 1 or 2 arguments"),
+        )),
+        ("parseFloat", _) => Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("`{label}.parseFloat` expects exactly 1 argument"),
+        )),
+        _ => Err(diag_spanned(
+            cm,
+            path,
+            c,
+            &format!("only `{label}.parseInt` and `{label}.parseFloat` are supported"),
+        )),
+    }
+}
+
 fn build_arrow_expr(
     a: &swc_ecma_ast::ArrowExpr,
     cm: &Lrc<SourceMap>,
@@ -2081,157 +2393,40 @@ fn build_expr(
                 }
                 if let Expr::Ident(fname) = &**ce {
                     if fname.sym == "readFileText" {
-                        if !type_args.is_empty() {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`readFileText` does not take type arguments",
-                            ));
-                        }
-                        if c.args.len() != 1 {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`readFileText` expects exactly one argument (path: string)",
-                            ));
-                        }
-                        let a0 = match &c.args[0] {
-                            ExprOrSpread { spread: None, expr } => expr,
-                            _ => {
-                                return Err(diag_spanned(
-                                    cm,
-                                    path,
-                                    c,
-                                    "spread arguments are not supported",
-                                ));
-                            }
-                        };
-                        let path_expr = build_expr(a0, cm, path, iface, in_async)?;
-                        return Ok(IRExpr::ReadFileText {
-                            path: Box::new(path_expr),
-                            span: c.span,
-                        });
+                        return build_read_file_text_ir(
+                            c,
+                            &type_args,
+                            cm,
+                            path,
+                            iface,
+                            in_async,
+                            "`readFileText`",
+                        );
                     }
                     if fname.sym == "readFileTextAsync" {
-                        if !type_args.is_empty() {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`readFileTextAsync` does not take type arguments",
-                            ));
-                        }
-                        if c.args.len() != 1 {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`readFileTextAsync` expects exactly one argument (path: string)",
-                            ));
-                        }
-                        let a0 = match &c.args[0] {
-                            ExprOrSpread { spread: None, expr } => expr,
-                            _ => {
-                                return Err(diag_spanned(
-                                    cm,
-                                    path,
-                                    c,
-                                    "spread arguments are not supported",
-                                ));
-                            }
-                        };
-                        let path_expr = build_expr(a0, cm, path, iface, in_async)?;
-                        return Ok(IRExpr::ReadFileTextAsync {
-                            path: Box::new(path_expr),
-                            span: c.span,
-                        });
+                        return build_read_file_text_async_ir(
+                            c,
+                            &type_args,
+                            cm,
+                            path,
+                            iface,
+                            in_async,
+                            "`readFileTextAsync`",
+                        );
                     }
                     if fname.sym == "fetchText" {
-                        if !type_args.is_empty() {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`fetchText` does not take type arguments",
-                            ));
-                        }
-                        if c.args.len() != 1 {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`fetchText` expects exactly one argument (url: string)",
-                            ));
-                        }
-                        let a0 = match &c.args[0] {
-                            ExprOrSpread { spread: None, expr } => expr,
-                            _ => {
-                                return Err(diag_spanned(
-                                    cm,
-                                    path,
-                                    c,
-                                    "spread arguments are not supported",
-                                ));
-                            }
-                        };
-                        let url = build_expr(a0, cm, path, iface, in_async)?;
-                        return Ok(IRExpr::FetchText {
-                            url: Box::new(url),
-                            span: c.span,
-                        });
+                        return build_fetch_text_ir(
+                            c,
+                            &type_args,
+                            cm,
+                            path,
+                            iface,
+                            in_async,
+                            "`fetchText`",
+                        );
                     }
                     if fname.sym == "fetch" {
-                        if !type_args.is_empty() {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`fetch` does not take type arguments",
-                            ));
-                        }
-                        if c.args.is_empty() || c.args.len() > 2 {
-                            return Err(diag_spanned(
-                                cm,
-                                path,
-                                c,
-                                "`fetch` expects one argument (url: string) or two (url, init object)",
-                            ));
-                        }
-                        let a0 = match &c.args[0] {
-                            ExprOrSpread { spread: None, expr } => expr,
-                            _ => {
-                                return Err(diag_spanned(
-                                    cm,
-                                    path,
-                                    c,
-                                    "spread arguments are not supported",
-                                ));
-                            }
-                        };
-                        let url = build_expr(a0, cm, path, iface, in_async)?;
-                        let init = if c.args.len() == 2 {
-                            let a1 = match &c.args[1] {
-                                ExprOrSpread { spread: None, expr } => expr,
-                                _ => {
-                                    return Err(diag_spanned(
-                                        cm,
-                                        path,
-                                        c,
-                                        "spread arguments are not supported",
-                                    ));
-                                }
-                            };
-                            Some(build_fetch_init(a1, cm, path, iface, in_async)?)
-                        } else {
-                            None
-                        };
-                        return Ok(IRExpr::Fetch {
-                            url: Box::new(url),
-                            init,
-                            span: c.span,
-                        });
+                        return build_fetch_ir(c, &type_args, cm, path, iface, in_async, "`fetch`");
                     }
                     if matches!(
                         fname.sym.as_ref(),
@@ -2275,6 +2470,428 @@ fn build_expr(
                             args: vec![arg],
                             span: c.span,
                         });
+                    }
+                }
+                if let Some(chain) = collect_std_member_chain(&**ce) {
+                    if chain.len() != 3 {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            c,
+                            &format!(
+                                "invalid `std` call (expected `std.<namespace>.<name>(...)`); {STD_API_HINT}"
+                            ),
+                        ));
+                    }
+                    if !type_args.is_empty() {
+                        return Err(diag_spanned(
+                            cm,
+                            path,
+                            c,
+                            "`std.*` calls do not take type arguments",
+                        ));
+                    }
+                    let ns = chain[1];
+                    let method = chain[2];
+                    match ns {
+                        "json" => {
+                            let kind = match (method, c.args.len()) {
+                                ("stringify", 1) => JsonBuiltinKind::Stringify,
+                                ("parse", 1) => JsonBuiltinKind::Parse,
+                                ("stringify", _) => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "`std.json.stringify` expects exactly 1 argument",
+                                    ));
+                                }
+                                ("parse", _) => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "`std.json.parse` expects exactly 1 argument",
+                                    ));
+                                }
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "only `std.json.stringify` and `std.json.parse` are supported",
+                                    ));
+                                }
+                            };
+                            let mut args = Vec::new();
+                            for a in &c.args {
+                                match a {
+                                    ExprOrSpread { spread: None, expr } => {
+                                        args.push(build_expr(expr, cm, path, iface, in_async)?);
+                                    }
+                                    _ => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "spread arguments are not supported",
+                                        ));
+                                    }
+                                }
+                            }
+                            if kind == JsonBuiltinKind::Parse {
+                                match fold_json_parse_arg(args[0].clone()) {
+                                    Ok(JsonParseFold::Folded(e)) => return Ok(e),
+                                    Ok(JsonParseFold::NotStringLiteral) => {}
+                                    Err(msg) => {
+                                        return Err(diag_spanned(cm, path, c, &msg));
+                                    }
+                                }
+                            }
+                            return Ok(IRExpr::JsonBuiltin {
+                                kind,
+                                args,
+                                span: c.span,
+                                stringify_inferred_ty: None,
+                            });
+                        }
+                        "uri" => {
+                            if c.args.len() != 1 {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`std.uri.*` encode/decode helpers expect exactly one argument (string)",
+                                ));
+                            }
+                            let a0 = match &c.args[0] {
+                                ExprOrSpread { spread: None, expr } => expr,
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "spread arguments are not supported",
+                                    ));
+                                }
+                            };
+                            let arg = build_expr(a0, cm, path, iface, in_async)?;
+                            let kind = match method {
+                                "encodeComponent" | "encodeURIComponent" => {
+                                    UriBuiltinKind::EncodeComponent
+                                }
+                                "decodeComponent" | "decodeURIComponent" => {
+                                    UriBuiltinKind::DecodeComponent
+                                }
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "unsupported `std.uri` builtin (expected encodeComponent, decodeComponent, encodeURIComponent, or decodeURIComponent)",
+                                    ));
+                                }
+                            };
+                            return Ok(IRExpr::UriBuiltin {
+                                kind,
+                                args: vec![arg],
+                                span: c.span,
+                            });
+                        }
+                        "string" | "str" => {
+                            let Some(kind) = string_method_kind(method) else {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "unsupported `std.string` builtin",
+                                ));
+                            };
+                            if c.args.is_empty() {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "`std.string.*` expects receiver as first argument",
+                                ));
+                            }
+                            let argc_wo_recv = c.args.len() - 1;
+                            if !string_method_arity_matches(kind, argc_wo_recv) {
+                                return Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "wrong argument count for this `std.string` method",
+                                ));
+                            }
+                            let receiver = match &c.args[0] {
+                                ExprOrSpread { spread: None, expr } => {
+                                    Box::new(build_expr(expr, cm, path, iface, in_async)?)
+                                }
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "spread arguments are not supported",
+                                    ));
+                                }
+                            };
+                            let mut args = Vec::new();
+                            for a in c.args.iter().skip(1) {
+                                match a {
+                                    ExprOrSpread { spread: None, expr } => {
+                                        args.push(build_expr(expr, cm, path, iface, in_async)?);
+                                    }
+                                    _ => {
+                                        return Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "spread arguments are not supported",
+                                        ));
+                                    }
+                                }
+                            }
+                            return Ok(IRExpr::StringMethodBuiltin {
+                                kind,
+                                receiver,
+                                args,
+                                span: c.span,
+                            });
+                        }
+                        "console" => {
+                            let stderr = match method {
+                                "log" => false,
+                                "error" | "debug" => true,
+                                _ => {
+                                    return Err(diag_spanned(
+                                        cm,
+                                        path,
+                                        c,
+                                        "only `std.console.log`, `std.console.error`, and `std.console.debug` are supported",
+                                    ));
+                                }
+                            };
+                            let args = build_call_args_irexpr(c, cm, path, iface, in_async)?;
+                            return Ok(IRExpr::BuiltinLog {
+                                args,
+                                stderr,
+                                span: c.span,
+                            });
+                        }
+                        "math" => {
+                            let kind = resolve_math_builtin_kind(c, cm, path, method, "std.math")?;
+                            let args = build_call_args_irexpr(c, cm, path, iface, in_async)?;
+                            return Ok(IRExpr::MathBuiltin {
+                                kind,
+                                args,
+                                span: c.span,
+                            });
+                        }
+                        "number" => {
+                            let kind =
+                                resolve_number_builtin_kind(c, cm, path, method, "std.number")?;
+                            let args = build_call_args_irexpr(c, cm, path, iface, in_async)?;
+                            return Ok(IRExpr::NumberBuiltin {
+                                kind,
+                                args,
+                                span: c.span,
+                            });
+                        }
+                        "io" => {
+                            return match method {
+                                "readLine" => {
+                                    if !c.args.is_empty() {
+                                        Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`std.io.readLine` expects no arguments",
+                                        ))
+                                    } else {
+                                        Ok(IRExpr::ReadStdinLine { span: c.span })
+                                    }
+                                }
+                                "readFileText" => build_read_file_text_ir(
+                                    c,
+                                    &type_args,
+                                    cm,
+                                    path,
+                                    iface,
+                                    in_async,
+                                    "`std.io.readFileText`",
+                                ),
+                                "readFileTextAsync" => build_read_file_text_async_ir(
+                                    c,
+                                    &type_args,
+                                    cm,
+                                    path,
+                                    iface,
+                                    in_async,
+                                    "`std.io.readFileTextAsync`",
+                                ),
+                                _ => Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "unsupported `std.io` builtin (expected readLine, readFileText, or readFileTextAsync)",
+                                )),
+                            };
+                        }
+                        "http" => {
+                            return match method {
+                                "fetchText" => build_fetch_text_ir(
+                                    c,
+                                    &type_args,
+                                    cm,
+                                    path,
+                                    iface,
+                                    in_async,
+                                    "`std.http.fetchText`",
+                                ),
+                                "fetch" => build_fetch_ir(
+                                    c,
+                                    &type_args,
+                                    cm,
+                                    path,
+                                    iface,
+                                    in_async,
+                                    "`std.http.fetch`",
+                                ),
+                                "text" => {
+                                    if c.args.len() != 1 {
+                                        Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`std.http.text` expects exactly one argument (response)",
+                                        ))
+                                    } else {
+                                        let a0 = match &c.args[0] {
+                                            ExprOrSpread { spread: None, expr } => expr,
+                                            _ => {
+                                                return Err(diag_spanned(
+                                                    cm,
+                                                    path,
+                                                    c,
+                                                    "spread arguments are not supported",
+                                                ));
+                                            }
+                                        };
+                                        let receiver =
+                                            Box::new(build_expr(a0, cm, path, iface, in_async)?);
+                                        Ok(IRExpr::HttpResponseMethodBuiltin {
+                                            kind: HttpResponseMethodKind::Text,
+                                            receiver,
+                                            span: c.span,
+                                        })
+                                    }
+                                }
+                                "json" => {
+                                    if c.args.len() != 1 {
+                                        Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`std.http.json` expects exactly one argument (response)",
+                                        ))
+                                    } else {
+                                        let a0 = match &c.args[0] {
+                                            ExprOrSpread { spread: None, expr } => expr,
+                                            _ => {
+                                                return Err(diag_spanned(
+                                                    cm,
+                                                    path,
+                                                    c,
+                                                    "spread arguments are not supported",
+                                                ));
+                                            }
+                                        };
+                                        let receiver =
+                                            Box::new(build_expr(a0, cm, path, iface, in_async)?);
+                                        Ok(IRExpr::HttpResponseMethodBuiltin {
+                                            kind: HttpResponseMethodKind::Json,
+                                            receiver,
+                                            span: c.span,
+                                        })
+                                    }
+                                }
+                                "bodyGetReader" => {
+                                    if c.args.len() != 1 {
+                                        Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`std.http.bodyGetReader` expects exactly one argument (response)",
+                                        ))
+                                    } else {
+                                        let a0 = match &c.args[0] {
+                                            ExprOrSpread { spread: None, expr } => expr,
+                                            _ => {
+                                                return Err(diag_spanned(
+                                                    cm,
+                                                    path,
+                                                    c,
+                                                    "spread arguments are not supported",
+                                                ));
+                                            }
+                                        };
+                                        let response =
+                                            Box::new(build_expr(a0, cm, path, iface, in_async)?);
+                                        Ok(IRExpr::HttpResponseBodyGetReader {
+                                            response,
+                                            span: c.span,
+                                            stream_slot: None,
+                                        })
+                                    }
+                                }
+                                "read" => {
+                                    if c.args.len() != 1 {
+                                        Err(diag_spanned(
+                                            cm,
+                                            path,
+                                            c,
+                                            "`std.http.read` expects exactly one argument (reader)",
+                                        ))
+                                    } else {
+                                        let a0 = match &c.args[0] {
+                                            ExprOrSpread { spread: None, expr } => expr,
+                                            _ => {
+                                                return Err(diag_spanned(
+                                                    cm,
+                                                    path,
+                                                    c,
+                                                    "spread arguments are not supported",
+                                                ));
+                                            }
+                                        };
+                                        match &**a0 {
+                                            Expr::Ident(rid) => Ok(IRExpr::ReaderRead {
+                                                reader_name: rid.sym.to_string(),
+                                                span: c.span,
+                                                reader_slot: None,
+                                            }),
+                                            _ => Err(diag_spanned(
+                                                cm,
+                                                path,
+                                                c,
+                                                "`std.http.read(reader)` requires `reader` to be a simple identifier",
+                                            )),
+                                        }
+                                    }
+                                }
+                                _ => Err(diag_spanned(
+                                    cm,
+                                    path,
+                                    c,
+                                    "unsupported `std.http` builtin (expected fetch, fetchText, text, json, bodyGetReader, or read)",
+                                )),
+                            };
+                        }
+                        _ => {
+                            return Err(diag_spanned(cm, path, c, STD_API_HINT));
+                        }
                     }
                 }
                 if let Expr::Member(m) = &**ce {
@@ -2342,22 +2959,7 @@ fn build_expr(
                                         ));
                                     }
                                 };
-                                let mut args = Vec::new();
-                                for a in &c.args {
-                                    match a {
-                                        ExprOrSpread { spread: None, expr } => {
-                                            args.push(build_expr(expr, cm, path, iface, in_async)?);
-                                        }
-                                        _ => {
-                                            return Err(diag_spanned(
-                                                cm,
-                                                path,
-                                                c,
-                                                "spread arguments are not supported",
-                                            ));
-                                        }
-                                    }
-                                }
+                                let args = build_call_args_irexpr(c, cm, path, iface, in_async)?;
                                 return Ok(IRExpr::BuiltinLog {
                                     args,
                                     stderr,
@@ -2367,57 +2969,14 @@ fn build_expr(
                         }
                         if obj.sym == "Math" {
                             if let MemberProp::Ident(prop) = &m.prop {
-                                let kind = match (prop.sym.as_ref(), c.args.len()) {
-                                    ("abs", 1) => MathBuiltinKind::Abs,
-                                    ("floor", 1) => MathBuiltinKind::Floor,
-                                    ("ceil", 1) => MathBuiltinKind::Ceil,
-                                    ("min", 2) => MathBuiltinKind::Min,
-                                    ("max", 2) => MathBuiltinKind::Max,
-                                    ("sign", 1) => MathBuiltinKind::Sign,
-                                    ("trunc", 1) => MathBuiltinKind::Trunc,
-                                    ("round", 1) => MathBuiltinKind::Round,
-                                    ("pow", 2) => MathBuiltinKind::Pow,
-                                    ("abs" | "floor" | "ceil" | "sign" | "trunc" | "round", _) => {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "this `Math` method expects exactly 1 argument",
-                                        ));
-                                    }
-                                    ("min" | "max" | "pow", _) => {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "`Math.min`, `Math.max`, and `Math.pow` expect exactly 2 arguments",
-                                        ));
-                                    }
-                                    _ => {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "unsupported `Math` builtin (see README for supported methods)",
-                                        ));
-                                    }
-                                };
-                                let mut args = Vec::new();
-                                for a in &c.args {
-                                    match a {
-                                        ExprOrSpread { spread: None, expr } => {
-                                            args.push(build_expr(expr, cm, path, iface, in_async)?);
-                                        }
-                                        _ => {
-                                            return Err(diag_spanned(
-                                                cm,
-                                                path,
-                                                c,
-                                                "spread arguments are not supported",
-                                            ));
-                                        }
-                                    }
-                                }
+                                let kind = resolve_math_builtin_kind(
+                                    c,
+                                    cm,
+                                    path,
+                                    prop.sym.as_ref(),
+                                    "Math",
+                                )?;
+                                let args = build_call_args_irexpr(c, cm, path, iface, in_async)?;
                                 return Ok(IRExpr::MathBuiltin {
                                     kind,
                                     args,
@@ -2427,50 +2986,14 @@ fn build_expr(
                         }
                         if obj.sym == "Number" {
                             if let MemberProp::Ident(prop) = &m.prop {
-                                let kind = match (prop.sym.as_ref(), c.args.len()) {
-                                    ("parseInt", 1 | 2) => NumberBuiltinKind::ParseInt,
-                                    ("parseFloat", 1) => NumberBuiltinKind::ParseFloat,
-                                    ("parseInt", _) => {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "`Number.parseInt` expects 1 or 2 arguments",
-                                        ));
-                                    }
-                                    ("parseFloat", _) => {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "`Number.parseFloat` expects exactly 1 argument",
-                                        ));
-                                    }
-                                    _ => {
-                                        return Err(diag_spanned(
-                                            cm,
-                                            path,
-                                            c,
-                                            "only `Number.parseInt` and `Number.parseFloat` are supported",
-                                        ));
-                                    }
-                                };
-                                let mut args = Vec::new();
-                                for a in &c.args {
-                                    match a {
-                                        ExprOrSpread { spread: None, expr } => {
-                                            args.push(build_expr(expr, cm, path, iface, in_async)?);
-                                        }
-                                        _ => {
-                                            return Err(diag_spanned(
-                                                cm,
-                                                path,
-                                                c,
-                                                "spread arguments are not supported",
-                                            ));
-                                        }
-                                    }
-                                }
+                                let kind = resolve_number_builtin_kind(
+                                    c,
+                                    cm,
+                                    path,
+                                    prop.sym.as_ref(),
+                                    "Number",
+                                )?;
+                                let args = build_call_args_irexpr(c, cm, path, iface, in_async)?;
                                 return Ok(IRExpr::NumberBuiltin {
                                     kind,
                                     args,
@@ -2771,6 +3294,7 @@ fn build_expr(
 
 fn string_method_kind(name: &str) -> Option<StringMethodKind> {
     match name {
+        "length" => Some(StringMethodKind::Length),
         "charAt" => Some(StringMethodKind::CharAt),
         "charCodeAt" => Some(StringMethodKind::CharCodeAt),
         "slice" => Some(StringMethodKind::Slice),
@@ -2783,6 +3307,7 @@ fn string_method_kind(name: &str) -> Option<StringMethodKind> {
 
 fn string_method_arity_matches(kind: StringMethodKind, argc: usize) -> bool {
     match kind {
+        StringMethodKind::Length => argc == 0,
         StringMethodKind::CharAt | StringMethodKind::CharCodeAt => argc == 1,
         StringMethodKind::Slice
         | StringMethodKind::Substring

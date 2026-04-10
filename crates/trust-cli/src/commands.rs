@@ -6,11 +6,12 @@ use toml::Value;
 use trust_driver::{
     build_rust_and_copy_with_options, build_rust_to_executable_with_options, RustBuildOptions,
 };
-use trust_hir::{build_checked_module, emit_rust_with_options, CodegenOptions};
+use trust_hir::{build_checked_module, emit_rust_with_options, CodegenOptions, StdlibMode};
 use trust_lower::{check_module_graph, lower_module_graph_with_options};
 use trust_parser::validate_imports;
 
 use crate::add_spec::{parse_add_spec, ParsedAddSpec};
+use crate::cli_args::StdlibModeArg;
 use crate::graph_loader::{ensure_entry_nonempty, load_module_graph};
 use crate::incremental::{compile_graph_incremental, resolve_incremental_cache_root};
 
@@ -35,6 +36,13 @@ fn default_exec_output_path(entry: &Path) -> Result<PathBuf, String> {
     #[cfg(not(windows))]
     {
         Ok(PathBuf::from(stem))
+    }
+}
+
+fn map_stdlib_mode(mode: StdlibModeArg) -> StdlibMode {
+    match mode {
+        StdlibModeArg::Legacy => StdlibMode::Legacy,
+        StdlibModeArg::TrustStdlib => StdlibMode::TrustStdlib,
     }
 }
 
@@ -372,6 +380,7 @@ pub(crate) fn cmd_compile(
     exec: bool,
     span_comments: bool,
     ts_source_comments: bool,
+    stdlib_mode: StdlibModeArg,
     link_trust_rt: bool,
     release: bool,
     emit_ir: bool,
@@ -396,6 +405,7 @@ pub(crate) fn cmd_compile(
     let codegen = CodegenOptions {
         span_comments,
         emit_ts_source_comments: ts_source_comments,
+        stdlib_mode: map_stdlib_mode(stdlib_mode),
     };
 
     let (rust, warnings, module_for_emit_ir) = if let Some(dir) = incremental {
@@ -450,6 +460,7 @@ pub(crate) fn cmd_run(
     link_trust_rt: bool,
     release: bool,
     incremental: Option<&PathBuf>,
+    stdlib_mode: StdlibModeArg,
     quiet: bool,
 ) -> RunOutcome {
     let graph = match load_module_graph(project, inputs) {
@@ -462,7 +473,10 @@ pub(crate) fn cmd_run(
     if let Err(e) = validate_imports(&graph) {
         return RunOutcome::TrustErr(e.to_string());
     }
-    let codegen = CodegenOptions::default();
+    let codegen = CodegenOptions {
+        stdlib_mode: map_stdlib_mode(stdlib_mode),
+        ..Default::default()
+    };
     let (rust, warnings) = match incremental {
         Some(dir) => {
             let cache_root = resolve_incremental_cache_root(dir);

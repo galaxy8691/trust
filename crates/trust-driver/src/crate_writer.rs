@@ -8,8 +8,35 @@ pub(crate) fn write_minimal_crate(
     rust_source: &str,
     opts: &RustBuildOptions,
 ) -> Result<(), DriverError> {
+    let stdlib_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../trust-stdlib");
+    let stdlib_canon = stdlib_path.canonicalize().map_err(|_| {
+        DriverError::TrustStdlibPathResolveFailed(stdlib_path.display().to_string())
+    })?;
+    let stdlib_toml = stdlib_canon.to_string_lossy().replace('\\', "/");
+    let mut stdlib_features: Vec<&str> = Vec::new();
+    if rust_source.contains("trust_stdlib::io::read_file_text_async") {
+        stdlib_features.push("async-io");
+    }
+    if rust_source.contains("trust_stdlib::http::") {
+        stdlib_features.push("http");
+    }
+    let trust_stdlib_dep = if stdlib_features.is_empty() {
+        format!("trust_stdlib = {{ path = \"{stdlib_toml}\", default-features = false }}\n")
+    } else {
+        let joined = stdlib_features
+            .iter()
+            .map(|f| format!("\"{f}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "trust_stdlib = {{ path = \"{stdlib_toml}\", default-features = false, features = [{joined}] }}\n"
+        )
+    };
+
     let needs_async = rust_source.contains("#[tokio::main]");
     let needs_futures_util = rust_source.contains("futures_util");
+    // URI / dynamic JSON number parsing live in `trust_stdlib`; only inject `serde_json` when the
+    // emitted Rust still mentions `serde_json::` (e.g. object literals, `JSON.stringify` on objects).
     let serde_json_dep = if rust_source.contains("serde_json::") {
         "serde_json = \"1.0\"\n"
     } else {
@@ -35,9 +62,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
     };
     let trust_deps = opts.trust_dependency_lines.trim();
     let trust_block = if trust_deps.is_empty() {
-        String::new()
+        trust_stdlib_dep.clone()
     } else {
-        format!("{trust_deps}\n")
+        format!("{trust_stdlib_dep}{trust_deps}\n")
     };
 
     let cargo_toml = if opts.link_trust_rt {

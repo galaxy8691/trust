@@ -166,7 +166,7 @@
 
 - [x] **字符串操作**：`string.length` 为 **UTF-16 码元数**（`encode_utf16().count()`）；`number[].length` → `Vec::len`；对象数字字段名为 `length` 时走 `HashMap::get`（见 [`MemberLengthDispatch`](crates/trust-hir/src/ir.rs)）。（验收：`trust-lower` `codegen_52_string_length_utf16`、`codegen_52_object_length_field_uses_get`；`trust-cli` 等；`cargo test --workspace`。）**`string` 下标 `s[i]`**：UTF-16 索引 → 单码元 `string`（[`IndexKind::StringUtf16`](crates/trust-hir/src/ir.rs)；`stdlib_hir_ok.ts`）。
 - [x] **数学**：`Math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` 等在 codegen 上对 **`f64`** 运算（[`MathBuiltinKind`](crates/trust-hir/src/ir.rs)；[`build.rs`](crates/trust-hir/src/build.rs)；[`emit_expr`](crates/trust-hir/src/codegen.rs)；与 README 矩阵「`Math.*` builtins」一致）。（验收：`trust-lower` `codegen_52_math_builtins`；`trust-cli` `run_math_builtin_prints_sum`、`run_stdlib_hir_ok_prints_expected`；`cargo test --workspace`。）
-- [x] **HIR 标准库（可不链 `trust_rt`）**：`Number.parseInt` / `parseFloat`；**`JSON.stringify` / `JSON.parse`**：**字符串字面量**实参在构建期用 **`serde_json`** 折叠为 trust 闭合 IR；**动态**字符串与 `await response.json()` 等同，经 **`serde_json::from_str`** 解析为 `f64` 等 trust 子集（见 §14「HIR stdlib / JSON」）；`String` 方法 `charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`；全局 `readLine()` 内联 `std::io`（`async` 函数体中拒绝）。（验收：`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`；`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`。）
+- [x] **HIR 标准库（可不链 `trust_rt`）**：`Number.parseInt` / `parseFloat`；`String` 方法 `charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`；全局 `readLine()` 内联 `std::io`（`async` 函数体中拒绝）。默认实现已切到 **`trust_stdlib`** 门面（`json` / `uri` / `string`），并保留 `--stdlib-mode legacy` 回退旧内联 helper / 直接 `serde_json` + `urlencoding`。（验收：`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`；`compile_stdlib_hir_ok_uses_trust_stdlib_calls`。）
 - [x] **I/O**：[`trust_rt::read_stdin_line`](crates/trust_rt/src/lib.rs) 仍为可选占位；**同步** `readLine()` 已在生成 Rust 中实现且**无需**链接 `trust_rt`；driver 临时 crate 默认仍不依赖 `trust_rt`（除非 `--link-trust-rt`）。
 
 ---
@@ -351,7 +351,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 - [x] **任意控制流中的 `await`**（不限于当前 async MVP 体约束）。（已移除 [`check_async_mvp_stmts`](crates/trust-hir/src/sem.rs)；[`infer_expr_mut`](crates/trust-hir/src/sem.rs) 中 `Await` 接受任意推断为 `Promise<T>` 的操作数；[`async_control_flow_ok.ts`](crates/trust-cli/tests/fixtures/async_control_flow_ok.ts)、`compile_async_control_flow_if_while_await_ok`。）
 - [x] **`Promise.all([...])`**（仅数组字面量；同质 `Promise<number>` / `Promise<string>` / `fetch` 的 `Promise<Response>`）。见 [`IRExpr::PromiseAll`](crates/trust-hir/src/ir.rs)、[`promise_all_fetch_ok.ts`](crates/trust-cli/tests/fixtures/promise_all_fetch_ok.ts)、`compile_promise_all_fetch_alias_ok`。
-- [x] **`fetchText`** → `__trust_fetch_text`；**`fetch`** → `__trust_fetch`（见上 §1.3）。
+- [x] **`fetchText`** → `trust_stdlib::http::fetch_text`；**`fetch`** → `trust_stdlib::http::fetch` + `FetchInit`（见 [`crates/trust-stdlib/src/http.rs`](crates/trust-stdlib/src/http.rs)）。
 - [x] **流式响应 body（M3）**：`response.body.getReader()` / `await reader.read()` → `StreamReadResult`；与 `.text()` / `.json()` 互斥；[`fetch_stream_ok.ts`](crates/trust-cli/tests/fixtures/fetch_stream_ok.ts)、`compile_fetch_stream_ok`。
 - [x] **拒绝 `.then`**（明确诊断，建议用 `async`/`await`）。见 [`promise_then_fail.ts`](crates/trust-cli/tests/fixtures/promise_then_fail.ts)、`compile_promise_then_fails`。
 - [x] **TLS / HTTP 说明（非「与 Node 完全一致」）**：临时 crate 使用 **reqwest** + **rustls-tls**；**TLS 1.2+** 与 **HTTP/2**（ALPN 协商成功时）由该栈提供；**根证书、cipher、HTTP/2 细节不保证与某一 Node 或浏览器版本逐字节一致**。**仍为 backlog**：完整 **WHATWG `fetch`**（浏览器级 `ReadableStream`、`Request`/`Headers` 对象、duplex、在非浏览器宿主下的 CORS 等）；trust 子集已支持 **`getReader`/`read` 分块读 body**（见上条）。
@@ -361,7 +361,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 - [x] **可选调用** `f?.()`；**`??` / `?.` 的静态收窄**（可判定；§3.3）。已实现：`OptionalCall` / `OptionalMethodCall`、`build_opt_chain_call_expr`；`optional_call_ok.ts`、`optional_chain_fail.ts`；`NullishCoalesce` 对同族 `Union` 去空值合并。**完整** discriminated 收窄仍属后续。
 - [x] **链式调用** `f().g()`（一层）。`chain_call_ok.ts`，`run_chain_call_ok_prints_six`；更一般实例方法类型仍见 §1.3。
 - [x] **数值模型**：全局 `number` → Rust **`f64`**（`IRExpr::Number(f64)`、codegen）；下标等仍 `as i32`。与旧 `i32` 截断不兼容；见 README。
-- [x] **HIR 标准库 / JSON / 字符串**：`JSON.parse` 对**字符串字面量**在构建期用 `serde_json` 折叠为 trust 闭合 IR（`number` / `boolean` / `string` / `null` / 同质 `number[]` \| `string[]` / 扁平 `{ k: number }`）；**非常量**实参仍为 JSON **number** 文档 → `f64`（`serde_json::from_str`，与 `await response.json()` 一致）。全局 **`encodeURIComponent`** / **`decodeURIComponent`** → `urlencoding`。生成 crate 按需注入 `serde_json` / `urlencoding`。见 `json_uri_trust_ok.ts`、`json_parse_hetero_array_fail.ts` 与对应 `run_` / `compile_` 测试。
+- [x] **HIR 标准库 / JSON / 字符串**：`JSON.parse` 对**字符串字面量**在构建期用 `serde_json` 折叠为 trust 闭合 IR；**非常量**实参仍为 JSON **number** 文档 → `f64`（`trust_stdlib::json::parse_number`，与 `await response.json()` 一致）。全局 **`encodeURIComponent`** / **`decodeURIComponent`** 经 `trust_stdlib::uri`。生成 crate 默认注入 `trust_stdlib`；生成代码若含 `serde_json::`（对象字面量 / 对象 `JSON.stringify`）则仍写入 `serde_json` 依赖。见 `json_uri_trust_ok.ts`、`json_parse_hetero_array_fail.ts` 与对应 `run_` / `compile_` 测试。
 
 ### Trust.toml / Rust extern（crates.io）
 

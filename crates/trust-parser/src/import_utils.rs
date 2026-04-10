@@ -10,6 +10,7 @@ use crate::ParseError;
 pub enum ModuleSpecifierResolution {
     Relative(PathBuf),
     RustCrate(String),
+    BuiltinStd,
 }
 
 /// 解析 `import ... from "…"`：相对路径，或 `trust` 中 `[dependencies]` 的键名。
@@ -29,6 +30,9 @@ pub fn resolve_module_specifier(
         return Ok(ModuleSpecifierResolution::Relative(
             resolve_relative_ts_path(file, &imp.src)?,
         ));
+    }
+    if raw == "std" {
+        return Ok(ModuleSpecifierResolution::BuiltinStd);
     }
     if let Some(t) = trust {
         if t.has_dependency(raw) {
@@ -64,6 +68,9 @@ pub(crate) fn resolve_supported_import_path(
         ModuleSpecifierResolution::RustCrate(name) => Err(ParseError::Message(format!(
             "Rust crate import `{name}` requires a Trust.toml next to the project; use `trust` driver path that loads Trust.toml"
         ))),
+        ModuleSpecifierResolution::BuiltinStd => Err(ParseError::Message(
+            "builtin std import is virtual and has no filesystem path".to_string(),
+        )),
     }
 }
 

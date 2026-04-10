@@ -10,7 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- (none yet)
+- Added new workspace crate `trust_stdlib` as the default stdlib facade for generated Rust (`json`, `uri`, `string` helpers).
+- Added CLI compatibility switch `--stdlib-mode trust_stdlib|legacy` on `compile` and `run` for migration fallback.
+- Driver now injects `trust_stdlib` dependency by default in generated temporary `Cargo.toml`.
 
 ## [0.1.0] - 2026-04-08
 

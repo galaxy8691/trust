@@ -364,6 +364,8 @@ pub enum UriBuiltinKind {
 /// `String.prototype` 内建子集（UTF-16 码元语义与 `length` / `charCodeAt` 一致）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StringMethodKind {
+    /// UTF-16 码元长度，与 `string.length` 一致。
+    Length,
     CharAt,
     CharCodeAt,
     Slice,

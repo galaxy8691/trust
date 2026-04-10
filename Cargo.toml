@@ -6,6 +6,7 @@ members = [
     "crates/trust-lower",
     "crates/trust-driver",
     "crates/trust-manifest",
+    "crates/trust-stdlib",
     "crates/trust_rt",
     "examples/crates/trust_orm_facade",
     "examples/crates/trust_ffi_facade",

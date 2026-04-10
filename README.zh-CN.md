@@ -68,6 +68,19 @@ trust run --project tsconfig.json
 
 当前内建/标准化可用 API：
 
+默认实现模式为 `trust_stdlib`（稳定门面 crate）。**HTTP**（`fetch` / `fetchText`）、**IO**（`readLine`、`readFileText`、异步读）、**console**、**Math** / **Number**、**JSON** / **URI** / **string** 等运行时逻辑集中在 [`crates/trust-stdlib`](crates/trust-stdlib)，生成代码以 `trust_stdlib::…` 调用为主。生成的 `Cargo.toml` 对 `trust_stdlib` 使用 **`default-features = false`**，仅在用到 **`fetch*`** 或 **`readFileTextAsync`** 时启用 Cargo 特性 **`http`** / **`async-io`**，同步程序不再为 stdlib 拉 **`reqwest` / `tokio`**，可显著加快 `trust run`、`compile --exec` 与 e2e。CLI 仍保留 `--stdlib-mode legacy`；**与默认模式 lowering 一致**（无单独内联 stdlib 实现）。
+
+**`import std from "std"`**（虚拟模块 `"std"` 仅允许这种默认导入）将下列能力收拢到统一命名空间；**下文全局写法仍然可用。**
+
+| 分区 | `std.*` 形态（三段调用 `std.<ns>.<name>(...)`） |
+|------|-----------------------------------------------|
+| Console | `std.console.log` / `error` / `debug` |
+| String | `std.string.*` 或 `std.str.*`：`length`、`charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`（**接收者为第一个实参**）；值的 `.length` / `s[i]` 仍为 UTF-16 |
+| Number / Math | `std.number.parseInt` / `parseFloat`；`std.math.abs` / `min` / `max` / `floor` / `ceil` / `sign` / `trunc` / `round` / `pow` |
+| JSON / URI | `std.json.stringify` / `parse`；`std.uri.encodeComponent` / `decodeComponent` / `encodeURIComponent` / `decodeURIComponent` |
+| IO | `std.io.readLine`、`readFileText`、`readFileTextAsync` |
+| HTTP | `std.http.fetch`、`fetchText`；`std.http.text(response)` / `json(response)`；`std.http.bodyGetReader(response)`；`std.http.read(reader)` — **`reader` 须为简单标识符**，与 `await reader.read()` 相同限制 |
+
 - Console：`console.log`、`console.error`、`console.debug`
 - String：`.length`、`charAt`、`charCodeAt`、`slice`、`substring`、`indexOf`、`includes`、UTF-16 下标
 - Number/Math：`Number.parseInt`、`Number.parseFloat`、`Math.abs/min/max/floor/ceil/sign/trunc/round/pow`
@@ -216,15 +229,15 @@ flowchart LR
 | `void` 函数 | 支持 | 不要求 `return` 路径检查 |
 | `+ - * /`、比较、`!`、一元 `-` | 支持 | 字符串仅 `+` 拼接；`number` 在 Rust 侧为 **`f64`**；见下文 §4.1 |
 | `Math.*` 内建 | 部分支持 | `abs`、`min`、`max`、`floor`、`ceil`、`sign`、`trunc`、`round`、`pow`（`f64`；`pow` 非负指数）；见 `math_builtin.ts`、`stdlib_hir_ok.ts` |
-| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`（`string` / `number` / `boolean` / trust **对象**形状）；`JSON.parse`（字面量折叠为 trust 闭合形状，含嵌套纯 number 对象；非常量仍为 JSON number 文档 → `f64`，`serde_json`）；`encodeURIComponent` / `decodeURIComponent`（`urlencoding`）；`charAt` 等（UTF-16）；`readLine()`；`readFileText(path)`（同步文本读取，UTF-8）；见 `stdlib_hir_ok.ts`、`json_uri_trust_ok.ts` |
-| `console.log` / `console.error` / `console.debug` | 支持 | `log` → `println!`；`error` / `debug` → `eprintln!`；多参数均为 `"{}"` **空格分隔**（与 §4.1 一致） |
+| `Number.*` / `JSON.*` / `String` 方法 / `readLine` | 部分支持 | `Number.parseInt` / `parseFloat` → **`f64`**；`JSON.stringify`（`string` / `number` / `boolean` / trust **对象**形状）；`JSON.parse`（字面量折叠为 trust 闭合形状，含嵌套纯 number 对象；非常量仍为 JSON number 文档 → `f64`，经 `trust_stdlib::json::parse_number`）；`encodeURIComponent` / `decodeURIComponent`（`trust_stdlib::uri`）；`charAt` 等（UTF-16，`trust_stdlib::string`）；`readLine()` / `readFileText` / `readFileTextAsync`（`trust_stdlib::io`）；见 `stdlib_hir_ok.ts`、`json_uri_trust_ok.ts` |
+| `console.log` / `console.error` / `console.debug` | 支持 | 经 `trust_stdlib::console::log_joined`（`stderr=false` / `true`）；多参数空格拼接（与 §4.1 一致） |
 | 字面量类型 | 部分支持 | `42`、`"a"`、`true` 等类型位置；向 `number`/`string`/`boolean` 拓宽；见 `literal_type_ok.ts`；`bigint`/模板字面量类型位置拒绝 |
 | 联合类型 `A \| B` | 部分支持 | 嵌套 `|` 扁平化、排序去重；成员须**映射到同一 Rust 类型**（如均为 `number` 字面量或 `number` 与字面量）；`number \| string` 等无法在单一 Rust 类型上 codegen 时会报错；**交集** `A & B` 拒绝；条件位置须为单族联合；见 `union_*`、`intersection_type_fail.ts` |
 | `interface`（受限） | 部分支持 | 顶层 `interface` / `export interface`；声明体为嵌套/可选 `ObjectNum` 字段（**单编译单元**）；类型位置用 `Point` 形式引用；**不**从依赖模块导入接口/类型**名**；对象类型上**无**可调用的方法成员类型（`obj.m()` 仍靠全局函数脱糖）；`extends`、泛型仍拒绝；见 `interface_ok.ts`、`nested_object_ok.ts`、`export_interface_ok.ts`、负例 `interface_extends_fail.ts`、`interface_generic_fail.ts` |
 | `type` 别名（受限） | 部分支持 | 顶层 `type Id = T` / `export type`；与 `interface` **共用**同一张具名表（[`collect_named_types_with_errors`](crates/trust-hir/src/build/build_types.rs)），按**出现顺序**解析右侧 `T`；可与 `interface` 交错；重复名（含与 `interface` 同名）拒绝；泛型 `type` 拒绝；见 `type_alias_ok.ts`、`type_alias_to_interface_ok.ts`、`export_type_alias_ok.ts`、负例 `type_alias_generic_fail.ts`、`type_alias_dup_fail.ts` |
 | 泛型 / 类型实参 | 部分支持 | 单态化：可写显式 `f<number>(x)`，或在实参类型可合成时省略（字面量、已注解的 `let`/参数）；不可推、冲突或多处错误会分别报错；`obj.m` 脱糖后的泛型全局函数同样推断；Rust 侧符号为 `name__` + 16 位十六进制指纹 |
 | 高阶函数 | 部分支持 | 函数类型与箭头闭包（`(number) => number` → `(f64) -> f64`）；变量调用 `f(...)` 等 |
-| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`；**`readFileTextAsync(path)`** → `Promise<string>`（必须 `await`）；**`fetch(url, init?)`** → `Promise<Response>`（`status` / `ok` / `await .text()` / `await .json()` JSON number → `f64`，`serde_json`）；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定，**不保证**与某一 Node 版本完全一致；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
+| `async` / `await` / `Promise` / `fetch` / `fetchText` | 部分支持 | **`fetchText(url)`** → `Promise<string>`（`trust_stdlib::http::fetch_text`）；**`readFileTextAsync(path)`** → `Promise<string>`（`trust_stdlib::io::read_file_text_async`，须 `await`）；**`fetch(url, init?)`** → `Promise<Response>`（`trust_stdlib::http::fetch` + `FetchInit`；`status` / `ok` / `await .text()` / `await .json()` JSON number → `f64`，`serde_json`）；流式 **`getReader`/`read`** 仍在 codegen 中生成；**`init`** 可为字面量 `method`、`headers`（值为字符串字面量）、可选 `body`；**`Promise.all`** 同质 `number` / `string` / `fetch` 的 Response（顺序 `.await`）；**`.then`** 拒绝；TLS 为 **rustls**；HTTP/2 由协商决定；完整 WHATWG `fetch` 仍为 backlog；见 `fetch_response_ok.ts`、`fetch_post_init_ok.ts` 与各 `compile_async_*` / `compile_fetch_*` / `compile_promise_*` 测试 |
 | class / this / extends / super | 部分支持 | class 子集已降级到构造函数/方法函数；sem 已校验继承关系、`super(...)` 位置与基础 `override`；见 `class_*` fixtures |
 | 完整 TypeScript / `tsc` 语义 | 未实现 | 长期目标 |
 
@@ -243,7 +256,7 @@ flowchart LR
 | 语义边界（重复/shadow/void 分支） | `let_dup_same_block_fail.ts`、`let_shadow_nested_ok.ts`、`param_let_same_name_fail.ts`、`void_log_in_branch.ts` | 对应 `compile_*` / `run_void_log_in_branch_prints_branch` |
 | 控制流与 return / 不可达 | `while_early.ts`、`for_loop.ts`、`for_in_*.ts`、`do_while_count.ts`、`break_while.ts`、`continue_while.ts`、`early_return_unreachable.ts`、`definite_assign_*.ts` | `run_while_early_prints_three`、`run_for_in_object_keys_ok_prints_three`、`compile_for_in_non_object_fails` 等 |
 | 逻辑/三元/模板/逗号 | `logical_bool.ts`、`logical_truthy_ok.ts`、`ternary_ok.ts`、`template_ok.ts`、`comma_ok.ts` | `run_logical_bool_prints_one`、`run_ternary_ok_prints_one` 等 |
-| 成员 / `Math` / HIR 标准库 / 链式 | `string_utf16_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`、`chain_call_ok.ts` 等 | `run_stdlib_hir_ok_prints_expected`、`run_json_uri_trust_ok_prints_expected`、`run_chain_call_ok_prints_six`、`compile_stdlib_hir_ok_writes_utf16_and_json_helpers`、`compile_json_uri_trust_ok_emits_serde_json_and_urlencoding` 等 |
+| 成员 / `Math` / HIR 标准库 / 链式 | `string_utf16_length.ts`、`math_builtin.ts`、`stdlib_hir_ok.ts`、`json_uri_trust_ok.ts`、`chain_call_ok.ts` 等 | `run_stdlib_hir_ok_prints_expected`、`run_json_uri_trust_ok_prints_expected`、`run_chain_call_ok_prints_six`、`compile_stdlib_hir_ok_uses_trust_stdlib_calls`、`compile_json_uri_trust_ok_uses_trust_stdlib_json_and_uri` 等 |
 | `?.` / `??`（支持子集） | `optional_ok.ts`、`nullish_ok.ts`、`nullish_fn_ok.ts`（`check`）、`optional_call_ok.ts` | `run_optional_ok_prints_two`、`run_nullish_ok_prints_one`、`check_nullish_fn_union_ok`、`run_optional_call_ok_prints_five` |
 | 数组 / 对象字面量 | `array_ok.ts`、`object_ok.ts`、`nested_object_ok.ts`；负例 `array_fail.ts` | `run_array_ok_prints_two`、`run_object_ok_prints_three`、`run_nested_object_ok_prints_three`、`compile_array_return_type_mismatch_fails` |
 | `switch` | `switch_ok.ts`、`switch_fail.ts` | `run_switch_ok_prints_seven`、`compile_switch_fallthrough_fails` |
@@ -340,9 +353,9 @@ cargo run -p trust-cli -- add url::Url::parse --dir my-trust-app
 | **`-q` / `--quiet`** | 成功时不打印 **warning**（错误仍输出） |
 | **`--color`** | `auto` / `always` / `never`，帮助文本等着色；`never` / `always` 在解析前会同步 `NO_COLOR`（亦可直接设 `NO_COLOR=1`） |
 
-**`compile`**：`--span-comments`、`--ts-source-comments`（将 TS leading 注释写成 Rust `//` 行）、`--emit-ir`（将 [`IRModule`](crates/trust-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、**`--exec`**（见上表：**`-o`** 为可执行文件路径，或省略则用入口主文件名写到 **cwd**；**Windows** 上默认名会加 **`.exe`**；与 `run` 的 `cargo build` 一致）、**`--incremental` / `--incremental DIR`**（多文件 HIR 片段缓存；单独写 `--incremental` 时默认目录 `.trust-cache`）。**仅在 `--exec` 时**：**`--link-trust-rt`**、**`--debug`**、**`-O` / `--release`**（含义与互斥关系同 `run`）。
+**`compile`**：`--span-comments`、`--ts-source-comments`（将 TS leading 注释写成 Rust `//` 行）、`--emit-ir`（将 [`IRModule`](crates/trust-hir/src/ir.rs) 的 `Debug` 打到 **stderr**，输出可能很大，仅调试用）、`--stdlib-mode trust_stdlib|legacy`（默认 `trust_stdlib`）、**`--exec`**（见上表：**`-o`** 为可执行文件路径，或省略则用入口主文件名写到 **cwd**；**Windows** 上默认名会加 **`.exe`**；与 `run` 的 `cargo build` 一致）、**`--incremental` / `--incremental DIR`**（多文件 HIR 片段缓存；单独写 `--incremental` 时默认目录 `.trust-cache`）。**仅在 `--exec` 时**：**`--link-trust-rt`**、**`--debug`**、**`-O` / `--release`**（含义与互斥关系同 `run`）。
 
-**`run`**：`--link-trust-rt`；**`--debug`** 使用非 release 的 `cargo build`（`target/debug/`）；**`-O` / `--release`** 显式要求 release 构建（与默认一致，与 `--debug` 互斥）；**`--incremental`** 与 `compile` 相同。
+**`run`**：`--link-trust-rt`；**`--debug`** 使用非 release 的 `cargo build`（`target/debug/`）；**`-O` / `--release`** 显式要求 release 构建（与默认一致，与 `--debug` 互斥）；`--stdlib-mode trust_stdlib|legacy`；**`--incremental`** 与 `compile` 相同。
 
 **`init`**：
 

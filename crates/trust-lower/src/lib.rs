@@ -197,12 +197,14 @@ function main(): number {
         let p = parse_typescript_file("log.ts", src).unwrap();
         let (rs, _) = lower_program(&p.program, &p.source_map, "log.ts").unwrap();
         assert!(
-            rs.contains("println!(\"{} {}\""),
-            "expected space-separated `{{}}` in format string: {rs}"
+            rs.contains("trust_stdlib::console::log_joined(false")
+                && rs.contains("format!(\"{}\", (\"ok\".to_string()))")
+                && rs.contains("format!(\"{}\", (1_f64))"),
+            "expected stdout console via trust_stdlib with per-arg format!: {rs}"
         );
     }
 
-    /// §5.1：`console.error` / `console.debug` → `eprintln!`，多参格式与 `log` 相同（`emit_builtin_log`）。
+    /// §5.1：`console.error` / `console.debug` → `trust_stdlib::console::log_joined(true, …)`（`emit_builtin_log`）。
     #[test]
     fn console_error_and_debug_use_eprintln() {
         let src = r#"function main(): void {
@@ -213,12 +215,14 @@ function main(): number {
         let p = parse_typescript_file("cerr.ts", src).unwrap();
         let (rs, _) = lower_program(&p.program, &p.source_map, "cerr.ts").unwrap();
         assert!(
-            rs.contains("eprintln!(\"{} {}\""),
-            "expected stderr console with spaced format: {rs}"
+            rs.contains("trust_stdlib::console::log_joined(true")
+                && rs.contains("format!(\"{}\", (\"e\".to_string()))")
+                && rs.contains("format!(\"{}\", (1_f64))"),
+            "expected stderr console via trust_stdlib: {rs}"
         );
         assert!(
-            rs.contains("eprintln!(\"{}\", 2_f64)"),
-            "expected single-arg eprintln for debug: {rs}"
+            rs.contains("trust_stdlib::console::log_joined(true, vec![format!(\"{}\", (2_f64))])"),
+            "expected single-arg stderr log_joined for debug: {rs}"
         );
     }
 
@@ -257,7 +261,7 @@ function main(): number {
         );
     }
 
-    /// §5.2：`Math.*` 整数子集。
+    /// §5.2：`Math.*` 经 `trust_stdlib::math`。
     #[test]
     fn codegen_52_math_builtins() {
         let src = r#"function main(): number {
@@ -266,8 +270,8 @@ function main(): number {
 "#;
         let p = parse_typescript_file("m.ts", src).unwrap();
         let (rs, _) = lower_program(&p.program, &p.source_map, "m.ts").unwrap();
-        assert!(rs.contains(".abs()"), "{rs}");
-        assert!(rs.contains(".min("), "{rs}");
+        assert!(rs.contains("trust_stdlib::math::abs("), "{rs}");
+        assert!(rs.contains("trust_stdlib::math::min("), "{rs}");
     }
 
     #[test]

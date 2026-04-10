@@ -62,6 +62,9 @@ pub enum DriverError {
 
     #[error("cannot resolve trust_rt path dependency; build from the trust source tree or omit --link-trust-rt (looked for {0})")]
     TrustRtPathResolveFailed(String),
+
+    #[error("cannot resolve trust_stdlib path dependency; build from the trust source tree (looked for {0})")]
+    TrustStdlibPathResolveFailed(String),
 }
 
 /// Options for generated temporary crate / `cargo build` (e.g. optional `trust_rt` path dependency).

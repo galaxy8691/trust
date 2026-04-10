@@ -12,7 +12,7 @@ pub use build::{
     build_module, build_module_ir_fragment, build_program_multi, merge_module_ir_fragments,
     ModuleIrFragment,
 };
-pub use codegen::{emit_rust, emit_rust_with_options, CodegenOptions};
+pub use codegen::{emit_rust, emit_rust_with_options, CodegenOptions, StdlibMode};
 pub use error::{CompileError, CompileWarning};
 pub use ir::*;
 pub use ir_cache::{

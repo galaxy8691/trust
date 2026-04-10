@@ -1,9 +1,9 @@
 // test-ts：多文件手工回归 — 入口须为 `export function main`；依赖 `./math.ts`（math 再依赖 `./strutil.ts`）。
 // 运行：`cargo run -p trust-cli -- run test-ts/main.ts`
-// 覆盖：控制流、字面量/联合、`interface`/`type`、多文件 import、`Math`/工具函数、**泛型**（显式 `identity<number>(…)`）、**高阶函数**（`apply_num`、返回闭包的 `make_adder`）、**class / extends / super / 实例方法**（见下文 `OOBase`/`OOChild`）、通过 `Trust.toml` 的 Rust crate 互操作（`regex` / `url` / `diesel::sqlite::SqliteConnection::establish`），以及 `async`/`await` + `fetch` 天气请求。
+// 覆盖：控制流、字面量/联合、`interface`/`type`、多文件 import、`Math`/工具函数、**泛型**（显式 `identity<number>(…)`）、**高阶函数**（`apply_num`、返回闭包的 `make_adder`）、**class / extends / super / 实例方法**（见下文 `OOBase`/`OOChild`）、通过 `Trust.toml` 的 Rust crate 互操作（`regex` / `url` / `diesel::sqlite::SqliteConnection::establish`），以及 `async`/`await` + **`std.http` 天气请求**（`fetchText` / `fetch` / `text`）。
 // **仍不覆盖**（由 fixtures 或仍为 backlog）：`export class` 跨文件、完整 discriminated 收窄等 — 见 README 矩阵与 PROJECT-TODO。
-// stdout 依次：`ok 1`、`cmp 1`、`void_fn 1`；随后一行 `out= 15 5 50 2`（空格分隔）；最后一行 stdout 为 main 返回值（当前 **354224848179262000000**；以 `cargo run -p trust-cli -- run test-ts/main.ts` 为准）。
-// stderr：`err 1` 与单独一行 `2`（console.debug）。
+// stdout 依次：`ok 1`、`cmp 1`、`void_fn 1`；随后一行 `out= 15 5 50 2`（空格分隔）；最后一行 stdout 为 main 返回值（以 `cargo run -p trust-cli -- run test-ts/main.ts` 为准）。
+// stderr：`err 1` 与单独一行 `2`（`std.console.debug`，与 `console.debug` 等价）。
 // 类型 `interface` / `type` 仅在本文件使用（具名表不跨模块合并，见 README）。
 
 import {
@@ -29,6 +29,7 @@ import {
 import { Regex } from "regex";
 import { SqliteConnection } from "diesel";
 import { Url } from "url";
+import std from "std";
 
 interface Point {
   x: number;
@@ -61,7 +62,7 @@ class OOChild extends OOBase {
 }
 
 function void_log_once(): void {
-  console.log("void_fn", 1);
+  std.console.log("void_fn", 1);
 }
 
 export async function main(): Promise<number> {
@@ -152,21 +153,21 @@ export async function main(): Promise<number> {
 
   let t: boolean = true;
   if (t) {
-    console.log("ok", 1);
+    std.console.log("ok", 1);
   } else {
-    console.log("no", 0);
+    std.console.log("no", 0);
   }
 
   if (greater(10, 5)) {
-    console.log("cmp", 1);
+    std.console.log("cmp", 1);
   } else {
-    console.log("cmp", 0);
+    std.console.log("cmp", 0);
   }
 
   void_log_once();
 
-  console.error("err", 1);
-  console.debug(2);
+  std.console.error("err", 1);
+  std.console.debug(2);
 
   let olen: { length: number; tag: number } = { length: 7, tag: 1 };
   acc = acc + olen.length;
@@ -180,7 +181,7 @@ export async function main(): Promise<number> {
 
   let label: string = "out";
   let sep: string = "=";
-  console.log(label + sep, sum, diff, prod, quot);
+  std.console.log(label + sep, sum, diff, prod, quot);
 
   let d: number = abs_diff(x, y);
   let e: number = early(7);
@@ -221,18 +222,60 @@ export async function main(): Promise<number> {
   let pth: string = u.path();
   acc = acc + sch.length;
   acc = acc + pth.length;
-  console.log("rust_url", sch, pth);
+  std.console.log("rust_url", sch, pth);
 
   // Diesel：清单里 `new` → `SqliteConnection::establish`（`Connection::establish`，非 `SimpleConnection`）；`:memory:` 仅作演示。
   let _sqlite: SqliteConnection = new SqliteConnection(":memory:");
-  console.log("diesel_sqlite_establish", 1);
+  std.console.log("diesel_sqlite_establish", 1);
 
   // 天气请求（HTTP 走 Rust 生态实现）
-  let weather_a: string = await fetchText("https://wttr.in/?format=3");
-  console.log("weather_a", weather_a);
-  let weather_resp: HttpResponse = await fetch("https://wttr.in/?format=3");
-  let weather_b: string = await weather_resp.text();
-  console.log("weather_b", weather_b);
+  let weather_a: string = await std.http.fetchText("https://wttr.in/?format=3");
+  std.console.log("weather_a", weather_a);
+  let weather_resp: HttpResponse = await std.http.fetch("https://wttr.in/?format=3");
+  let weather_b: string = await std.http.text(weather_resp);
+  std.console.log("weather_b", weather_b);
+
+  // 虚拟模块 `std`（须 `import std from "std"`）：与全局 `console` / `fetch*` / `JSON` 等能力一一对应，推荐统一写 `std.*`
+  let jdoc: string = std.json.stringify({ n: 12 });
+  let jstr: string = std.json.stringify("ab");
+  let jsrc: string = "12" + "3";
+  let jnum: number = std.json.parse(jsrc);
+  let enc: string = std.uri.encodeURIComponent("a b");
+  let dec: string = std.uri.decodeURIComponent(enc);
+  let sm: string = "abcdef";
+  let sub_s: string = std.string.slice(sm, 1, 4);
+  let has_cd: boolean = std.string.includes(sm, "cd");
+  let idx: number = std.string.indexOf(sm, "de");
+  let utf16_len: number = std.string.length(sm);
+  let mabs: number = std.math.abs(-3.0);
+  let parsed: number = std.number.parseInt("9", 10);
+  acc =
+    acc +
+    jdoc.length +
+    jstr.length +
+    jnum +
+    dec.length +
+    sub_s.length +
+    idx +
+    utf16_len +
+    mabs +
+    parsed;
+  if (has_cd) {
+    acc = acc + 1;
+  }
+  std.console.log(
+    "stdlib_probe",
+    jdoc,
+    jstr,
+    enc,
+    dec,
+    sub_s,
+    has_cd,
+    idx,
+    utf16_len,
+    mabs,
+    parsed,
+  );
 
   return acc;
 }
