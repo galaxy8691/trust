@@ -357,7 +357,8 @@ Trust keeps a **callable entry named `main`**. Default export is supported only 
 
 - [x] **B1 — nested `ObjectNum` + optional props**: [`ObjectProp`](crates/trust-hir/src/ir.rs), [`object_shape_assignable`](crates/trust-hir/src/sem/helpers.rs), object literals as `serde_json::Value` in codegen; fixture `nested_object_ok.ts`.
 - [x] **B2a — `import type` cross-file**: `import type { I } from "./dep.ts"` and using `I` in annotations **across files** already works (tested: `import_type_main.ts`, cross-file interface methods with R2). 
-- [ ] **B2+ — `interface extends`, callable members on object types, richer `readonly`/index signatures**: **backlog**; README documents current limits. `interface extends` is the next priority (rejected today with "interface extends clauses are not supported").
+- [x] **B2+ — `interface extends`**: single inheritance with width subtyping; fixtures `interface_extends_ok.ts`, `interface_extends_circular_fail.ts`.
+- [ ] **B2+ remaining — callable members on object types, `readonly`/index signatures**: backlog; README documents current limits.
 
 ### 13.8 Async surface — no user `Promise` / no `.then` (product decision)
 
@@ -439,10 +440,11 @@ Checkbox list derived from [README — Unsupported TypeScript](README.md), matri
 - [ ] **Full structural subtyping parity with `tsc`** — not a goal; only **documented safe chips** if any.
 - [ ] **Heterogeneous unions** (`number | string`, …): clearer codegen strategy or diagnostics when a single Rust type is impossible ([README matrix — Union](README.md)).
 - [ ] **`strictNullChecks`-equivalent mode** as an **explicit** compiler option (not implicit TS looseness).
-- [ ] **R1 — Nominal methods on `interface` / object types** (static dispatch; global `m__I(receiver,…)` or inherent) ([§3.3.1](PROJECT-TODO.md)).
-- [ ] **R2 — Deeper type-driven call/member chains** than one `f().g()` ([§1.3 follow-ups](PROJECT-TODO.md)).
+- [x] **R1 — Nominal methods on `interface`** (static dispatch; global `m__I(receiver,…)`) ([§3.3.1](PROJECT-TODO.md)). Completed: `obj.method()` desugars to `m__obj(receiver, …)`.
+- [x] **R2 — Deeper type-driven call/member chains** (`getA().getB().getC().val()`) ([§1.3 follow-ups](PROJECT-TODO.md)). Completed: function-typed fields in object literals with method chaining.
 - [x] **§13.7 B2a** — `import type` cross-file already works (discovered complete; see investigation).
-- [ ] **§13.7 B2+** — `interface extends`, callable members on object types, richer `readonly` / index signatures ([§13.7](PROJECT-TODO.md)).
+- [x] **§13.7 B2+ — `interface extends`** — single inheritance with width subtyping, completed.
+- [ ] **B2+ remaining** — callable members on object types (non-interface), `readonly`/index signatures ([§13.7](PROJECT-TODO.md)).
 
 #### Language surface
 

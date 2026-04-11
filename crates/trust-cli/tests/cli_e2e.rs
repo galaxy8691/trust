@@ -1635,6 +1635,12 @@ fn run_interface_extends_ok_prints_six() {
 }
 
 #[test]
+fn run_import_type_ok_prints_ten() {
+    // B2a: import type 跨文件导入类型
+    assert_run_stdout("import_type_main.ts", "10\n");
+}
+
+#[test]
 fn compile_interface_extends_circular_fails() {
     assert_compile_fails_stderr("interface_extends_circular_fail.ts", "circular interface inheritance");
 }
