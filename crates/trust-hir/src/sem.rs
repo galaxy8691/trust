@@ -941,6 +941,7 @@ fn stmt_span(s: &IRStmt) -> Span {
         | IRStmt::If { span, .. }
         | IRStmt::While { span, .. }
         | IRStmt::ForIn { span, .. }
+        | IRStmt::ForOf { span, .. }
         | IRStmt::DoWhile { span, .. }
         | IRStmt::Break { span }
         | IRStmt::Continue { span }
@@ -1025,6 +1026,12 @@ fn reject_naked_fetchtext_in_stmts(
                 }
                 reject_naked_fetchtext_in_stmts(body, cm, path)?;
             }
+            IRStmt::ForOf { target, body, .. } => {
+                if needs_await_surrounding(target) {
+                    return Err(diag(cm, path, stmt_span(s), AWAIT_MSG));
+                }
+                reject_naked_fetchtext_in_stmts(body, cm, path)?;
+            }
             IRStmt::DoWhile { body, cond, .. } => {
                 reject_naked_fetchtext_in_stmts(body, cm, path)?;
                 if needs_await_surrounding(cond) {
@@ -1084,6 +1091,10 @@ fn reject_readline_in_async_stmts(
                 reject_readline_in_async_stmts(body, cm, path)?;
             }
             IRStmt::ForIn { target, body, .. } => {
+                reject_readline_in_async_expr(target, cm, path, stmt_span(s))?;
+                reject_readline_in_async_stmts(body, cm, path)?;
+            }
+            IRStmt::ForOf { target, body, .. } => {
                 reject_readline_in_async_expr(target, cm, path, stmt_span(s))?;
                 reject_readline_in_async_stmts(body, cm, path)?;
             }
@@ -1253,7 +1264,7 @@ fn stmt_block_diverges(s: &IRStmt, ret_ty: &TsType, loop_depth: usize) -> bool {
                 && stmts_block_seq_diverges(else_b, ret_ty, loop_depth)
         }
         IRStmt::If { else_b: None, .. } => false,
-        IRStmt::While { .. } | IRStmt::ForIn { .. } | IRStmt::DoWhile { .. } => false,
+        IRStmt::While { .. } | IRStmt::ForIn { .. } | IRStmt::ForOf { .. } | IRStmt::DoWhile { .. } => false,
         IRStmt::Empty { .. }
         | IRStmt::Let { .. }
         | IRStmt::Assign { .. }
@@ -1285,7 +1296,10 @@ fn tail_returns_while_body(stmts: &[IRStmt]) -> bool {
             ..
         } => tail_returns_while_body(then_b) && tail_returns_while_body(else_b),
         IRStmt::Block { stmts: b, .. } => tail_returns_while_body(b),
-        IRStmt::While { body, .. } | IRStmt::ForIn { body, .. } | IRStmt::DoWhile { body, .. } => {
+        IRStmt::While { body, .. }
+        | IRStmt::ForIn { body, .. }
+        | IRStmt::ForOf { body, .. }
+        | IRStmt::DoWhile { body, .. } => {
             tail_returns_while_body(body)
         }
         _ => false,
@@ -1307,7 +1321,10 @@ fn stmt_fn_returns_complete(s: &IRStmt, ret: &TsType) -> bool {
         } => fn_body_returns(then_b, ret) && fn_body_returns(else_b, ret),
         IRStmt::If { else_b: None, .. } => false,
         IRStmt::Block { stmts, .. } => fn_body_returns(stmts, ret),
-        IRStmt::While { body, .. } | IRStmt::ForIn { body, .. } | IRStmt::DoWhile { body, .. } => {
+        IRStmt::While { body, .. }
+        | IRStmt::ForIn { body, .. }
+        | IRStmt::ForOf { body, .. }
+        | IRStmt::DoWhile { body, .. } => {
             tail_returns_while_body(body)
         }
         _ => false,
@@ -1851,6 +1868,73 @@ fn check_stmt(
             let pre = snapshot_inits(stack);
             push_scope(stack);
             insert_let(stack, key, key_ty.clone(), true, true, *span, cm, path)?;
+            let mut body_r = true;
+            check_stmts(
+                body,
+                stack,
+                globals,
+                ret_ty,
+                loop_depth + 1,
+                cm,
+                path,
+                warnings,
+                &mut body_r,
+                next_reader_slot,
+            )?;
+            pop_scope(stack);
+            apply_loop_conservative_init(stack, &pre);
+            Ok(())
+        }
+        IRStmt::ForOf {
+            elem,
+            elem_ty,
+            target,
+            body,
+            span,
+        } => {
+            let tt = infer_expr_mut(target, stack, globals, cm, path)?;
+            let inferred_elem_ty = match tt {
+                TsType::ArrayNumber => TsType::Number,
+                TsType::ArrayString => TsType::String,
+                _ => {
+                    return Err(diag(
+                        cm,
+                        path,
+                        *span,
+                        "for..of target must be an array (number[] or string[])",
+                    ));
+                }
+            };
+            // If type annotation provided, check it matches inferred type
+            if *elem_ty != TsType::Unknown && *elem_ty != inferred_elem_ty {
+                return Err(diag(
+                    cm,
+                    path,
+                    *span,
+                    format!(
+                        "for..of loop variable type mismatch: expected `{:?}`, found `{:?}`",
+                        elem_ty, inferred_elem_ty
+                    ),
+                ));
+            }
+            let final_elem_ty = if *elem_ty == TsType::Unknown {
+                inferred_elem_ty
+            } else {
+                elem_ty.clone()
+            };
+            *elem_ty = final_elem_ty.clone();
+            let pre = snapshot_inits(stack);
+            push_scope(stack);
+            insert_let(
+                stack,
+                elem,
+                final_elem_ty,
+                true, // mutable
+                true, // initialized
+                *span,
+                cm,
+                path,
+            )?;
             let mut body_r = true;
             check_stmts(
                 body,

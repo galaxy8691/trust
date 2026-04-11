@@ -1001,6 +1001,34 @@ fn compile_for_in_key_type_mismatch_fails() {
 }
 
 #[test]
+fn run_for_of_number_array_ok_prints_six() {
+    assert_run_stdout("for_of_number_array_ok.ts", "6\n");
+}
+
+#[test]
+fn run_for_of_string_array_ok_prints_three() {
+    assert_run_stdout("for_of_string_array_ok.ts", "3\n");
+}
+
+#[test]
+fn run_for_of_break_ok_prints_three() {
+    assert_run_stdout("for_of_break_ok.ts", "3\n");
+}
+
+#[test]
+fn compile_for_of_non_array_fails() {
+    assert_compile_fails_stderr("for_of_non_array_fail.ts", "for..of target must be an array");
+}
+
+#[test]
+fn compile_for_of_type_mismatch_fails() {
+    assert_compile_fails_stderr(
+        "for_of_type_mismatch_fail.ts",
+        "binary arithmetic expects two `number`s",
+    );
+}
+
+#[test]
 fn run_do_while_prints_three() {
     assert_run_stdout("do_while_count.ts", "3\n");
 }

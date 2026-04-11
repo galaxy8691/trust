@@ -206,6 +206,9 @@ fn stmts_maybe_http_stream(stmts: &[IRStmt]) -> bool {
         IRStmt::ForIn { target, body, .. } => {
             expr_maybe_http_stream(target) || stmts_maybe_http_stream(body)
         }
+        IRStmt::ForOf { target, body, .. } => {
+            expr_maybe_http_stream(target) || stmts_maybe_http_stream(body)
+        }
         IRStmt::DoWhile { body, cond, .. } => {
             stmts_maybe_http_stream(body) || expr_maybe_http_stream(cond)
         }
@@ -571,6 +574,43 @@ fn emit_stmt(
                         &f.source_path,
                         *span,
                         "for..in kind missing from sem",
+                    ));
+                }
+            }
+            for x in body {
+                emit_stmt(out, x, level + 1, f, opts, module)?;
+            }
+            out.push_str(&ind);
+            out.push_str("}\n");
+        }
+        IRStmt::ForOf {
+            elem,
+            elem_ty,
+            target,
+            body,
+            span,
+        } => {
+            let t = emit_expr(target, f, level, module)?;
+            let elem_rust_ty = rust_ty(elem_ty, f)?;
+            let tmp = format!("__forof_target_{}", elem);
+            out.push_str(&ind);
+            out.push_str(&format!("let {tmp} = {t};\n"));
+            out.push_str(&ind);
+            out.push_str(&format!("for __elem in &{tmp} {{\n"));
+            out.push_str(&indent(level + 1));
+            match elem_ty {
+                TsType::Number => {
+                    out.push_str(&format!("let {elem}: {elem_rust_ty} = *__elem;\n"));
+                }
+                TsType::String => {
+                    out.push_str(&format!("let {elem}: {elem_rust_ty} = __elem.clone();\n"));
+                }
+                _ => {
+                    return Err(diag(
+                        f.cm.as_ref(),
+                        &f.source_path,
+                        *span,
+                        "for..of element type must be number or string",
                     ));
                 }
             }

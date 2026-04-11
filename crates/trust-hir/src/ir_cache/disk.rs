@@ -277,6 +277,13 @@ pub enum DiskIRStmt {
         body: Vec<DiskIRStmt>,
         span: DSpan,
     },
+    ForOf {
+        elem: String,
+        elem_ty: TsType,
+        target: DiskIRExpr,
+        body: Vec<DiskIRStmt>,
+        span: DSpan,
+    },
     DoWhile {
         body: Vec<DiskIRStmt>,
         cond: DiskIRExpr,

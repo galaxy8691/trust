@@ -235,6 +235,21 @@ fn rewrite_stmt_scoped(
                 errs,
             );
         }
+        IRStmt::ForOf { target, body, .. } => {
+            rewrite_expr(target, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
+            let mut body_env = env.clone();
+            rewrite_stmts_in_scope(
+                body,
+                templates,
+                fn_ret_types,
+                queue,
+                cm,
+                path,
+                fn_span,
+                &mut body_env,
+                errs,
+            );
+        }
         IRStmt::DoWhile { body, cond, .. } => {
             let mut body_env = env.clone();
             rewrite_stmts_in_scope(
@@ -810,6 +825,16 @@ fn subst_stmts(stmts: &mut [IRStmt], subst: &BTreeMap<String, TsType>) {
                 subst_expr(target, subst);
                 subst_stmts(body, subst);
             }
+            IRStmt::ForOf {
+                elem_ty,
+                target,
+                body,
+                ..
+            } => {
+                *elem_ty = subst_type(elem_ty, subst);
+                subst_expr(target, subst);
+                subst_stmts(body, subst);
+            }
             IRStmt::DoWhile {
                 body,
                 cond,
@@ -1064,6 +1089,7 @@ fn mangle_name(name: &str, args: &[TsType]) -> String {
 
 fn type_key(t: &TsType) -> String {
     match t {
+        TsType::Unknown => "unknown".to_string(),
         TsType::Number => "n".to_string(),
         TsType::Boolean => "b".to_string(),
         TsType::String => "s".to_string(),

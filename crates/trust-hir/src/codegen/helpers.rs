@@ -53,6 +53,7 @@ pub(super) fn is_stringish(t: &TsType) -> bool {
 
 pub(super) fn rust_ty_scalar(t: &TsType) -> &'static str {
     match t {
+        TsType::Unknown => unreachable!("rust_ty_scalar: Unknown type should be inferred before codegen"),
         TsType::Number | TsType::NumberLit(_) => "f64",
         TsType::Boolean | TsType::BoolLit(_) => "bool",
         TsType::String | TsType::StringLit(_) => "String",
@@ -143,6 +144,7 @@ pub(super) fn stmt_span(s: &IRStmt) -> Span {
         | IRStmt::If { span, .. }
         | IRStmt::While { span, .. }
         | IRStmt::ForIn { span, .. }
+        | IRStmt::ForOf { span, .. }
         | IRStmt::DoWhile { span, .. }
         | IRStmt::Break { span }
         | IRStmt::Continue { span }

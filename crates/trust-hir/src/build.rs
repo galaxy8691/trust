@@ -7,8 +7,8 @@ use swc_common::comments::{Comment, CommentKind, SingleThreadedComments};
 use swc_common::{sync::Lrc, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     AssignOp, AssignTarget, BinaryOp, BindingIdent, CallExpr, Callee, ClassDecl, ClassMember, Decl,
-    DefaultDecl, EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForStmt, Ident,
-    KeyValueProp, Lit, MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleExportName,
+    DefaultDecl, EmptyStmt, ExportDecl, Expr, ExprOrSpread, FnDecl, ForHead, ForOfStmt, ForStmt,
+    Ident, KeyValueProp, Lit, MemberExpr, MemberProp, MethodKind, ModuleDecl, ModuleExportName,
     ModuleItem, ObjectLit, OptCall, OptChainBase, OptChainExpr, Param, ParamOrTsParamProp, Pat,
     Program, Prop, PropName, PropOrSpread, SimpleAssignTarget, Stmt, SwitchStmt, Tpl, TsTypeAnn,
     UnaryOp, VarDecl, VarDeclKind, VarDeclOrExpr,
@@ -901,6 +901,10 @@ fn rewrite_this_in_stmts(stmts: &mut [IRStmt], span: Span) {
                 rewrite_this_in_expr(target, span);
                 rewrite_this_in_stmts(body, span);
             }
+            IRStmt::ForOf { target, body, .. } => {
+                rewrite_this_in_expr(target, span);
+                rewrite_this_in_stmts(body, span);
+            }
             IRStmt::DoWhile { body, cond, .. } => {
                 rewrite_this_in_stmts(body, span);
                 rewrite_this_in_expr(cond, span);
@@ -1777,6 +1781,87 @@ fn build_for_in_stmt(
     })
 }
 
+fn build_for_of_stmt(
+    fo: &ForOfStmt,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    next_id: &mut u32,
+    iface: &HashMap<String, TsType>,
+    in_async: bool,
+) -> Result<IRStmt, CompileError> {
+    let (elem, elem_ty) = match &fo.left {
+        ForHead::VarDecl(v) => {
+            if v.decls.len() != 1 {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    v,
+                    "for..of expects exactly one loop variable",
+                ));
+            }
+            let d = &v.decls[0];
+            if d.init.is_some() {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    d,
+                    "for..of loop variable initializer is not supported",
+                ));
+            }
+            let Pat::Ident(BindingIdent { id, type_ann, .. }) = &d.name else {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    d,
+                    "for..of requires identifier loop variable",
+                ));
+            };
+            let ty = if let Some(ann) = type_ann {
+                ts_type_from_ann(&Some(ann.clone()), cm, path, id.span, iface, None)?
+            } else {
+                TsType::Unknown
+            };
+            (id.sym.to_string(), ty)
+        }
+        ForHead::Pat(p) => {
+            let Pat::Ident(BindingIdent { id, type_ann, .. }) = &**p else {
+                return Err(diag_spanned(
+                    cm,
+                    path,
+                    p,
+                    "for..of requires identifier loop variable",
+                ));
+            };
+            let ty = if let Some(ann) = type_ann {
+                ts_type_from_ann(&Some(ann.clone()), cm, path, id.span, iface, None)?
+            } else {
+                TsType::Unknown
+            };
+            (id.sym.to_string(), ty)
+        }
+        ForHead::UsingDecl(u) => {
+            return Err(diag_spanned(
+                cm,
+                path,
+                u,
+                "for..of `using` declaration is not supported",
+            ));
+        }
+    };
+    let target = build_expr(&fo.right, cm, path, iface, in_async)?;
+    let body = match &*fo.body {
+        Stmt::Block(b) => build_block_stmts(&b.stmts, cm, path, next_id, iface, in_async)?,
+        s => vec![build_stmt(s, cm, path, next_id, iface, in_async)?],
+    };
+    Ok(IRStmt::ForOf {
+        elem,
+        elem_ty,
+        target,
+        body,
+        span: fo.span,
+    })
+}
+
 fn build_stmt(
     stmt: &Stmt,
     cm: &Lrc<SourceMap>,
@@ -1932,12 +2017,7 @@ fn build_stmt(
         }
         Stmt::Switch(sw) => build_switch_stmt(sw, cm, path, next_id, iface, in_async),
         Stmt::ForIn(fi) => build_for_in_stmt(fi, cm, path, next_id, iface, in_async),
-        Stmt::ForOf(_) => Err(diag_spanned(
-            cm,
-            path,
-            stmt,
-            "`for-of` is not supported in this compiler version",
-        )),
+        Stmt::ForOf(fo) => build_for_of_stmt(fo, cm, path, next_id, iface, in_async),
         Stmt::Labeled(_) => Err(diag_spanned(
             cm,
             path,

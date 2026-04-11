@@ -69,6 +69,8 @@ impl ObjectProp {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TsType {
+    /// 占位类型，用于需要类型推断的场景（如 for..of 循环变量无类型注释时）
+    Unknown,
     Number,
     Boolean,
     String,
@@ -310,7 +312,8 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
 
 fn variant_rank(t: &TsType) -> u8 {
     match t {
-        TsType::Void => 0,
+        TsType::Unknown => 0,
+        TsType::Void => 1,
         TsType::Null => 1,
         TsType::Undefined => 2,
         TsType::Boolean => 3,
@@ -917,6 +920,14 @@ pub enum IRStmt {
         key_ty: TsType,
         target: IRExpr,
         kind: Option<ForInKind>,
+        body: Vec<IRStmt>,
+        span: Span,
+    },
+    /// `for (elem of target) { ... }`
+    ForOf {
+        elem: String,
+        elem_ty: TsType,
+        target: IRExpr,
         body: Vec<IRStmt>,
         span: Span,
     },
