@@ -149,10 +149,12 @@ Single-PR rule: land **one** pillar at a time; each needs fixtures + README §3.
 
 #### G1 / G2 — Generics subset expansion (spec)
 
-- **G1 (explicit args)**: Extend **documented** allowed patterns for `f<T>(…)` calls — e.g. explicit `T` on chained / nested calls where callee and args are already monomorph-safe; each addition needs a proof case in `mono.rs` + fixture.
-- **G2 (inference)**: Only extend inference when **every** type parameter is fixed uniquely from argument types that are already supported for synthesis (literals, annotated locals, etc.); reject unions / ambiguous args.
+- [x] **G1 (explicit args)**: Nested generic calls with explicit type args `f<T>(g<U>(x))` supported.
+- [x] **G2 (inference)**: Extended `synth_expr_ty` to infer from non-generic function return types; e.g., `id(getNumber())` where `getNumber(): number` infers `T=number`.
+- [x] **Implementation**: Added `fn_ret_types: HashMap<String, TsType>` throughout monomorphization pipeline to enable function return type lookup during type argument inference.
+- [x] **Fixtures**: `generic_fn_return_infer_ok.ts`, `generic_nested_call_ok.ts`, `generic_multi_param_ok.ts`.
 - **Still out of scope**: Higher-kinded types, `extends` constraints, default type params, inference from heterogeneous unions, call-site partial application of type args.
-- **Regression**: retain [`generic_function_*_fail.ts`](crates/trust-cli/tests/fixtures/), [`compile_generic_function_multi_infer_fail_reports_multiple_errors`](crates/trust-cli/tests/cli_e2e.rs); add new positives only with e2e.
+- **Regression**: retained [`generic_function_*_fail.ts`](crates/trust-cli/tests/fixtures/), [`compile_generic_function_multi_infer_fail_reports_multiple_errors`](crates/trust-cli/tests/cli_e2e.rs).
 
 #### R1 — `interface` instance methods (nominal; spec)
 
@@ -430,7 +432,7 @@ Checkbox list derived from [README — Unsupported TypeScript](README.md), matri
 
 - [x] **D1 — Discriminated narrowing** on object unions (`if (v.kind === 'a')` / `else`); coordinate with `??` / `?.` ([§3.3.1](PROJECT-TODO.md), [`sem.rs`](crates/trust-hir/src/sem.rs)). Completed: nested narrowing supported via `narrow_ty` on `Binding`.
 - [ ] **D3-style — Broader unions / `normalize_union` / assignability** only where still **one** Rust type and statically decidable ([§3.3](PROJECT-TODO.md)).
-- [ ] **G1 / G2 — Generics subset expansion** (more explicit type-arg patterns; more arity / non-call monomorphization) ([§3.3.1](PROJECT-TODO.md), [`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)).
+- [x] **G1 / G2 — Generics subset expansion** (more explicit type-arg patterns; more arity / non-call monomorphization) ([§3.3.1](PROJECT-TODO.md), [`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)). Completed: nested generic calls, function return type inference.
 - [ ] **G3 — Where-like constraints** (if introduced: must remain fully static).
 - [ ] **Intersection types `A & B`** in type positions (currently rejected).
 - [ ] **`bigint` / template literal types** in type positions (rejected today).

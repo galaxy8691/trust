@@ -12,9 +12,13 @@ struct Req {
 
 pub(super) fn monomorphize_module_functions(module: &mut IRModule) -> Result<(), CompileError> {
     let mut templates = HashMap::<String, IRFunction>::new();
+    // G2-2: 构建非泛型函数返回类型表，用于类型推断
+    let mut fn_ret_types: HashMap<String, TsType> = HashMap::new();
     for f in &module.fns {
         if !f.type_params.is_empty() {
             templates.insert(f.name.clone(), f.clone());
+        } else {
+            fn_ret_types.insert(f.name.clone(), f.ret.clone());
         }
     }
     if templates.is_empty() {
@@ -37,6 +41,7 @@ pub(super) fn monomorphize_module_functions(module: &mut IRModule) -> Result<(),
         rewrite_stmts_in_scope(
             &mut f.body,
             &templates,
+            &fn_ret_types,
             &mut queue,
             &cm,
             &source_path,
@@ -102,6 +107,7 @@ pub(super) fn monomorphize_module_functions(module: &mut IRModule) -> Result<(),
         rewrite_stmts_in_scope(
             &mut inst.body,
             &templates,
+            &fn_ret_types,
             &mut queue,
             &cm,
             &source_path,
@@ -124,6 +130,7 @@ pub(super) fn monomorphize_module_functions(module: &mut IRModule) -> Result<(),
 fn rewrite_stmts_in_scope(
     stmts: &mut [IRStmt],
     templates: &HashMap<String, IRFunction>,
+    fn_ret_types: &HashMap<String, TsType>,
     queue: &mut VecDeque<Req>,
     cm: &crate::ir::SendSourceMap,
     path: &str,
@@ -132,7 +139,7 @@ fn rewrite_stmts_in_scope(
     errs: &mut Vec<CompileError>,
 ) {
     for s in stmts.iter_mut() {
-        rewrite_stmt_scoped(s, templates, queue, cm, path, fn_span, env, errs);
+        rewrite_stmt_scoped(s, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
     }
 }
 
@@ -140,6 +147,7 @@ fn rewrite_stmts_in_scope(
 fn rewrite_stmt_scoped(
     s: &mut IRStmt,
     templates: &HashMap<String, IRFunction>,
+    fn_ret_types: &HashMap<String, TsType>,
     queue: &mut VecDeque<Req>,
     cm: &crate::ir::SendSourceMap,
     path: &str,
@@ -151,27 +159,27 @@ fn rewrite_stmt_scoped(
         IRStmt::Let { name, ty, init, .. } => {
             *ty = subst_type(ty, &BTreeMap::new());
             if let Some(e) = init {
-                rewrite_expr(e, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(e, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
             env.insert(name.clone(), ty.clone());
         }
         IRStmt::Assign { rhs, .. } => {
-            rewrite_expr(rhs, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(rhs, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRStmt::MemberAssign { rhs, .. } => {
-            rewrite_expr(rhs, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(rhs, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRStmt::Expr { expr, .. } => {
-            rewrite_expr(expr, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(expr, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRStmt::Return { arg, .. } => {
             if let Some(e) = arg {
-                rewrite_expr(e, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(e, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRStmt::Block { stmts, .. } => {
             let mut inner = env.clone();
-            rewrite_stmts_in_scope(stmts, templates, queue, cm, path, fn_span, &mut inner, errs);
+            rewrite_stmts_in_scope(stmts, templates, fn_ret_types, queue, cm, path, fn_span, &mut inner, errs);
         }
         IRStmt::If {
             cond,
@@ -179,11 +187,12 @@ fn rewrite_stmt_scoped(
             else_b,
             ..
         } => {
-            rewrite_expr(cond, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(cond, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             let mut then_env = env.clone();
             rewrite_stmts_in_scope(
                 then_b,
                 templates,
+                fn_ret_types,
                 queue,
                 cm,
                 path,
@@ -193,15 +202,16 @@ fn rewrite_stmt_scoped(
             );
             if let Some(e) = else_b {
                 let mut else_env = env.clone();
-                rewrite_stmts_in_scope(e, templates, queue, cm, path, fn_span, &mut else_env, errs);
+                rewrite_stmts_in_scope(e, templates, fn_ret_types, queue, cm, path, fn_span, &mut else_env, errs);
             }
         }
         IRStmt::While { cond, body, .. } => {
-            rewrite_expr(cond, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(cond, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             let mut body_env = env.clone();
             rewrite_stmts_in_scope(
                 body,
                 templates,
+                fn_ret_types,
                 queue,
                 cm,
                 path,
@@ -211,11 +221,12 @@ fn rewrite_stmt_scoped(
             );
         }
         IRStmt::ForIn { target, body, .. } => {
-            rewrite_expr(target, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(target, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             let mut body_env = env.clone();
             rewrite_stmts_in_scope(
                 body,
                 templates,
+                fn_ret_types,
                 queue,
                 cm,
                 path,
@@ -229,6 +240,7 @@ fn rewrite_stmt_scoped(
             rewrite_stmts_in_scope(
                 body,
                 templates,
+                fn_ret_types,
                 queue,
                 cm,
                 path,
@@ -236,13 +248,14 @@ fn rewrite_stmt_scoped(
                 &mut body_env,
                 errs,
             );
-            rewrite_expr(cond, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(cond, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRStmt::FnDecl { func, .. } => {
             let mut inner: HashMap<String, TsType> = func.params.iter().cloned().collect();
             rewrite_stmts_in_scope(
                 &mut func.body,
                 templates,
+                fn_ret_types,
                 queue,
                 cm,
                 path,
@@ -259,6 +272,7 @@ fn rewrite_stmt_scoped(
 fn rewrite_expr(
     e: &mut IRExpr,
     templates: &HashMap<String, IRFunction>,
+    fn_ret_types: &HashMap<String, TsType>,
     queue: &mut VecDeque<Req>,
     cm: &crate::ir::SendSourceMap,
     path: &str,
@@ -280,7 +294,7 @@ fn rewrite_expr(
             span,
         } => {
             for a in args.iter_mut() {
-                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(a, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
             if templates.contains_key(callee) {
                 let Some(tpl) = templates.get(callee) else {
@@ -292,6 +306,7 @@ fn rewrite_expr(
                     &tpl.params,
                     &arg_refs,
                     env,
+                    fn_ret_types,
                     type_args,
                     cm.as_ref(),
                     path,
@@ -340,9 +355,9 @@ fn rewrite_expr(
             inherent_rust,
             ..
         } => {
-            rewrite_expr(receiver, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(receiver, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             for a in args.iter_mut() {
-                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(a, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
             if inherent_rust.is_some() {
                 return;
@@ -359,6 +374,7 @@ fn rewrite_expr(
                     &tpl.params,
                     &arg_refs,
                     env,
+                    fn_ret_types,
                     type_args,
                     cm.as_ref(),
                     path,
@@ -388,40 +404,40 @@ fn rewrite_expr(
             }
         }
         IRExpr::Binary { left, right, .. } => {
-            rewrite_expr(left, templates, queue, cm, path, fn_span, env, errs);
-            rewrite_expr(right, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(left, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(right, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::Unary { arg, .. } => {
-            rewrite_expr(arg, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(arg, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::Conditional {
             test, cons, alt, ..
         } => {
-            rewrite_expr(test, templates, queue, cm, path, fn_span, env, errs);
-            rewrite_expr(cons, templates, queue, cm, path, fn_span, env, errs);
-            rewrite_expr(alt, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(test, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(cons, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(alt, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::Seq { exprs, .. } => {
             for x in exprs.iter_mut() {
-                rewrite_expr(x, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(x, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRExpr::Tpl { parts, .. } => {
             for p in parts.iter_mut() {
                 if let TplPart::Interp(e) = p {
-                    rewrite_expr(e, templates, queue, cm, path, fn_span, env, errs);
+                    rewrite_expr(e, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
                 }
             }
         }
         IRExpr::Member { obj, .. } => {
-            rewrite_expr(obj, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(obj, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::OptionalMember { obj, .. } => {
-            rewrite_expr(obj, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(obj, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::NullishCoalesce { left, right, .. } => {
-            rewrite_expr(left, templates, queue, cm, path, fn_span, env, errs);
-            rewrite_expr(right, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(left, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(right, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::MathBuiltin { args, .. }
         | IRExpr::BuiltinLog { args, .. }
@@ -429,13 +445,13 @@ fn rewrite_expr(
         | IRExpr::JsonBuiltin { args, .. }
         | IRExpr::UriBuiltin { args, .. } => {
             for a in args.iter_mut() {
-                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(a, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRExpr::StringMethodBuiltin { receiver, args, .. } => {
-            rewrite_expr(receiver, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(receiver, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             for a in args.iter_mut() {
-                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(a, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRExpr::ReadStdinLine { .. } => {}
@@ -444,54 +460,54 @@ fn rewrite_expr(
         }
         | IRExpr::ReadFileTextAsync {
             path: file_path, ..
-        } => rewrite_expr(file_path, templates, queue, cm, path, fn_span, env, errs),
+        } => rewrite_expr(file_path, templates, fn_ret_types, queue, cm, path, fn_span, env, errs),
         IRExpr::ArrayLit { elems, .. } => {
             for a in elems.iter_mut() {
-                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(a, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRExpr::ObjectLit { fields, .. } => {
             for (_, v) in fields.iter_mut() {
-                rewrite_expr(v, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(v, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRExpr::Index { obj, index, .. } => {
-            rewrite_expr(obj, templates, queue, cm, path, fn_span, env, errs);
-            rewrite_expr(index, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(obj, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(index, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::ArrowFn { params, body, .. } => {
             let mut inner: HashMap<String, TsType> = params.iter().cloned().collect();
-            rewrite_stmts_in_scope(body, templates, queue, cm, path, fn_span, &mut inner, errs);
+            rewrite_stmts_in_scope(body, templates, fn_ret_types, queue, cm, path, fn_span, &mut inner, errs);
         }
         IRExpr::Await { arg, .. } => {
-            rewrite_expr(arg, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(arg, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::FetchText { url, .. } => {
-            rewrite_expr(url, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(url, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::Fetch { url, init, .. } => {
-            rewrite_expr(url, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(url, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             if let Some(i) = init {
                 if let Some(b) = &mut i.body {
-                    rewrite_expr(b, templates, queue, cm, path, fn_span, env, errs);
+                    rewrite_expr(b, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
                 }
             }
         }
         IRExpr::HttpResponseMethodBuiltin { receiver, .. } => {
-            rewrite_expr(receiver, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(receiver, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::HttpResponseBodyGetReader { response, .. } => {
-            rewrite_expr(response, templates, queue, cm, path, fn_span, env, errs);
+            rewrite_expr(response, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
         }
         IRExpr::ReaderRead { .. } => {}
         IRExpr::PromiseAll { elems, .. } => {
             for a in elems.iter_mut() {
-                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(a, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRExpr::RustNew { args, .. } => {
             for a in args.iter_mut() {
-                rewrite_expr(a, templates, queue, cm, path, fn_span, env, errs);
+                rewrite_expr(a, templates, fn_ret_types, queue, cm, path, fn_span, env, errs);
             }
         }
         IRExpr::Number(..)
@@ -511,6 +527,7 @@ fn resolve_generic_type_args(
     param_pairs: &[(String, TsType)],
     arg_exprs: &[&IRExpr],
     env: &HashMap<String, TsType>,
+    fn_ret_types: &HashMap<String, TsType>,
     type_args: &[TsType],
     cm: &swc_common::SourceMap,
     path: &str,
@@ -534,7 +551,7 @@ fn resolve_generic_type_args(
         }
         return Some(type_args.to_vec());
     }
-    match infer_type_args_from_call(tpl, param_pairs, arg_exprs, env, cm, path, span) {
+    match infer_type_args_from_call(tpl, param_pairs, arg_exprs, env, fn_ret_types, cm, path, span) {
         Ok(v) => Some(v),
         Err(e) => {
             errs.push(e);
@@ -548,6 +565,7 @@ fn infer_type_args_from_call(
     param_pairs: &[(String, TsType)],
     arg_exprs: &[&IRExpr],
     env: &HashMap<String, TsType>,
+    fn_ret_types: &HashMap<String, TsType>,
     cm: &swc_common::SourceMap,
     path: &str,
     span: swc_common::Span,
@@ -565,7 +583,7 @@ fn infer_type_args_from_call(
     }
     let mut subst: BTreeMap<String, TsType> = BTreeMap::new();
     for ((_, pt), arg) in param_pairs.iter().zip(arg_exprs.iter()) {
-        let Some(at) = synth_expr_ty(arg, env) else {
+        let Some(at) = synth_expr_ty(arg, env, fn_ret_types) else {
             return Err(diag(
                 cm,
                 path,
@@ -597,7 +615,7 @@ fn infer_type_args_from_call(
     Ok(out)
 }
 
-fn synth_expr_ty(e: &IRExpr, env: &HashMap<String, TsType>) -> Option<TsType> {
+fn synth_expr_ty(e: &IRExpr, env: &HashMap<String, TsType>, fn_ret_types: &HashMap<String, TsType>) -> Option<TsType> {
     match e {
         IRExpr::Number(_, _) => Some(TsType::Number),
         IRExpr::Bool(_, _) => Some(TsType::Boolean),
@@ -605,6 +623,10 @@ fn synth_expr_ty(e: &IRExpr, env: &HashMap<String, TsType>) -> Option<TsType> {
         IRExpr::Ident(n, _) => env.get(n).cloned(),
         IRExpr::Null(_) => Some(TsType::Null),
         IRExpr::Undefined(_) => Some(TsType::Undefined),
+        // G2-2: 支持从非泛型函数调用返回类型推断
+        IRExpr::Call { callee, .. } | IRExpr::OptionalCall { callee, .. } => {
+            fn_ret_types.get(callee).cloned()
+        }
         _ => None,
     }
 }

@@ -148,8 +148,10 @@
 
 #### G1 / G2 — 泛型子集扩展（规格）
 
-- **G1**：显式类型实参的**更多安全调用形态**（链式/嵌套），逐项在 `mono.rs` 证明可单态 + fixture。
-- **G2**：推断仅当每个类型参数可从**已支持的合成实参类型**唯一确定；拒绝联合歧义、未知标识符等（保持现有多错误行为）。
+- [x] **G1**：嵌套泛型调用显式实参 `f<T>(g<U>(x))` 已支持。
+- [x] **G2**：扩展 `synth_expr_ty` 以支持非泛型函数返回类型推断；例如 `id(getNumber())` 其中 `getNumber(): number` 推断 `T=number`。
+- [x] **实现**：在单态化流水线中增加 `fn_ret_types: HashMap<String, TsType>` 以支持函数返回类型查找。
+- [x] **Fixture**：`generic_fn_return_infer_ok.ts`、`generic_nested_call_ok.ts`、`generic_multi_param_ok.ts`。
 - **仍非目标**：高阶类型参数、`extends` 约束、默认类型参数、从异质联合推断等。
 - **回归**：保留现有 `generic_function_*_fail.ts` 与 `compile_generic_function_multi_infer_fail_reports_multiple_errors`。
 
@@ -428,7 +430,7 @@ trust 仍要求**可调用入口名为 `main`**。默认导出仅在与此约定
 
 - [x] **D1 — Discriminated 收窄**：对象联合上 `if (v.kind === 'a')` / `else`；与 `??` / `?.` 协同（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem.rs`](crates/trust-hir/src/sem.rs)）。已完成：通过 `Binding` 上的 `narrow_ty` 支持嵌套收窄。
 - [ ] **D3 向 — 更宽的联合 / `normalize_union` / 可赋值性**：仅当仍能落到**单一** Rust 类型且可静态判定（[§3.3](PROJECT-TODO.zh-CN.md)）。
-- [ ] **G1 / G2 — 泛型子集扩大**（更多显式实参形态、更多元数或非调用位置单态）（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)）。
+- [x] **G1 / G2 — 泛型子集扩大**（更多显式实参形态、更多元数或非调用位置单态）（[§3.3.1](PROJECT-TODO.zh-CN.md)、[`sem/mono.rs`](crates/trust-hir/src/sem/mono.rs)）。已完成：嵌套泛型调用、函数返回类型推断。
 - [ ] **G3 — 类 where 约束**（若做：须全程可静态检查）。
 - [ ] **交集类型 `A & B`**（类型位置；当前拒绝）。
 - [ ] **类型位置的 `bigint` / 模板字面量类型**（当前拒绝）。
