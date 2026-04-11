@@ -1495,7 +1495,14 @@ fn check_stmt(
                         "cannot bind `response.body` alone; use `response.body.getReader()`",
                     ));
                 }
-                if !type_assignable(ty, &got) {
+                // Class subclass constructor: allow parent ctor result to initialize __self
+                // (parent shape is a subset of child shape; fields are added later in ctor body)
+                let is_class_self_init = name == "__self"
+                    && matches!(
+                        init_e,
+                        IRExpr::Call { callee, .. } if callee.ends_with("_new")
+                    );
+                if !is_class_self_init && !type_assignable(ty, &got) {
                     return Err(diag(
                         cm,
                         path,
