@@ -172,14 +172,15 @@ fn object_num_member_ty(
         return None;
     };
     let p = object_prop_by_name(props, prop)?;
-    *object_member_access = Some(if let ObjectMemberKind::Field(ty) = &p.kind {
-        if matches!(ty.as_ref(), TsType::Number) {
-            ObjectMemberAccessKind::NumberLeaf
-        } else {
-            ObjectMemberAccessKind::NestedObject
+    *object_member_access = Some(match &p.kind {
+        ObjectMemberKind::Field(ty) => {
+            if matches!(ty.as_ref(), TsType::Number) {
+                ObjectMemberAccessKind::NumberLeaf
+            } else {
+                ObjectMemberAccessKind::NestedObject
+            }
         }
-    } else {
-        ObjectMemberAccessKind::NestedObject
+        ObjectMemberKind::Method { .. } => ObjectMemberAccessKind::Method,
     });
     p.ty().cloned()
 }
@@ -209,7 +210,7 @@ fn find_interface_method(receiver_ty: &TsType, method_name: &str) -> Option<Meth
 /// R1: 生成修饰后的方法函数名（mangle method name）
 /// 格式: {method}__{interface_name}
 /// 对于 ObjectNum，我们使用一个简化的 mangling 策略
-fn mangle_method_name(method: &str, receiver_ty: &TsType) -> String {
+fn mangle_method_name(method: &str, _receiver_ty: &TsType) -> String {
     // 简化实现：使用 receiver 类型的 fingerprint
     // 实际场景下可能需要更复杂的 mangling 来区分不同 interface
     format!("{}__obj", method)
@@ -2831,7 +2832,9 @@ fn infer_expr_mut(
             let mut props: Vec<ObjectProp> = Vec::with_capacity(fields.len());
             for (k, v) in fields {
                 let t = infer_expr_mut(v, stack, globals, cm, path)?;
-                if !is_numberish(&t) && !matches!(t, TsType::ObjectNum(_)) {
+                // R2: Allow function references in object literals for deep chains
+                let is_function = matches!(t, TsType::Fn { .. });
+                if !is_numberish(&t) && !matches!(t, TsType::ObjectNum(_)) && !is_function {
                     return Err(diag(
                         cm,
                         path,

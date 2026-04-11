@@ -1633,6 +1633,11 @@ fn run_chain_call_ok_prints_six() {
 }
 
 #[test]
+fn run_chain_deep_ok_prints_forty_two() {
+    assert_run_stdout("chain_deep_ok.ts", "42\n");
+}
+
+#[test]
 fn run_optional_call_ok_prints_five() {
     assert_run_stdout("optional_call_ok.ts", "5\n");
 }

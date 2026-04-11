@@ -826,6 +826,8 @@ pub enum IRExpr {
 pub enum ObjectMemberAccessKind {
     NumberLeaf,
     NestedObject,
+    /// R2: Method field stored as string (for deep chains)
+    Method,
 }
 
 /// 模板字面量片段

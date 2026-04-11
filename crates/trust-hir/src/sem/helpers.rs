@@ -5,29 +5,83 @@ use swc_common::Span;
 use crate::error::{diag, CompileError};
 use crate::ir::{ObjectProp, SendSourceMap, TsType};
 
-/// R1: 宽度子类型检查（只比较字段，方法不参与）
-/// `got` 的每个字段必须在 `expected` 中存在且类型可赋。
-/// 不强制要求 `expected` 的所有字段都在 `got` 中（支持类继承）。
+/// R1/R2: 宽度子类型检查（字段 + 方法）
+/// `got` 的每个成员必须在 `expected` 中存在且类型可赋。
+/// 不强制要求 `expected` 的所有成员都在 `got` 中（支持类继承）。
+/// R2: Field(Fn { ... }) 与 Method { ... } 兼容当签名匹配时
 fn object_shape_assignable(expected: &[ObjectProp], got: &[ObjectProp]) -> bool {
-    // 只比较字段（跳过方法）
-    let expected_fields: Vec<_> = expected.iter().filter_map(|e| {
-        e.ty().map(|ty| (e.name.clone(), ty))
-    }).collect();
-    let got_fields: Vec<_> = got.iter().filter_map(|g| {
-        g.ty().map(|ty| (g.name.clone(), ty))
-    }).collect();
-    
-    // got 的每个字段必须在 expected 中存在且类型可赋
-    for (g_name, g_ty) in &got_fields {
-        let Some((_, e_ty)) = expected_fields.iter().find(|(n, _)| n == g_name) else {
+    use crate::ir::ObjectMemberKind;
+
+    // got 的每个成员必须在 expected 中存在且类型可赋
+    for g in got {
+        let Some(e) = expected.iter().find(|p| p.name == g.name) else {
             return false;
         };
-        if !type_assignable(e_ty, g_ty) {
+        // 检查成员兼容性
+        if !object_member_assignable(e, g) {
             return false;
         }
     }
-    
+
     true
+}
+
+/// R2: 检查单个对象成员是否可赋
+/// - Field(T) 与 Field(T) 比较类型
+/// - Method { params, ret } 与 Method { params, ret } 比较签名
+/// - Field(Fn { params, ret }) 与 Method { params, ret } 兼容（允许函数作为方法）
+fn object_member_assignable(expected: &ObjectProp, got: &ObjectProp) -> bool {
+    use crate::ir::ObjectMemberKind;
+
+    match (&expected.kind, &got.kind) {
+        // 字段与字段比较
+        (ObjectMemberKind::Field(e_ty), ObjectMemberKind::Field(g_ty)) => {
+            type_assignable(e_ty, g_ty)
+        }
+        // 方法与方法比较
+        (
+            ObjectMemberKind::Method {
+                params: ep,
+                ret: er,
+            },
+            ObjectMemberKind::Method {
+                params: gp,
+                ret: gr,
+            },
+        ) => {
+            if ep.len() != gp.len() {
+                return false;
+            }
+            if ep.iter().zip(gp.iter()).any(|(e, g)| !type_assignable(e, g)) {
+                return false;
+            }
+            type_assignable(er, gr)
+        }
+        // R2: 期望 Method，得到 Field(Fn) —— 函数作为方法实现
+        (
+            ObjectMemberKind::Method {
+                params: ep,
+                ret: er,
+            },
+            ObjectMemberKind::Field(g_ty),
+        ) => {
+            if let TsType::Fn { params: gp, ret: gr } = g_ty.as_ref() {
+                // R2: 函数作为方法时，函数的第一个参数是 receiver
+                // 所以函数参数数量 = 方法参数数量 + 1 (receiver)
+                if gp.len() != ep.len() + 1 {
+                    return false;
+                }
+                // 比较参数（跳过函数的 receiver 参数）
+                if ep.iter().zip(gp.iter().skip(1)).any(|(e, g)| !type_assignable(e, g)) {
+                    return false;
+                }
+                return type_assignable(er, gr);
+            }
+            false
+        }
+        // 其他情况不兼容
+        _ => false,
+    }
 }
 
 pub(super) fn is_numberish(t: &TsType) -> bool {
