@@ -162,14 +162,16 @@ fn object_prop_by_name<'a>(props: &'a [ObjectProp], name: &str) -> Option<&'a Ob
     props.iter().find(|p| p.name == name)
 }
 
-/// [`TsType::ObjectNum`] 上 `prop` 字段的类型，并写入 [`ObjectMemberAccessKind`]。
+/// [`TsType::ObjectNum`] 或 [`TsType::Interface`] 上 `prop` 字段的类型，并写入 [`ObjectMemberAccessKind`]。
 fn object_num_member_ty(
     ot: &TsType,
     prop: &str,
     object_member_access: &mut Option<ObjectMemberAccessKind>,
 ) -> Option<TsType> {
-    let TsType::ObjectNum(props) = ot else {
-        return None;
+    let props = match ot {
+        TsType::ObjectNum(props) => props,
+        TsType::Interface { props, .. } => props,
+        _ => return None,
     };
     let p = object_prop_by_name(props, prop)?;
     *object_member_access = Some(match &p.kind {
@@ -192,10 +194,12 @@ struct MethodSig {
     ret: Box<TsType>,
 }
 
-/// R1: 在 ObjectNum 中查找方法签名
+/// R1: 在 ObjectNum 或 Interface 中查找方法签名
 fn find_interface_method(receiver_ty: &TsType, method_name: &str) -> Option<MethodSig> {
-    let TsType::ObjectNum(props) = receiver_ty else {
-        return None;
+    let props = match receiver_ty {
+        TsType::ObjectNum(props) => props,
+        TsType::Interface { props, .. } => props,
+        _ => return None,
     };
     let prop = props.iter().find(|p| p.name == method_name)?;
     match &prop.kind {
@@ -248,6 +252,24 @@ fn subst_type_local(t: &TsType, subst: &HashMap<String, TsType>) -> TsType {
                 })
                 .collect(),
         ),
+        TsType::Interface { name, extends, props } => TsType::Interface {
+            name: name.clone(),
+            extends: extends.clone(),
+            props: props
+                .iter()
+                .map(|p| ObjectProp {
+                    name: p.name.clone(),
+                    optional: p.optional,
+                    kind: match &p.kind {
+                        ObjectMemberKind::Field(ty) => ObjectMemberKind::Field(Box::new(subst_type_local(ty, subst))),
+                        ObjectMemberKind::Method { params, ret } => ObjectMemberKind::Method {
+                            params: params.iter().map(|t| subst_type_local(t, subst)).collect(),
+                            ret: Box::new(subst_type_local(ret, subst)),
+                        },
+                    },
+                })
+                .collect(),
+        },
         _ => t.clone(),
     }
 }
@@ -1809,7 +1831,7 @@ fn check_stmt(
             let tt = infer_expr_mut(target, stack, globals, cm, path)?;
             *kind = Some(match tt {
                 TsType::ArrayNumber => ForInKind::ArrayIndices,
-                TsType::ObjectNum(_) | TsType::ClassInstance(_) => ForInKind::ObjectKeys,
+                TsType::ObjectNum(_) | TsType::ClassInstance(_) | TsType::Interface { .. } => ForInKind::ObjectKeys,
                 _ => {
                     return Err(diag(
                         cm,
@@ -2606,7 +2628,7 @@ fn infer_expr_mut(
                 if !is_stringish(&t)
                     && !is_numberish(&t)
                     && !is_booleanish(&t)
-                    && !matches!(t, TsType::ObjectNum(_))
+                    && !matches!(t, TsType::ObjectNum(_) | TsType::Interface { .. })
                 {
                     return Err(diag(
                         cm,
@@ -2834,7 +2856,8 @@ fn infer_expr_mut(
                 let t = infer_expr_mut(v, stack, globals, cm, path)?;
                 // R2: Allow function references in object literals for deep chains
                 let is_function = matches!(t, TsType::Fn { .. });
-                if !is_numberish(&t) && !matches!(t, TsType::ObjectNum(_)) && !is_function {
+                let is_object_like = matches!(t, TsType::ObjectNum(_) | TsType::Interface { .. });
+                if !is_numberish(&t) && !is_object_like && !is_function {
                     return Err(diag(
                         cm,
                         path,

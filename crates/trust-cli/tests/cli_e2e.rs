@@ -578,14 +578,6 @@ fn run_export_interface_ok_prints_twelve() {
 }
 
 #[test]
-fn compile_interface_extends_fails() {
-    assert_compile_fails_stderr(
-        "interface_extends_fail.ts",
-        "interface extends clauses are not supported",
-    );
-}
-
-#[test]
 fn run_interface_generic_ok_prints_zero() {
     assert_run_stdout("interface_generic_fail.ts", "0\n");
 }
@@ -1635,6 +1627,16 @@ fn run_chain_call_ok_prints_six() {
 #[test]
 fn run_chain_deep_ok_prints_forty_two() {
     assert_run_stdout("chain_deep_ok.ts", "42\n");
+}
+
+#[test]
+fn run_interface_extends_ok_prints_six() {
+    assert_run_stdout("interface_extends_ok.ts", "6\n");
+}
+
+#[test]
+fn compile_interface_extends_circular_fails() {
+    assert_compile_fails_stderr("interface_extends_circular_fail.ts", "circular interface inheritance");
 }
 
 #[test]

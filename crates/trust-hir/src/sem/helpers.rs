@@ -5,16 +5,18 @@ use swc_common::Span;
 use crate::error::{diag, CompileError};
 use crate::ir::{ObjectProp, SendSourceMap, TsType};
 
-/// R1/R2: 宽度子类型检查（字段 + 方法）
-/// `got` 的每个成员必须在 `expected` 中存在且类型可赋。
-/// 不强制要求 `expected` 的所有成员都在 `got` 中（支持类继承）。
+/// R1/R2/B2+: 宽度子类型检查（字段 + 方法）
+/// `expected` 的每个**必需**成员必须在 `got` 中存在且类型可赋。
+/// `got` 可以有额外成员（宽度子类型）。
 /// R2: Field(Fn { ... }) 与 Method { ... } 兼容当签名匹配时
 fn object_shape_assignable(expected: &[ObjectProp], got: &[ObjectProp]) -> bool {
-    use crate::ir::ObjectMemberKind;
-
-    // got 的每个成员必须在 expected 中存在且类型可赋
-    for g in got {
-        let Some(e) = expected.iter().find(|p| p.name == g.name) else {
+    // expected 的每个必需成员必须在 got 中存在且类型可赋（宽度子类型）
+    for e in expected {
+        let Some(g) = got.iter().find(|p| p.name == e.name) else {
+            // 可选字段可以缺失
+            if e.optional {
+                continue;
+            }
             return false;
         };
         // 检查成员兼容性
@@ -173,6 +175,28 @@ pub(super) fn type_assignable(expected: &TsType, got: &TsType) -> bool {
             return true;
         }
         return object_shape_assignable(exp, got);
+    }
+    // B2+: Interface 与 ObjectNum / Interface 的兼容性
+    let interface_compatible = match (expected, got) {
+        // Interface 期望，ObjectNum 提供：宽度子类型检查
+        (TsType::Interface { props: exp, .. }, TsType::ObjectNum(got)) => {
+            Some(object_shape_assignable(exp, got))
+        }
+        // Interface 期望，Interface 提供
+        (TsType::Interface { props: exp, .. }, TsType::Interface { props: got, .. }) => {
+            Some(object_shape_assignable(exp, got))
+        }
+        // ObjectNum 期望，Interface 提供（反向兼容）
+        (TsType::ObjectNum(exp), TsType::Interface { props: got, .. }) => {
+            if exp.is_empty() {
+                return true;
+            }
+            Some(object_shape_assignable(exp, got))
+        }
+        _ => None,
+    };
+    if let Some(result) = interface_compatible {
+        return result;
     }
     matches!(
         (expected, got),

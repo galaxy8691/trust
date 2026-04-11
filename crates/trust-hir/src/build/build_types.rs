@@ -359,6 +359,9 @@ pub(super) fn ts_type_from_ast(
 }
 
 /// 收集具名类型；失败项记入 `errs` 并跳过，仍返回当前已收集的 `map`。
+/// B2+: 使用两阶段收集：
+/// 1) 收集所有接口名（空壳）到 map 用于前向引用
+/// 2) 解析接口属性、extends 和类型别名
 pub(super) fn collect_named_types_with_errors(
     program: &Program,
     cm: &Lrc<SourceMap>,
@@ -366,19 +369,19 @@ pub(super) fn collect_named_types_with_errors(
     errs: &mut Vec<CompileError>,
 ) -> HashMap<String, TsType> {
     let mut map = HashMap::new();
+    let mut interface_decls: Vec<&TsInterfaceDecl> = Vec::new();
+    let mut type_alias_decls: Vec<&TsTypeAliasDecl> = Vec::new();
+    
+    // 第一阶段：收集所有声明的引用，并将接口名（空壳）插入 map
     match program {
         Program::Module(m) => {
             for item in &m.body {
                 match item {
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(i))) => {
-                        if let Err(e) = collect_one_interface(i.as_ref(), &mut map, cm, path) {
-                            errs.push(e);
-                        }
+                        interface_decls.push(i.as_ref());
                     }
                     ModuleItem::Stmt(Stmt::Decl(Decl::TsTypeAlias(a))) => {
-                        if let Err(e) = collect_one_type_alias(a.as_ref(), &mut map, cm, path) {
-                            errs.push(e);
-                        }
+                        type_alias_decls.push(a.as_ref());
                     }
                     ModuleItem::Stmt(Stmt::Decl(Decl::Class(c))) => {
                         if let Err(e) = collect_one_class(c, &mut map, cm, path) {
@@ -388,18 +391,10 @@ pub(super) fn collect_named_types_with_errors(
                     ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => {
                         match decl {
                             Decl::TsInterface(i) => {
-                                if let Err(e) =
-                                    collect_one_interface(i.as_ref(), &mut map, cm, path)
-                                {
-                                    errs.push(e);
-                                }
+                                interface_decls.push(i.as_ref());
                             }
                             Decl::TsTypeAlias(a) => {
-                                if let Err(e) =
-                                    collect_one_type_alias(a.as_ref(), &mut map, cm, path)
-                                {
-                                    errs.push(e);
-                                }
+                                type_alias_decls.push(a.as_ref());
                             }
                             Decl::Class(c) => {
                                 if let Err(e) = collect_one_class(c, &mut map, cm, path) {
@@ -417,14 +412,10 @@ pub(super) fn collect_named_types_with_errors(
             for stmt in &s.body {
                 match stmt {
                     Stmt::Decl(Decl::TsInterface(i)) => {
-                        if let Err(e) = collect_one_interface(i.as_ref(), &mut map, cm, path) {
-                            errs.push(e);
-                        }
+                        interface_decls.push(i.as_ref());
                     }
                     Stmt::Decl(Decl::TsTypeAlias(a)) => {
-                        if let Err(e) = collect_one_type_alias(a.as_ref(), &mut map, cm, path) {
-                            errs.push(e);
-                        }
+                        type_alias_decls.push(a.as_ref());
                     }
                     Stmt::Decl(Decl::Class(c)) => {
                         if let Err(e) = collect_one_class(c, &mut map, cm, path) {
@@ -436,7 +427,289 @@ pub(super) fn collect_named_types_with_errors(
             }
         }
     }
+    
+    // 检查接口名重复并将空壳插入 map（支持前向引用）
+    for d in &interface_decls {
+        let name = d.id.sym.to_string();
+        if map.contains_key(&name) {
+            errs.push(diag(
+                cm,
+                path,
+                d.id.span,
+                format!("duplicate type name `{}`", d.id.sym),
+            ));
+            continue;
+        }
+        map.insert(name.clone(), TsType::Interface {
+            name,
+            extends: None,
+            props: vec![],
+        });
+    }
+    
+    // 第二阶段：检测循环继承
+    if let Err(e) = check_circular_extends(&interface_decls, &map, cm, path) {
+        errs.push(e);
+        return map; // 有循环继承，提前返回
+    }
+    
+    // 第三阶段：解析接口（属性类型和 extends 都可以引用其他接口）
+    let mut resolver = ExtendsResolver {
+        map: &mut map,
+        resolving: HashSet::new(),
+    };
+    for d in &interface_decls {
+        if let Err(e) = resolve_interface(d, &mut resolver, cm, path) {
+            errs.push(e);
+        }
+    }
+    
+    // 第三阶段：解析类型别名（可以引用接口）
+    for d in &type_alias_decls {
+        if let Err(e) = resolve_type_alias(d, &mut map, cm, path) {
+            errs.push(e);
+        }
+    }
+    
     map
+}
+
+/// B2+: 解析单个接口（此时所有接口名已在 map 中）
+/// B2+: 检测循环继承
+fn check_circular_extends(
+    decls: &[&TsInterfaceDecl],
+    map: &HashMap<String, TsType>,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+) -> Result<(), CompileError> {
+    // 构建 extends 图
+    let mut extends_graph: HashMap<String, Option<String>> = HashMap::new();
+    for d in decls {
+        let name = d.id.sym.to_string();
+        let extends = if d.extends.is_empty() {
+            None
+        } else if d.extends.len() > 1 {
+            None // 多个 extends 会在解析时报错
+        } else {
+            match d.extends[0].expr.as_ref() {
+                Expr::Ident(id) => {
+                    let parent = id.sym.to_string();
+                    if map.contains_key(&parent) {
+                        Some(parent)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        };
+        extends_graph.insert(name, extends);
+    }
+    
+    // 检测循环
+    fn check_cycle(
+        name: &str,
+        graph: &HashMap<String, Option<String>>,
+        visiting: &mut Vec<String>,
+        visited: &mut HashSet<String>,
+    ) -> Option<String> {
+        if visiting.contains(&name.to_string()) {
+            return Some(name.to_string());
+        }
+        if visited.contains(name) {
+            return None;
+        }
+        visiting.push(name.to_string());
+        if let Some(Some(parent)) = graph.get(name) {
+            if let Some(cycle) = check_cycle(parent, graph, visiting, visited) {
+                return Some(cycle);
+            }
+        }
+        visiting.pop();
+        visited.insert(name.to_string());
+        None
+    }
+    
+    let mut visited = HashSet::new();
+    for name in extends_graph.keys() {
+        let mut visiting = Vec::new();
+        if let Some(cycle_name) = check_cycle(name, &extends_graph, &mut visiting, &mut visited) {
+            // 找到循环，查找对应的接口定义获取 span
+            for d in decls {
+                if d.id.sym == cycle_name {
+                    return Err(diag(
+                        cm,
+                        path,
+                        d.id.span,
+                        format!("circular interface inheritance detected involving `{}`", cycle_name),
+                    ));
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// 用于检测循环继承的状态
+struct ExtendsResolver<'a> {
+    map: &'a mut HashMap<String, TsType>,
+    resolving: HashSet<String>,
+}
+
+fn resolve_interface(
+    d: &&TsInterfaceDecl,
+    resolver: &mut ExtendsResolver,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+) -> Result<(), CompileError> {
+    let name = d.id.sym.to_string();
+    
+    // 检测循环继承
+    if resolver.resolving.contains(&name) {
+        return Err(diag(
+            cm,
+            path,
+            d.id.span,
+            format!("circular interface inheritance detected involving `{}`", name),
+        ));
+    }
+    
+    // 解析 extends
+    let extends = if d.extends.is_empty() {
+        None
+    } else if d.extends.len() > 1 {
+        return Err(diag(
+            cm,
+            path,
+            d.extends[1].span,
+            "multiple interface extends are not supported",
+        ));
+    } else {
+        match d.extends[0].expr.as_ref() {
+            Expr::Ident(id) => {
+                let parent_name = id.sym.to_string();
+                // 检查父接口是否存在
+                if !resolver.map.contains_key(&parent_name) {
+                    return Err(diag(
+                        cm,
+                        path,
+                        d.extends[0].span,
+                        format!("interface extends unknown type `{}`", parent_name),
+                    ));
+                }
+                Some(parent_name)
+            }
+            _ => {
+                return Err(diag(
+                    cm,
+                    path,
+                    d.extends[0].span,
+                    "complex interface extends expressions are not supported",
+                ));
+            }
+        }
+    };
+    
+    // 解析自己的属性（可以引用其他接口，因为所有接口名已在 map 中）
+    let own_props = object_props_from_type_elements(&d.body.body, cm, path, d.body.span, resolver.map, None)?;
+    
+    // 如果有 extends，合并父接口属性
+    let props = if let Some(ref parent_name) = extends {
+        resolver.resolving.insert(name.clone());
+        let parent_props = get_interface_props(parent_name, resolver, cm, path, d.span)?;
+        resolver.resolving.remove(&name);
+        merge_interface_props(&parent_props, &own_props)
+    } else {
+        own_props
+    };
+    
+    // 更新 map 中的接口定义
+    resolver.map.insert(name, TsType::Interface {
+        name: d.id.sym.to_string(),
+        extends,
+        props,
+    });
+    
+    Ok(())
+}
+
+/// B2+: 获取接口的属性（用于 extends 合并）
+fn get_interface_props(
+    name: &str,
+    resolver: &mut ExtendsResolver,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+    span: Span,
+) -> Result<Vec<ObjectProp>, CompileError> {
+    match resolver.map.get(name) {
+        Some(TsType::Interface { props, extends, .. }) => {
+            // 如果属性为空但有 extends，需要递归解析
+            if props.is_empty() && extends.is_some() {
+                // 返回空，让上层处理递归
+                Ok(vec![])
+            } else {
+                Ok(props.clone())
+            }
+        }
+        Some(TsType::ObjectNum(props)) => Ok(props.clone()),
+        _ => Err(diag(
+            cm,
+            path,
+            span,
+            format!("`{}` is not an interface type", name),
+        )),
+    }
+}
+
+/// B2+: 合并父接口和子接口的属性（子覆盖父）
+fn merge_interface_props(parent: &[ObjectProp], child: &[ObjectProp]) -> Vec<ObjectProp> {
+    let mut result = parent.to_vec();
+    for c in child {
+        if let Some(idx) = result.iter().position(|p| p.name == c.name) {
+            result[idx] = c.clone(); // 子覆盖父
+        } else {
+            result.push(c.clone());
+        }
+    }
+    // 排序以确保确定性
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    result
+}
+
+/// B2+: 解析类型别名
+fn resolve_type_alias(
+    d: &&TsTypeAliasDecl,
+    map: &mut HashMap<String, TsType>,
+    cm: &Lrc<SourceMap>,
+    path: &str,
+) -> Result<(), CompileError> {
+    let name = d.id.sym.to_string();
+    if map.contains_key(&name) {
+        return Err(diag(
+            cm,
+            path,
+            d.id.span,
+            format!("duplicate type name `{}`", d.id.sym),
+        ));
+    }
+    
+    let mut tp = HashSet::new();
+    if let Some(params) = &d.type_params {
+        for p in &params.params {
+            tp.insert(p.name.sym.to_string());
+        }
+    }
+    
+    let ty = ts_type_from_ast(
+        d.type_ann.as_ref(),
+        cm,
+        path,
+        map,
+        if tp.is_empty() { None } else { Some(&tp) },
+    )?;
+    map.insert(name, ty);
+    Ok(())
 }
 
 fn collect_one_class(
@@ -500,67 +773,105 @@ fn collect_one_class(
     Ok(())
 }
 
-fn collect_one_interface(
-    d: &TsInterfaceDecl,
-    map: &mut HashMap<String, TsType>,
-    cm: &Lrc<SourceMap>,
-    path: &str,
-) -> Result<(), CompileError> {
-    let name = d.id.sym.to_string();
-    if map.contains_key(&name) {
-        return Err(diag(
-            cm,
-            path,
-            d.id.span,
-            format!("duplicate type name `{}`", d.id.sym),
-        ));
-    }
-    if !d.extends.is_empty() {
-        return Err(diag(
-            cm,
-            path,
-            d.extends[0].span,
-            "interface extends clauses are not supported",
-        ));
-    }
-    // R1: 先插入空壳以支持前向引用（方法参数中引用自身类型）
-    map.insert(name.clone(), TsType::ObjectNum(vec![]));
-    let ty = object_num_from_type_elements(&d.body.body, cm, path, d.body.span, map, None)?;
-    map.insert(name, ty);
-    Ok(())
-}
+/// B2+: 收集接口定义（第一阶段），提取 extends 信息但不展平
 
-fn collect_one_type_alias(
-    d: &TsTypeAliasDecl,
-    map: &mut HashMap<String, TsType>,
+/// 从类型元素收集属性
+/// B2+: 添加 iface 参数以支持接口类型引用
+fn object_props_from_type_elements(
+    members: &[TsTypeElement],
     cm: &Lrc<SourceMap>,
     path: &str,
-) -> Result<(), CompileError> {
-    let name = d.id.sym.to_string();
-    if map.contains_key(&name) {
-        return Err(diag(
-            cm,
-            path,
-            d.id.span,
-            format!("duplicate type name `{}`", d.id.sym),
-        ));
-    }
-    let mut tp = HashSet::new();
-    if let Some(params) = &d.type_params {
-        for p in &params.params {
-            tp.insert(p.name.sym.to_string());
+    dup_span: Span,
+    iface: &HashMap<String, TsType>,
+    type_params: Option<&HashSet<String>>,
+) -> Result<Vec<ObjectProp>, CompileError> {
+    let mut props: Vec<ObjectProp> = Vec::new();
+    for m in members {
+        match m {
+            TsTypeElement::TsPropertySignature(p) => {
+                let key = match &*p.key {
+                    Expr::Ident(i) => i.sym.to_string(),
+                    Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
+                    _ => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            p.key.span(),
+                            "unsupported property key in interface",
+                        ));
+                    }
+                };
+                let ft = if let Some(type_ann) = &p.type_ann {
+                    ts_type_from_ast(&type_ann.type_ann, cm, path, iface, type_params)?
+                } else {
+                    TsType::Void
+                };
+                props.push(ObjectProp {
+                    name: key,
+                    optional: p.optional,
+                    kind: crate::ir::ObjectMemberKind::Field(Box::new(ft)),
+                });
+            }
+            TsTypeElement::TsMethodSignature(m) => {
+                // R1: 支持接口方法签名
+                let key = match &*m.key {
+                    Expr::Ident(i) => i.sym.to_string(),
+                    _ => {
+                        return Err(diag(
+                            cm,
+                            path,
+                            m.span,
+                            "method name must be an identifier",
+                        ));
+                    }
+                };
+                // R1 v0: 拒绝泛型方法
+                if m.type_params.is_some() {
+                    return Err(diag(
+                        cm,
+                        path,
+                        m.span,
+                        "generic methods are not supported in interface (R1 v0)",
+                    ));
+                }
+                // 解析参数类型
+                let mut params = Vec::new();
+                for param in &m.params {
+                    let ty = ts_type_from_fn_param(param, cm, path, iface, type_params)?;
+                    params.push(ty);
+                }
+                // 解析返回类型
+                let ret = if let Some(type_ann) = &m.type_ann {
+                    ts_type_from_ast(&type_ann.type_ann, cm, path, iface, type_params)?
+                } else {
+                    TsType::Void
+                };
+                props.push(ObjectProp {
+                    name: key,
+                    optional: false,
+                    kind: crate::ir::ObjectMemberKind::Method { params, ret: Box::new(ret) },
+                });
+            }
+            _ => {}
         }
     }
-    let ty = ts_type_from_ast(
-        d.type_ann.as_ref(),
-        cm,
-        path,
-        map,
-        if tp.is_empty() { None } else { Some(&tp) },
-    )?;
-    map.insert(name, ty);
-    Ok(())
+    
+    // 检查重复
+    props.sort_by(|a, b| a.name.cmp(&b.name));
+    for w in props.windows(2) {
+        if w[0].name == w[1].name {
+            return Err(diag(
+                cm,
+                path,
+                dup_span,
+                format!("duplicate property name `{}` in interface", w[0].name),
+            ));
+        }
+    }
+    
+    Ok(props)
 }
+
 
 fn object_num_from_type_elements(
     members: &[TsTypeElement],

@@ -356,8 +356,8 @@ Trust keeps a **callable entry named `main`**. Default export is supported only 
 **trust** uses static, codegen-friendly rules; **not** full TypeScript structural subtyping.
 
 - [x] **B1 — nested `ObjectNum` + optional props**: [`ObjectProp`](crates/trust-hir/src/ir.rs), [`object_shape_assignable`](crates/trust-hir/src/sem/helpers.rs), object literals as `serde_json::Value` in codegen; fixture `nested_object_ok.ts`.
-- [ ] **B2+ — cross-file interface names in type position, callable members on object types, richer `readonly`/index signatures**: **backlog**; README documents current limits and differences from `tsc`.
-- **B2a (next milestone)** — cross-file **type-only** / nominal reuse: e.g. `import type { I } from "./dep.ts"` and using `I` in annotations **across files**. **Current boundary**: `import type` and type-only specifiers are **rejected** at import resolution ([`import_utils.rs`](crates/trust-parser/src/import_utils.rs)); negative fixture [`import_type_fail_main.ts`](crates/trust-cli/tests/fixtures/import_type_fail_main.ts) + e2e `compile_import_type_fails`. Implementing B2a requires extending the module graph + merged type table, not only parser tweaks.
+- [x] **B2a — `import type` cross-file**: `import type { I } from "./dep.ts"` and using `I` in annotations **across files** already works (tested: `import_type_main.ts`, cross-file interface methods with R2). 
+- [ ] **B2+ — `interface extends`, callable members on object types, richer `readonly`/index signatures**: **backlog**; README documents current limits. `interface extends` is the next priority (rejected today with "interface extends clauses are not supported").
 
 ### 13.8 Async surface — no user `Promise` / no `.then` (product decision)
 
@@ -441,7 +441,8 @@ Checkbox list derived from [README — Unsupported TypeScript](README.md), matri
 - [ ] **`strictNullChecks`-equivalent mode** as an **explicit** compiler option (not implicit TS looseness).
 - [ ] **R1 — Nominal methods on `interface` / object types** (static dispatch; global `m__I(receiver,…)` or inherent) ([§3.3.1](PROJECT-TODO.md)).
 - [ ] **R2 — Deeper type-driven call/member chains** than one `f().g()` ([§1.3 follow-ups](PROJECT-TODO.md)).
-- [ ] **§13.7 B2a + B2+** — `import type`, cross-file interface/type names in annotations, callable members on object types, `interface extends`, richer `readonly` / index signatures ([§13.7](PROJECT-TODO.md)).
+- [x] **§13.7 B2a** — `import type` cross-file already works (discovered complete; see investigation).
+- [ ] **§13.7 B2+** — `interface extends`, callable members on object types, richer `readonly` / index signatures ([§13.7](PROJECT-TODO.md)).
 
 #### Language surface
 

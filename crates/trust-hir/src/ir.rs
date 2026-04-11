@@ -100,6 +100,12 @@ pub enum TsType {
     Uint8Array,
     /// 受限对象形状：`{ k: number, n?: number, inner: { x: number } }`（字段名排序、唯一；与完整 TS 结构子类型不等价）。
     ObjectNum(Vec<ObjectProp>),
+    /// B2+: 接口类型，支持 extends 继承
+    Interface {
+        name: String,
+        extends: Option<String>,
+        props: Vec<ObjectProp>,
+    },
     /// 联合类型 `A | B`（成员已规范化：扁平化、去重、按 [`cmp_ts_type`] 排序）。
     Union(Vec<TsType>),
     /// 交集类型 `A & B`（成员已规范化：扁平化、去重、按 [`cmp_ts_type`] 排序）。
@@ -202,6 +208,18 @@ pub fn cmp_ts_type(a: &TsType, b: &TsType) -> Ordering {
         (NumberLit(x), NumberLit(y)) => x.cmp(y),
         (StringLit(x), StringLit(y)) => x.cmp(y),
         (ObjectNum(x), ObjectNum(y)) => cmp_object_props(x, y),
+        (
+            Interface {
+                name: na,
+                extends: ea,
+                props: pa,
+            },
+            Interface {
+                name: nb,
+                extends: eb,
+                props: pb,
+            },
+        ) => na.cmp(nb).then_with(|| ea.cmp(eb)).then_with(|| cmp_object_props(pa, pb)),
         (TypeParam(x), TypeParam(y)) => x.cmp(y),
         (ClassInstance(x), ClassInstance(y)) => x.cmp(y),
         (ArrayString, ArrayString) => Equal,
@@ -310,13 +328,14 @@ fn variant_rank(t: &TsType) -> u8 {
         TsType::StreamReadResult => 15,
         TsType::Uint8Array => 16,
         TsType::ObjectNum(_) => 17,
-        TsType::TypeParam(_) => 18,
-        TsType::Fn { .. } => 19,
-        TsType::ClassInstance(_) => 20,
-        TsType::Promise(_) => 21,
-        TsType::RustExtern { .. } => 22,
-        TsType::Union(_) => 23,
-        TsType::Intersection(_) => 24,
+        TsType::Interface { .. } => 18,
+        TsType::TypeParam(_) => 19,
+        TsType::Fn { .. } => 20,
+        TsType::ClassInstance(_) => 21,
+        TsType::Promise(_) => 22,
+        TsType::RustExtern { .. } => 23,
+        TsType::Union(_) => 24,
+        TsType::Intersection(_) => 25,
     }
 }
 

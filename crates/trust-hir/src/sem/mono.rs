@@ -1107,6 +1107,33 @@ fn type_key(t: &TsType) -> String {
             }
             s
         }
+        TsType::Interface { name, extends, props } => {
+            let mut s = format!("iface_{}", name);
+            if let Some(parent) = extends {
+                s.push_str("_e_");
+                s.push_str(parent);
+            }
+            for p in props {
+                s.push('_');
+                s.push_str(&p.name);
+                s.push('_');
+                s.push(if p.optional { '1' } else { '0' });
+                s.push('_');
+                match &p.kind {
+                    crate::ir::ObjectMemberKind::Field(ty) => {
+                        s.push('f');
+                        s.push_str(&type_key(ty));
+                    }
+                    crate::ir::ObjectMemberKind::Method { params, ret } => {
+                        s.push('m');
+                        s.push_str(&params.iter().map(type_key).collect::<Vec<_>>().join("_"));
+                        s.push_str("_r");
+                        s.push_str(&type_key(ret));
+                    }
+                }
+            }
+            s
+        }
         TsType::Union(m) => format!("u{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
         TsType::Intersection(m) => format!("i{}", m.iter().map(type_key).collect::<Vec<_>>().join("_")),
         TsType::TypeParam(n) => format!("tp{n}"),
