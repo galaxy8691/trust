@@ -340,15 +340,15 @@ tests/
 ### 6.1 TIR 节点
 
 ```rust
-/// TIR 控制流图节点（对应 Trust-设计文档.md §9.1）
+/// TIR 控制流图节点（对应 Trust-设计文档.md §9.1，spec SEM-REQ-001）
 enum TirNode {
-    /// let x = expr; （对应 §4.1 移动语义）
+    /// let x = expr; （对应 设计文档 §4.1 移动语义，spec OWN-REQ-001）
     Let { name: Symbol, init: TirExpr, mutable: bool },
-    /// function foo(inout x: T) { ... } （对应 §4.3）
+    /// function foo(inout x: T) { ... } （对应 设计文档 §4.3，spec OWN-REQ-002）
     Function { name: Symbol, params: Vec<TirParam>, body: TirBlock },
-    /// spawn(move || { ... }) （对应 §5.1）
+    /// spawn(move || { ... }) （对应 设计文档 §5.1，spec CON-REQ-002）
     Spawn { closure: TirClosure, is_async: bool },
-    /// shared counter = 0; counter.withLock(c => ...) （对应 §5.3）
+    /// shared counter = 0; counter.withLock(c => ...) （对应 设计文档 §5.3，spec CON-REQ-003）
     Shared { name: Symbol, init: TirExpr },
     WithLock { shared: Symbol, body: TirClosure },
 }
@@ -356,18 +356,20 @@ enum TirNode {
 
 **规则：** 每个 TIR 节点变体上方必须注释对应的设计文档章节号。
 
+> **范围说明：** 以上仅列出所有权/并发相关的 TIR 节点（5 个变体）。完整的 AST→TIR 降级覆盖 spec SEM-REQ-001 的全部 13 个 AST 节点——控制流（`IfExpr`、`ForStmt`、`LoopExpr` 等）在 HIR→TIR 时降级为基本块 + 条件跳转（见 spec SEM-REQ-004），非所有权相关的节点不在此列出。
+
 ### 6.2 Borrow Checker
 
 借用检查器实现 Trust 的三模式参数表（§4.3）：默认只读借用、`inout` 可变借用、`move` 所有权转移。核心算法：对每个 TIR 基本块进行**区域推断（region inference）**和**数据流分析**。
 
 ```rust
-/// 借用检查入口（§4.3 三模式参数表）
+/// 借用检查入口（设计文档 §4.3 三模式参数表，spec OWN-REQ-002）
 fn check_function_borrows(&self, func: &TirFunction) -> Result<(), TirError> {
     for param in &func.params {
         match param.mode {
-            ParamMode::ReadOnly => self.check_immutable_borrow(param)?,
-            ParamMode::InOut => self.check_mutable_borrow(param)?,
-            ParamMode::Move => self.check_ownership_transfer(param)?,
+            ParamMode::ReadOnly => self.check_immutable_borrow(param)?,   // OWN-REQ-003
+            ParamMode::InOut => self.check_mutable_borrow(param)?,       // OWN-REQ-003
+            ParamMode::Move => self.check_ownership_transfer(param)?,     // OWN-REQ-001
         }
     }
     Ok(())
@@ -375,17 +377,55 @@ fn check_function_borrows(&self, func: &TirFunction) -> Result<(), TirError> {
 ```
 
 **规则：** 
-- 借用检查器的每个检查步骤必须注释对应的设计文档规则
+- 借用检查器的每个检查步骤必须注释对应的 spec REQ-ID（OWN-REQ-001~008）
 - 错误信息必须映射回 Trust 源文件的**行号和列号**（通过 source span）
 - 不允许暴露 TIR 内部名称（如 `_tir_borrow_14`）到错误信息中
 
+#### 6.2.1 for 循环隐式可变（spec OWN-REQ-007）
+
+`for (let i = 0; i < N; i++)` 中 `i` 为隐式可变——这是 Trust 中唯一允许 `let` 声明的变量被修改的场景。TIR 层在对 `for` 循环降级时，自动将 `i` 标记为 `mutable = true`：
+
+```rust
+fn lower_for_loop(init: &TirExpr, cond: &TirExpr, update: &TirExpr, body: &TirBlock) -> TirBlock {
+    // C-style for 的迭代变量强制标记为 mutable（OWN-REQ-007）
+    if let TirExpr::Let { name, init, .. } = init {
+        self.scope.insert(name, TirVar { mutable: true, .. });
+    }
+    // ... 降级为 loop + if break 的基本块
+}
+```
+
+**规则：** `for-of` 和 `while` 循环不受此例外影响——它们的迭代变量遵循标准 `let` 不可变规则。
+
+#### 6.2.2 Copy 类型判定（spec OWN-REQ-008）
+
+编译器在 HIR→TIR 降级时自动判定类型是否实现 `Copy` trait：
+
+```rust
+fn is_copy_type(ty: &Type) -> bool {
+    match ty {
+        Type::I32 | Type::F64 | Type::Bool | Type::BigInt => true,  // 标量类型
+        Type::Ref(_) => true,                                        // 引用总是 Copy
+        Type::Tuple(elems) => elems.iter().all(|e| is_copy_type(e)), // 元素全 Copy
+        Type::Array(elem, _) => is_copy_type(elem),                  // 固定数组元素 Copy
+        Type::Vec(_) | Type::String | Type::Box(_)
+            | Type::Rc(_) | Type::Arc(_) => false,                   // 堆分配类型非 Copy
+        _ => false,                                                  // 保守：用户类型默认非 Copy
+    }
+}
+```
+
+`Copy` 类型在 `let b = a` 时不触发移动语义（`a` 后续仍可用），非 `Copy` 类型触发 OWN-REQ-001。
+
 ### 6.3 区域推断（Region Inference）
 
-生命周期自动推导实现（§4.4）：
+生命周期自动推导实现（设计文档 §4.4，spec OWN-REQ-009）：
 
 - 函数参数 → 返回值：如果返回引用类型，自动将返回值生命周期绑定到参数
 - 大多数场景不需要标注，仅在返回引用或自引用结构中需要
 - TIR 层检测生命周期不足时，生成 rustc 风格的生命周期标注并提示用户
+
+**回退策略：** 当 TIR 层无法完全推断生命周期关系时（如高阶生命周期多态、自引用结构），编译器不放弃——回退为生成带有显式生命周期标注的 Rust 代码，依赖 rustc 进行最终验证。错误信息通过 source map（§7.2）映射回 Trust 源码行。此策略确保 Trust 编译器在 v0.1 即可覆盖 95%+ 的场景，剩余极端情况由 rustc 保底，而非阻塞编译。随着 TIR 成熟度提升，回退触发频率应逐步降低至 0。
 
 ---
 
@@ -404,6 +444,35 @@ fn emit_param(param: &TirParam) -> String {
     }
 }
 ```
+
+#### 7.1.1 隐式 Trait 生成（对应 spec TYP-REQ-007）
+
+当 Trust 泛型约束使用结构化类型 `T extends { field: Type }` 时，编译器在 codegen 阶段自动生成隐式 trait 并实现：
+
+```rust
+// Trust 源：function first<T extends { length: number }>(x: T): number { ... }
+//
+// 编译器自动生成：
+trait HasLength {           // 隐式 trait，命名规则：Has{FieldName}
+    fn length(&self) -> usize;
+}
+
+impl<T> HasLength for Vec<T> {             // 向量 → len()
+    fn length(&self) -> usize { self.len() }
+}
+impl HasLength for String {                // 字符串 → len()
+    fn length(&self) -> usize { self.len() }
+}
+impl<T, const N: usize> HasLength for [T; N] { // 固定数组 → 编译时常量
+    fn length(&self) -> usize { N }
+}
+```
+
+**规则：**
+- 隐式 trait 仅用于结构化 `extends` 约束（`T extends { field: Type }`），不用于名义 `extends Interface` 约束
+- 内置类型的自动 `impl` 仅覆盖 `Vec<T>`、`String`、`[T; N]`、`&[T]`、`HashMap<K,V>`
+- 用户自定义类型若需满足该约束，可手动 `impl HasFieldName for MyType`（孤儿规则适用）
+- 隐式 trait 生成在 HIR 类型检查阶段（`trust_hir::typeck`），非 codegen 阶段——codegen 仅消费已解析的 trait 信息
 
 ### 7.2 Source Map
 
@@ -452,7 +521,16 @@ struct Diagnostic {
   "message": "变量 `data` 在第 12 行被移动后在第 15 行被使用",
   "level": "error",
   "code": "E0382",
-  "spans": [...],
+  "spans": [
+    {
+      "file": "src/main.trust",
+      "line_start": 12,
+      "line_end": 12,
+      "col_start": 5,
+      "col_end": 9,
+      "label": "data 在此处被移动"
+    }
+  ],
   "children": [
     { "message": "考虑在此处使用 data.clone()", "level": "help" }
   ]
