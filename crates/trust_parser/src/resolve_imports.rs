@@ -11,9 +11,10 @@ pub fn resolve_import_path(import_path: &str, current_file: &str) -> Option<Stri
         if !p.ends_with(".trust") { p.push_str(".trust"); }
         Some(p)
     } else if import_path.starts_with("./") || import_path.starts_with("../") {
-        // 相对路径
         let current_dir = std::path::Path::new(current_file).parent()?;
-        let resolved = current_dir.join(import_path);
+        // 去掉 ./ 前缀再 join，避免产生 src/./math 路径
+        let clean_path = import_path.strip_prefix("./").unwrap_or(import_path);
+        let resolved = current_dir.join(clean_path);
         let mut p = resolved.to_string_lossy().to_string();
         if !p.ends_with(".trust") { p.push_str(".trust"); }
         Some(p)
