@@ -2,7 +2,8 @@
 
 > 目标：实现最小可用 Trust 编译器（Trust → Rust 源码 → 二进制）  
 > 期限：第 2–4 个月  
-> 优先级：P0（阻塞所有后续 Phase）
+> 优先级：P0（阻塞所有后续 Phase）  
+> 最后辩论：与 OpenClaw 三轮对抗审查，23 条发现全部修正（🔴8 🟠5 🟡11 → 0）
 
 ---
 
@@ -12,18 +13,40 @@
 **工作量：** 2 天  
 **优先级：** P0
 
+### Cargo workspace
+
 - [ ] Cargo workspace 搭建（crate 结构按 `docs/design-constraints.md` §1.2）
 - [ ] `rustfmt.toml`、`clippy.toml` 配置
 - [ ] MSRV 声明（stable Rust ≥ 1.63，`Cargo.toml` 中 `rust-version` 字段）
+
+### CI/CD
+
 - [ ] CI/CD 配置（GitHub Actions，按 constraints §11.1）
 - [ ] CI job: `cargo test --workspace`
 - [ ] CI job: `cargo clippy --workspace -- -D warnings`
 - [ ] CI job: `cargo fmt --check --all`
+- [ ] CI job: `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir && exit 1 || echo "OK"`（P0：前三 crate 零 unsafe，constraints §3.2）
 - [ ] CI job: `cargo tarpaulin -p trust_tir --fail-under 85`（P1，nightly toolchain）
+- [ ] CI job: `cargo tarpaulin -p trust_parser --fail-under 70`（P1，constraints §5.3）
+- [ ] CI job: `cargo tarpaulin -p trust_hir --fail-under 70`（P1）
+- [ ] CI job: `cargo tarpaulin -p trust_codegen --fail-under 70`（P1）
 - [ ] CI job: `cargo miri test -p ferro_rt`（P1，unsafe 块验证，nightly）
-- [ ] `fuzz/` 目录初始化（cargo-fuzz，parser + codegen 目标）
-- [ ] `benches/` 基础目录（v0.1 性能基准占位，v0.2 正式启用）
+- [ ] CI job: `cargo test --workspace` on MSRV（Rust 1.63，constraints §11.2 P1）
 - [ ] `.github/dependabot.yml` 依赖自动更新配置
+
+### Clippy P0 约束
+
+- [ ] `clippy.toml` 启用 `clippy::unwrap_used`、`clippy::expect_used`（P0：编译器 crate 禁止 unwrap/expect，constraints §3.1）
+- [ ] `clippy.toml` 启用 `clippy::unnecessary_cast`、`clippy::cast_lossless`（数字类型规范）
+
+### Fuzz + Bench + 工程规范
+
+- [ ] `fuzz/` 目录初始化（cargo-fuzz：parser + TIR + codegen 目标）
+- [ ] `benches/` 基础目录（criterion benchmark，v0.1 基础，v0.2 正式启用）
+- [ ] `CHANGELOG.md` 初始化（Keep a Changelog 格式，constraints §11.4）
+- [ ] Workspace 所有 crate 版本同步声明（SemVer `0.1.0`，constraints §11.3）
+- [ ] `cargo publish --dry-run` 通过（workspace 成员统一 bump）
+- [ ] 交叉编译目标声明：`wasm32-unknown-unknown`（P2，Phase 1 仅声明不实现）
 
 ---
 
@@ -34,18 +57,22 @@
 **优先级：** P0  
 **依赖：** 1.1
 
+> **P0 约束：** 本 crate 零 `unsafe` 块（constraints §3.2）。
+
 ### 1.2.1 AST 节点定义
 
 - [ ] `crates/trust_parser/src/ast.rs`：完整 AST 节点定义（按 `spec/trust-spec.md` §SEM-REQ-001）
 - [ ] 表达式节点：`LetStmt`、`ConstStmt`、`FunctionDecl`、`IfExpr`、`ForStmt`、`ForOfStmt`、`LoopExpr`、`SwitchStmt`、`MatchExpr`、`IfLetStmt`、`SelectStmt`
-- [ ] 类型节点：`Type::Number`、`Type::String`、`Type::Boolean`、`Type::BigInt`、`Type::Void`、`Type::Array`、`Type::Tuple`、`Type::Generic`、`Type::TraitObject`、`Type::Option`、`Type::Result`、`Type::Ref`
+  > *Phase 1 仅解析以下节点：`LetStmt`、`ConstStmt`、`FunctionDecl`、`IfExpr`、`ForStmt`、`LoopExpr`。其余节点占位（parser 不报错但 HIR/TIR 跳过）。*
+- [ ] 类型节点：`Type::Number`、`Type::String`、`Type::Boolean`、`Type::BigInt`、`Type::Void`、`Type::Array`、`Type::Tuple`、**`Type::Ref`**（Phase 1 `&` 需要）
+  > *占位节点（Phase 2+ 实现）：`Type::Generic`、`Type::TraitObject`、`Type::Option`、`Type::Result`*
 - [ ] Source span 附加到每个 AST 节点（文件路径 + 行列号）
 
 ### 1.2.2 Lexer（词法分析器）
 
 - [ ] `crates/trust_parser/src/lexer.rs`：Tokenizer
 - [ ] 关键字识别：全部 40 个关键字按 `spec/trust-spec.md` §LEX-REQ-001
-- [ ] 字面量解析：整数（`i32`）、浮点（`f64`）、BigInt（`i64`）、字符串、模板字符串、布尔
+- [ ] 字面量解析：整数（`i32`）、浮点（`f64`）、BigInt（`i64` — `n` 后缀）、字符串、模板字符串、布尔
 - [ ] 注释跳过：`//` 行注释、`/* */` 块注释、`///` 文档注释
 - [ ] 运算符/分隔符/箭头的 token 生成
 - [ ] 验收标准：AC-LEX-001~014 全部通过
@@ -53,19 +80,24 @@
 ### 1.2.3 Parser（语法分析器）
 
 - [ ] `crates/trust_parser/src/parser.rs`：递归下降解析器
-- [ ] **Phase 1 语法子集**（按 ROADMAP §1.2）：
+- [ ] **Phase 1 语法子集**（对齐 ROADMAP §1.2 + §1.4）：
   - [ ] `let` / `let mut` 变量声明
   - [ ] `const` 编译时常量声明
-  - [ ] `function` 函数声明（无泛型）
+  - [ ] `function` 函数声明 — 含 `inout` / `move` 参数标注（ROADMAP §1.4 所有权子集）
   - [ ] `if` / `else` / `for` / `while` / `loop`
   - [ ] `return`、`break`、`continue`
-  - [ ] 基本类型标注：`number`、`string`、`boolean`、`void`
+  - [ ] 基本类型标注：`number`、`string`、`boolean`、`void`、`bigint`
   - [ ] 算术/比较/逻辑表达式
-  - [ ] 函数调用
+  - [ ] `as` 显式类型转换（TYP-REQ-001）
+  - [ ] `&` 显式引用创建（OWN-REQ-003）
+  - [ ] `() => expr` 箭头函数 / `move () => expr` 闭包（SYN-REQ-009）
+  - [ ] 函数调用 — 含 `inout` / `move` 调用处标注（OWN-REQ-002）
   - [ ] `import` / `export` 模块声明
   - [ ] 注释（`//`、`/* */`、`///`）
 - [ ] 错误恢复：panic mode + 同步点（`;`、`}`、`function`、`import`、`export`、`type`、`interface`、`impl`、`test`、`async`）
-- [ ] 验收标准：AC-SYN-001~042 中 Phase 1 子集全部通过
+- [ ] 验收标准：Phase 1 覆盖的 AC-SYN 子集全部通过
+  > **Phase 1 AC-SYN 覆盖：** AC-SYN-001~006（变量/函数基本声明）、AC-SYN-009~012（控制流）、AC-SYN-020~023（模块）、AC-SYN-030~031（箭头函数/闭包）、AC-SYN-036~042（引用/运算符/错误恢复/分隔规则）
+  > **不覆盖：** 007~008（泛型）、013~016（match/switch/if let）、017~019（async/await/spawn）、024~026（Channel/select/withLock）、027~029（interface/type/ADT）、032~033（FFI）、034~035（test/属性）
 
 ### 1.2.4 模块图
 
@@ -76,6 +108,7 @@
 ### 1.2.5 测试
 
 - [ ] 单元测试（与源码同文件 `#[cfg(test)] mod tests`）
+- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
 - [ ] 快照测试（`trust_parser/tests/snapshots/` — AST 输出比对）
 - [ ] Fuzz 目标（`fuzz/fuzz_targets/parse.rs` — 随机 `.trust` 输入不 panic）
 
@@ -87,6 +120,8 @@
 **工作量：** 2–3 周  
 **优先级：** P0  
 **依赖：** 1.2
+
+> **P0 约束：** 零 `unsafe`（constraints §3.2）。所有 pub 函数和关键结构上方标注 `// §X.Y.Z: ...` 设计文档章节引用（constraints §1.3）。
 
 ### 1.3.1 HIR 节点定义
 
@@ -118,7 +153,10 @@
 ### 1.3.5 测试
 
 - [ ] 单元测试（happy path + 错误路径）
+- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [ ] Doctest（pub 函数推荐有，constraints §5.4）
 - [ ] 集成测试：`.` 文件 → HIR 快照比对
+- [ ] 验收标准：AC-SEM-001~010 中 Phase 1 相关项通过（AST→HIR 降级、名称解析、作用域、`if`/`loop` 表达式→语句转换）
 
 ---
 
@@ -128,6 +166,10 @@
 **工作量：** 4–6 周  
 **优先级：** P0  
 **依赖：** 1.3
+
+> **P0 约束：** 零 `unsafe`（constraints §3.2）。所有 pub 函数和关键结构上方标注 `// §X.Y.Z: ...` 设计文档章节引用（constraints §1.3 P0）。
+> 
+> **Phase 1 并发范围：** 不实现 `spawn` / `Channel` / `shared` / `select`（押后 Phase 4）。`move` 闭包仅用于局部语义（FnOnce），不涉及跨线程。AC-CON-001~013 和 AC-OWN-011~014（spawn/Rc/Arc）押后 Phase 4。
 
 ### 1.4.1 TIR 节点定义
 
@@ -142,7 +184,7 @@
 - [ ] `crates/trust_tir/src/moveck.rs`：移动语义分析
 - [ ] `let b = a;` 后 `a` 失效（OWN-REQ-001）
 - [ ] `Copy` 类型判定：标量 Copy、堆类型非 Copy（OWN-REQ-008）
-- [ ] 错误信息映射：TIR 内部名 → Trust 源码变量名 + 行列号
+- [ ] 错误信息映射：**TIR 内部名 / Rust 生成变量名 / rustc 内部结构 → Trust 源码变量名 + 行列号**（constraints §6.2, §8.3 P0）
 
 ### 1.4.3 借用检查（borrowck）
 
@@ -151,7 +193,7 @@
 - [ ] 调用处对称标注检查：`pushOne(inout data)` vs `pushOne(data)` 错误
 - [ ] 借用规则（OWN-REQ-003）：同一变量同时 ≤1 可变借用 或 ≥0 只读借用
 - [ ] 方法调用所有权（OWN-REQ-004）：`let` 非 `mut` → 仅 `&self` 方法
-- [ ] 闭包捕获规则（OWN-REQ-005）：默认只读借用 / `move` → FnOnce
+- [ ] 闭包捕获规则（OWN-REQ-005）：默认只读借用 / `move` → FnOnce（**不涉及 `spawn`**）
 
 ### 1.4.4 区域推断（Region Inference）
 
@@ -162,18 +204,23 @@
 ### 1.4.5 测试
 
 - [ ] 单元测试（每个 pub 函数必有）
-- [ ] Doctest（`trust_tir` 所有 pub 函数必须有 doctest — P0 约束）
+- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [ ] Doctest（`trust_tir` **所有** pub 函数必须有 doctest — P0 约束，constraints §5.4）
 - [ ] 行覆盖率 ≥ 85%（tarpaulin CI 门控）
 - [ ] 分支覆盖率 ≥ 60%
+- [ ] Fuzz 目标：`fuzz/fuzz_targets/tir_borrowck.rs` — 随机 TIR 图不 panic（P1，constraints §11.6）
+- [ ] 验收标准：AC-OWN-001~005（移动/借用基本规则）、AC-OWN-007~008（方法调用所有权）、AC-OWN-015~017（for 隐式可变/Copy 判定）、AC-OWN-018~020（生命周期省略）通过
 
 ---
 
-## 1.5 `trust_codegen` — Rust 代码生成
+## 1.5 `trust_codegen` — Rust 代码生成 + ferro_rt Stub
 
-**产出物：** `crates/trust_codegen/`  
+**产出物：** `crates/trust_codegen/` + `crates/ferro_rt/`  
 **工作量：** 2–3 周  
 **优先级：** P0  
 **依赖：** 1.4
+
+> **P0 约束：** 所有 pub 函数和关键结构上方标注 `// §X.Y.Z: ...` 设计文档章节引用（constraints §1.3 P0）。代码生成中禁止硬编码 Trust/Rust 语法字符串（constraints §2.2）。
 
 ### 1.5.1 Rust 源码生成
 
@@ -182,7 +229,7 @@
 - [ ] 函数生成：`function foo(x: number): number { ... }` → `fn foo(x: &i32) -> i32 { ... }`
 - [ ] 控制流生成：`if`/`for`/`while`/`loop` → Rust 等价物
 - [ ] `fn main()` 包装：Trust 入口 → Rust `fn main()`
-- [ ] 禁止硬编码 Trust/Rust 语法字符串（constraints §2.2）
+- [ ] 代码生成中所有字面量（除 0/1/公认常量）使用命名常量，禁止硬编码（constraints §2.1 P0）
 
 ### 1.5.2 Source Map
 
@@ -193,12 +240,25 @@
 ### 1.5.3 运行时库接口
 
 - [ ] `crates/trust_codegen/src/runtime.rs`：ferro_rt API 映射表
+- [ ] `console.log("...")` 生成 `ferro_rt::console::log("...")`（非硬编码，constraints §2.2）
 - [ ] 标准库路径生成（`use ferro_rt::...`）
 
-### 1.5.4 测试
+### 1.5.4 `ferro_rt` 最小 Stub（Phase 1）
+
+> **优先级：P0**（阻塞交付标准——`console.log` 依赖 ferro_rt 实现）
+
+- [ ] `crates/ferro_rt/Cargo.toml` 创建（零依赖，Phase 1 无 tokio/crossbeam）
+- [ ] `crates/ferro_rt/src/console.rs`：`pub fn log(msg: &str)` 函数（→ `println!("{}", msg)`）
+- [ ] `crates/ferro_rt/src/lib.rs`：导出 `console` 模块
+- [ ] 无 `unsafe`（Phase 1 的 ferro_rt 是纯安全 Rust 包装）
+
+### 1.5.5 测试
 
 - [ ] 单元测试
+- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [ ] Doctest（pub 函数推荐有，constraints §5.4）
 - [ ] 集成测试：完整 `.trust` 文件 → Rust 输出 → 与 `.rs` 快照比对 → rustc 编译验证
+- [ ] Fuzz 目标：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1，constraints §11.6）
 
 ---
 
@@ -207,7 +267,7 @@
 **产出物：** `crates/trust_error/`  
 **工作量：** 1 周  
 **优先级：** P0  
-**依赖：** 1.4
+**依赖：** 1.1（独立基础 crate，`Diagnostic` 结构不依赖任何 IR——被 1.2~1.5 共用）
 
 ### 1.6.1 错误数据结构
 
@@ -232,7 +292,10 @@
 ### 1.6.4 测试
 
 - [ ] 单元测试（每种 ErrorCode 至少一个触发用例）
+- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [ ] Doctest（pub 函数推荐有，constraints §5.4）
 - [ ] JSON 输出格式快照测试
+- [ ] 验收标准：AC-ERR-001~002（Result/`?` 传播）、AC-ERR-005~006（`!` 断言）在 Phase 1 端到端测试中覆盖。AC-ERR-003~004（throw/panic）和 AC-ERR-007~008（`.expect`）押后 Phase 3。
 
 ---
 
@@ -241,7 +304,7 @@
 **产出物：** `crates/trustc/`  
 **工作量：** 1 周  
 **优先级：** P0  
-**依赖：** 1.5, 1.6
+**依赖：** 1.2, 1.3, 1.4, 1.5, 1.6（直接依赖全部编译器 crate）
 
 ### 1.7.1 CLI
 
@@ -260,8 +323,13 @@
 
 ### 1.7.3 编译管线编排
 
-- [ ] Parse → HIR → TIR → 错误检查（TIR 错误数=0 才继续）→ Codegen → rustc
-- [ ] 各阶段错误数 > 0 时终止后续阶段（constraints §11.5）
+对齐 `design-constraints.md` §11.5 的错误恢复策略：
+
+- [ ] **Parse**：panic mode 收集全部语法错误，不阻塞后续阶段
+- [ ] **HIR**：类型错误用 `Type::Error` 哨兵继续，函数级收集全部错误
+- [ ] **TIR**：所有权错误函数级终止，但继续检查其他函数（收集全部错误）
+- [ ] **Codegen**：仅在 TIR 总错误数 = 0 时运行
+- [ ] 各阶段错误汇总 → 结构化 JSON 输出
 
 ---
 
@@ -273,24 +341,45 @@
 
 ### 1.8.1 端到端测试
 
-- [ ] 每个语法特性至少一个端到端测试（`tests/integration/*.trust` → `*.rs` 快照 → `rustc` 编译）
+- [ ] 每个语法特性至少一个端到端测试：
+
+```
+tests/integration/
+├── basic_variable.trust      # 输入
+├── basic_variable.rs         # 期望 Rust 输出（快照）
+├── function_call.trust
+├── function_call.rs
+├── if_expr.trust
+├── if_expr.rs
+├── for_loop.trust
+├── for_loop.rs
+├── closure_move.trust
+├── closure_move.rs
+└── ...                       # ≥ 20 个特性
+```
+
 - [ ] 测试运行器：编译 `.trust` → 比较生成 Rust 与快照 → 编译 Rust → 执行并验证输出
+- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
 
-### 1.8.2 自举测试
+### 1.8.2 端到端验证（替换原"自举测试"）
 
-- [ ] 最小自举：Trust 编译器源码中的 `console.log` 调用由 Trust 自己的 codegen 生成
-- [ ] 交叉编译验证：`trustc` 自身可通过生成的 Rust 代码编译（即使不运行）
+- [ ] 编译器能将包含 `console.log` 的 `.trust` 文件编译为可执行 Rust 二进制并运行
+- [ ] 交叉编译验证：生成的 Rust 代码可通过 `rustc` 独立编译（即使不运行 `trustc`）
+- [ ] 真正自举（Trust 编译器用 Trust 重写）— 押后 Phase 7
 
 ### 1.8.3 性能基准
 
-- [ ] `benches/` 目录初始化
-- [ ] 基准指标：编译 5000 行 Trust 代码 ≤ 60 秒（冷启动）
-- [ ] CI 性能回归监控（基准记录在 `benches/BASELINE.md`）
+- [ ] `benches/` 目录初始化（criterion）
+- [ ] 基准指标：编译 **100 行** Trust 代码（含函数、变量、控制流、函数调用）≤ 5 秒（冷启动）
+- [ ] 5000 行基准移至 Phase 2（v0.1.1，届时 `trust_std` 可用作为输入源）
+- [ ] CI 性能回归监控：基准记录在 `benches/BASELINE.md`，`±10%` 视为回归（P1）
+- [ ] CI job: `cargo bench` 运行（criterion 基准比较）
 
 ### 1.8.4 Fuzzing
 
-- [ ] Parser fuzz：随机 `.trust` 输入不 panic
-- [ ] Codegen fuzz：随机 TIR 图不 panic
+- [ ] Parser fuzz：`fuzz/fuzz_targets/parse.rs` — 随机 `.trust` 输入不 panic
+- [ ] TIR fuzz：`fuzz/fuzz_targets/tir_borrowck.rs` — 随机 TIR 图不 panic（P1，constraints §11.6）
+- [ ] Codegen fuzz：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1）
 - [ ] 语料库从集成测试的 `.trust` 文件初始化
 
 ---
@@ -300,18 +389,26 @@
 - [ ] 编译以下程序并执行输出 `"Hello, Trust!"`：
 
 ```ts
+// console 为 Phase 1 隐式全局绑定，codegen 自动映射到 ferro_rt::console::log
+// Phase 2 后要求显式 import { console } from "trust_std"
 function main() {
     console.log("Hello, Trust!");
 }
 ```
 
 - [ ] `cargo test --workspace` 全部通过
-- [ ] `cargo clippy --workspace -- -D warnings` 通过
+- [ ] `cargo clippy --workspace -- -D warnings` 通过（含 `unwrap_used`/`expect_used` lint）
 - [ ] `cargo fmt --check --all` 通过
+- [ ] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空（P0）
 - [ ] `cargo tarpaulin -p trust_tir --fail-under 85` 通过
+- [ ] `cargo tarpaulin -p trust_parser --fail-under 70` 通过
+- [ ] `cargo tarpaulin -p trust_hir --fail-under 70` 通过
+- [ ] `cargo tarpaulin -p trust_codegen --fail-under 70` 通过
+- [ ] `cargo miri test -p ferro_rt` 通过（unsafe 块验证）
 - [ ] 集成测试：≥ 20 个语法特性有端到端 `tests/integration/` 测试
 - [ ] `docs/ROADMAP.md` 的 Phase 1 全部子项标记完成
 
 ---
 
-> **下一步：** Phase 2 — 类型系统与泛型（`phase2-types` 分支）
+> **下一步：** Phase 2 — 类型系统与泛型（`phase2-types` 分支）  
+> **辩论记录：** 与 OpenClaw 三轮对抗审查，R1 发现 23 处缺口（🔴8 🟠5 🟡11），修正后全部归零。
