@@ -124,9 +124,9 @@ closure ::= ("move")? "(" param_list? ")" "=>" (expr | block)
 ### SYN-REQ-001：变量声明
 
 ```ebnf
-var_decl ::= ("let" | "let" "mut") ident (":" type)? "=" expr ";"
-           | "const" ident (":" type)? "=" expr ";"
-           | "shared" ident (":" type)? "=" expr ";"
+  var_decl ::= ("let" | "let" "mut") ident (":" type)? "=" expr ";?"
+           | "const" ident (":" type)? "=" expr ";?"
+           | "shared" ident (":" type)? "=" expr ";?"
 ```
 
 **验收标准：**
@@ -158,8 +158,8 @@ for_stmt   ::= "for" "(" ("let" ident "=" expr ";" expr ";" expr) ")" block
              | "for" "(" "let" ident "of" expr ")" block
 while_stmt ::= "while" "(" expr ")" block
 loop_expr  ::= "loop" block
-return_stmt ::= "return" expr? ";"
-break_stmt ::= "break" expr? ";"
+return_stmt ::= "return" expr? ";?"
+break_stmt ::= "break" expr? ";?"
 ```
 
 **设计决策——`if` 和 `loop` 是表达式：** `let x = if (c) { a } else { b };` 合法。`loop { break val; }` 返回 `val`。`for`/`while` 是语句，无返回值。`break` 仅在 `loop` 中可带值——其他上下文（`for`/`while`/`switch`）中 `break expr` 由 parser 拒绝。
@@ -180,7 +180,7 @@ match_arm   ::= "case" pattern "=>" expr
 if_let_stmt ::= "if" "let" pattern "=" expr block ("else" block)?
 ```
 
-**设计决策——`switch`（语句）vs `match`（表达式）：** `switch` 用于副作用，分支用 `case X:` + `break;`。`match` 用于值映射，分支用 `case X => expr,`。
+**设计决策——`switch`（语句）vs `match`（表达式）：** `switch` 用于副作用，分支用 `case X:` + `break`。`match` 用于值映射，分支用 `case X => expr,`。
 
 **验收标准：**
 - AC-SYN-013: `switch (msg.kind) { case "quit": return; case "data": process(msg.payload); break; }` → 穷举检查
@@ -204,7 +204,7 @@ spawn_expr ::= "spawn" "(" ("move")? "async"? "(" param_list? ")" "=>" (block | 
 ### SYN-REQ-006：模块
 
 ```ebnf
-import_decl    ::= "import" (import_named | import_default | import_namespace) "from" string ";"
+import_decl ::= "import" (import_named | import_default | import_namespace) "from" string ";?"
 import_named   ::= "{" ident ("," ident)* "}"
 import_default ::= ident
 import_namespace ::= "*" "as" ident
@@ -235,9 +235,9 @@ withlock_expr ::= ident "." "withLock" "(" closure ")"
 
 ```ebnf
 interface_decl ::= "interface" ident generic_params? ("extends" type ("," type)*)? "{" method_sig* "}"
-method_sig     ::= ident "(" param_list? ")" ":" type ";"
-type_decl      ::= "type" ident generic_params? "=" type ";"
-adt_decl       ::= "type" ident "=" "|" adt_variant ("|" adt_variant)* ";"
+method_sig     ::= ident "(" param_list? ")" ":" type ";?"
+type_decl      ::= "type" ident generic_params? "=" type ";?"
+adt_decl       ::= "type" ident "=" "|" adt_variant ("|" adt_variant)* ";?"
 adt_variant    ::= "{" ident ":" string (":" type)? "}"
 ```
 
@@ -293,24 +293,33 @@ test_decl    ::= attribute? "test" "async"? "function" ident "(" param_list? ")"
 
 **需求：** Parser 采用 panic mode。遇到语法错误后，跳过 token 直到同步点。
 
-**同步点：** `;` `}` `function` `import` `export` `type` `interface` `impl` `test` `async`
+**同步点：** `;`（可选语句分隔符） `}` `function` `import` `export` `type` `interface` `impl` `test` `async`
 
 **验收标准：**
 - AC-SYN-037: 包含语法错误的 `.trust` 文件产生 ≥2 个诊断信息（非首个错误停止）
 - AC-SYN-038: 错误恢复后，后续合法代码仍产出正确的 AST 节点
 
-### SYN-REQ-014：分隔符规则
+### SYN-REQ-014：语句分隔规则
+
+**需求：** Trust 采用**换行即分隔**的语句规则（与 Go/TypeScript 一致）。分号 `;` **可选**——推荐省略，仅在同行多语句时用于分隔。
 
 | 上下文 | 规则 |
 |--------|------|
-| 语句 | 必须 `;` |
+| 语句 | 换行自动分隔，`;` 可选（推荐省略） |
+| 同行多语句 | `;` 分隔（如 `let x = 1; let y = 2`，但不推荐此风格） |
+| `for` 子句 | `;` 分隔 init / condition / update（语法要求，非语句分隔） |
 | `match` 分支 | `,` 分隔，最后一个可省略 |
-| `switch` 分支 | 分支内语句 `;` + `break;` |
-| 块 `{ }` | 最后表达式省略 `;` 作为返回值 |
+| `switch` 分支 | 分支内语句换行分隔，`break` 退出（无需 `break;`） |
+| 块 `{ }` | 最后表达式作为返回值（无 `;`） |
+| `return expr` | 换行即返回；`return` 后无表达式 = 返回 void |
+
+**设计决策——为何不像 Rust 强制分号：** Rust 用 `;` 区分表达式（无分号=返回值）和语句（有分号=无返回值）。Trust 的 `if`/`loop`/`match` 是表达式，`for`/`while`/`switch` 是语句——这个区分在**语法层面就已确定**（EBNF 结构），不需要分号来消歧。去分号减少 TS/JS 开发者的迁移摩擦，且避免了 Rust 常见的"忘写分号导致类型不匹配"的困惑。
 
 **验收标准：**
-- AC-SYN-039: `let x = { let y = 2; y };` → `y` 作为块返回值（省略 `;`）
-- AC-SYN-040: `let x = match (v) { case Some(n) => n, case None => 0 };` → `match` 分支 `,` 分隔
+- AC-SYN-039: `let x = 42\nlet y = 10` → 换行分隔，两条语句正确解析
+- AC-SYN-040: `let x = { let y = 2; y }` → 块内最后表达式省略 `;` 作为返回值（`;` 在此处合法但可选）
+- AC-SYN-041: `let x = match (v) { case Some(n) => n, case None => 0 }` → `match` 分支 `,` 分隔
+- AC-SYN-042: `return 42\n}` → 换行即返回，无需 `;`
 
 ### SYN-REQ-015：类型标注语法
 
