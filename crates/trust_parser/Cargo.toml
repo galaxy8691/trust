@@ -8,3 +8,5 @@ repository.workspace = true
 
 [dependencies]
 trust_error = { path = "../trust_error" }
+
+[dev-dependencies]
