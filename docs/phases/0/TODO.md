@@ -53,7 +53,7 @@
 - [x] 引用：`&` 运算符
 - [x] 测试：`test function` / `#[test]`
 - [x] **`::` 构造器/关联函数访问**：`Type::ident`（`Box::new`、`Dynamic.Number`、`Vec::new` 等）
-- [x] **分号与分隔符规则**：语句 `;` 结尾；`match` 分支 `,` 分隔（末尾可选）；`switch` 分支内 `;` + `break;`；块内最后表达式省略 `;` 作为返回值
+- [x] **分号与分隔符规则**：换行即分隔（`;` 可选）；`for` 子句 `;` 分隔（语法要求）；`match` 分支 `,` 分隔（末尾可选）；块内最后表达式省略 `;` 作为返回值
 
 ### 0.1.3 语义规范
 
@@ -144,29 +144,29 @@
 **工作量：** 3 天  
 **依赖：** 0.1, 0.2
 
-- [x] `docs/Trust-设计文档.md` ↔ `spec/trust-spec.md` 交叉验证
+- [ ] `docs/Trust-设计文档.md` ↔ `spec/trust-spec.md` 交叉验证
   - [ ] 所有设计文档中描述的语法特性在规范中有形式化定义
   - [ ] 所有代码示例的语法与规范一致
   - [ ] 所有权规则描述与规范中的形式化定义一致
   - [ ] 并发模型描述与规范中的形式化定义一致
-- [x] `spec/trust-spec.md` ↔ `docs/design-constraints.md` 交叉验证
+- [ ] `spec/trust-spec.md` ↔ `docs/design-constraints.md` 交叉验证
   - [ ] 规范中的 TIR 节点与 constraints 中的实现节点对应
   - [ ] 规范中的 API 映射与 constraints §9.2 的 ferros_rt 映射一致
   - [ ] 错误格式与 constraints §8 的结构体一致
-- [x] `docs/Trust-设计文档.md` ↔ `docs/design-constraints.md` 直接交叉验证：设计文档中每个"编译器应…"的描述在 constraints 中有实现规范
-- [x] 三方交叉引用一致性（所有 "详见 §X.Y" 引用可解析）
-- [x] 所有示例代码在规范中用形式化语法标注
-- [x] **验证被拒绝的 8 个特性（§15）的语法在 EBNF 中不存在**
+- [ ] `docs/Trust-设计文档.md` ↔ `docs/design-constraints.md` 直接交叉验证：设计文档中每个"编译器应…"的描述在 constraints 中有实现规范
+- [ ] 三方交叉引用一致性（所有 "详见 §X.Y" 引用可解析）
+- [ ] 所有示例代码在规范中用形式化语法标注
+- [ ] **验证被拒绝的 8 个特性（§15）的语法在 EBNF 中不存在**
 
 ---
 
 ## Phase 0 交付标准
 
 - [x] `spec/trust-spec.md` 完成，覆盖 0.1.1–0.1.7 全部子项
-- [x] `spec/stdlib.md` 完成
-- [x] 三方一致性审计通过，无需修正的差异记录在案
-- [x] `docs/ROADMAP.md` 的 Phase 0.3 "一致性审计" 条目标记完成
-- [x] 创建 PR 合并 `phase0-spec` → `main`（Phase 0 冻结）
+- [x] `spec/stdlib.md` 完成，覆盖 12 个模块
+- [ ] 0.3 三方一致性审计通过，无需修正的差异记录在案
+- [ ] `docs/ROADMAP.md` 的 Phase 0.3 "一致性审计" 条目标记完成
+- [ ] 创建 PR 合并 `phase0-spec` → `main`（Phase 0 冻结）
 
 ---
 
