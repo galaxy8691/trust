@@ -86,8 +86,8 @@ pub struct Lexer {
     source: Vec<char>,
     pos: usize,
     file: String,
-    line: u32,
-    col: u32,
+    pub line: u32,
+    pub col: u32,
     pub last_token: Option<TokenKind>,
     line_has_content: bool,
 }

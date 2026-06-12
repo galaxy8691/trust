@@ -8,19 +8,29 @@ pub struct Diagnostic { pub level: DiagLevel, pub message: String, pub span: Spa
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiagLevel { Error, Warning }
 
-pub struct Parser { lexer: Lexer, pub diagnostics: Vec<Diagnostic>, cur: TokenKind }
+pub struct Parser { lexer: Lexer, pub diagnostics: Vec<Diagnostic>, cur: TokenKind, file: String }
 
 impl Parser {
     pub fn new(src: &str, file: &str) -> Self {
         let mut lex = Lexer::new(src, file);
         let cur = lex.next_token();
-        Parser { lexer: lex, diagnostics: vec![], cur }
+        Parser { lexer: lex, diagnostics: vec![], cur, file: file.to_string() }
     }
 
     fn advance(&mut self) { self.cur = self.lexer.next_token(); }
 
+    fn span(&self) -> Span {
+        Span {
+            file: self.file.clone(),
+            line_start: self.lexer.line,
+            line_end: self.lexer.line,
+            col_start: self.lexer.col,
+            col_end: self.lexer.col,
+        }
+    }
+
     fn error(&mut self, msg: &str) {
-        self.diagnostics.push(Diagnostic { level: DiagLevel::Error, message: msg.to_string(), span: Span::dummy() });
+        self.diagnostics.push(Diagnostic { level: DiagLevel::Error, message: msg.to_string(), span: self.span() });
     }
 
     fn expect_semi(&mut self) { if matches!(self.cur, TokenKind::Semi) { self.advance(); } }
@@ -49,7 +59,7 @@ impl Parser {
                 None => self.panic_mode(),
             }
         }
-        Program { imports, exports, statements: stmts, span: Span::dummy() }
+        Program { imports, exports, statements: stmts, span: self.span() }
     }
 
     fn parse_imports(&mut self) -> Vec<ImportDecl> {
@@ -79,7 +89,7 @@ impl Parser {
                 self.advance();
                 let init = self.parse_expr()?;
                 self.expect_semi();
-                Some(Stmt::Shared(SharedStmt{name,ty,init:Box::new(init),span:Span::dummy()}))
+                Some(Stmt::Shared(SharedStmt{name,ty,init:Box::new(init),span:self.span()}))
             }
             TokenKind::Function => self.parse_fn(),
             TokenKind::If => self.parse_if(),
@@ -88,8 +98,8 @@ impl Parser {
             TokenKind::Loop => self.parse_loop(),
             TokenKind::Return => self.parse_ret(),
             TokenKind::Break => self.parse_break(),
-            TokenKind::Continue => { self.advance(); self.expect_semi(); Some(Stmt::Continue(ContinueStmt{span:Span::dummy()})) }
-            TokenKind::LBrace => self.parse_block().map(|b| Stmt::Expr(ExprStmt{expr:Box::new(Expr::BlockExpr(b)), span:Span::dummy()})),
+            TokenKind::Continue => { self.advance(); self.expect_semi(); Some(Stmt::Continue(ContinueStmt{span:self.span()})) }
+            TokenKind::LBrace => self.parse_block().map(|b| Stmt::Expr(ExprStmt{expr:Box::new(Expr::BlockExpr(b)), span:self.span()})),
             TokenKind::Semi => { self.advance(); None }
             _ => self.parse_expr_stmt(),
         }
@@ -99,7 +109,7 @@ impl Parser {
         if !self.can_expr_start() { self.error(&format!("unexpected {:?}", self.cur)); self.advance(); return None; }
         let e = self.parse_expr()?;
         self.expect_semi();
-        Some(Stmt::Expr(ExprStmt{expr:Box::new(e), span:Span::dummy()}))
+        Some(Stmt::Expr(ExprStmt{expr:Box::new(e), span:self.span()}))
     }
 
     // =================================================================
@@ -115,8 +125,8 @@ impl Parser {
         self.advance();
         let init = self.parse_expr()?;
         self.expect_semi();
-        if is_const { Some(Stmt::Const(ConstStmt{name,ty,init:Box::new(init),span:Span::dummy()})) }
-        else { Some(Stmt::Let(LetStmt{name,ty,init:Box::new(init),mutable,span:Span::dummy()})) }
+        if is_const { Some(Stmt::Const(ConstStmt{name,ty,init:Box::new(init),span:self.span()})) }
+        else { Some(Stmt::Let(LetStmt{name,ty,init:Box::new(init),mutable,span:self.span()})) }
     }
 
     // =================================================================
@@ -132,9 +142,9 @@ impl Parser {
             self.advance();
             let e = self.parse_expr()?;
             self.expect_semi();
-            Block{statements:vec![Stmt::Return(ReturnStmt{value:Some(Box::new(e)),span:Span::dummy()})],span:Span::dummy()}
+            Block{statements:vec![Stmt::Return(ReturnStmt{value:Some(Box::new(e)),span:self.span()})],span:self.span()}
         } else { self.parse_block()? };
-        Some(Stmt::Function(FunctionDecl{name,params,return_type:ret,body,span:Span::dummy()}))
+        Some(Stmt::Function(FunctionDecl{name,params,return_type:ret,body,span:self.span()}))
     }
 
     fn parse_params(&mut self) -> Option<Vec<Param>> {
@@ -150,7 +160,7 @@ impl Parser {
                 };
                 let name = self.expect_ident("param name")?;
                 let ty = if matches!(self.cur, TokenKind::Colon) { self.advance(); self.parse_type() } else { None };
-                v.push(Param{name,mode,ty,optional:false,span:Span::dummy()});
+                v.push(Param{name,mode,ty,optional:false,span:self.span()});
                 if matches!(self.cur,TokenKind::Comma) { self.advance(); } else { break; }
             }
         }
@@ -176,7 +186,7 @@ impl Parser {
             match self.parse_stmt() { Some(s) => stmts.push(s), None => self.panic_mode() }
         }
         if matches!(self.cur, TokenKind::RBrace) { self.advance(); }
-        Some(Block{statements:stmts,span:Span::dummy()})
+        Some(Block{statements:stmts,span:self.span()})
     }
 
     fn parse_if(&mut self) -> Option<Stmt> {
@@ -185,10 +195,10 @@ impl Parser {
         let then = self.parse_block()?;
         let els = if matches!(self.cur, TokenKind::Else) {
             self.advance();
-            if matches!(self.cur, TokenKind::If) { Some(Block{statements:vec![self.parse_if()?],span:Span::dummy()}) }
+            if matches!(self.cur, TokenKind::If) { Some(Block{statements:vec![self.parse_if()?],span:self.span()}) }
             else { self.parse_block() }
         } else { None };
-        Some(Stmt::If(IfExpr{condition:Box::new(cond),then_branch:then,else_branch:els,span:Span::dummy()}))
+        Some(Stmt::If(IfExpr{condition:Box::new(cond),then_branch:then,else_branch:els,span:self.span()}))
     }
 
     fn parse_for(&mut self) -> Option<Stmt> {
@@ -211,7 +221,7 @@ impl Parser {
             if !matches!(self.cur, TokenKind::RParen) { self.error("expected )"); }
             self.advance();
             let body = self.parse_block()?;
-            Some(Stmt::ForOf(ForOfStmt{item:name,iterator:Box::new(iter),body,span:Span::dummy()}))
+            Some(Stmt::ForOf(ForOfStmt{item:name,iterator:Box::new(iter),body,span:self.span()}))
         } else if matches!(self.cur, TokenKind::Of) {
             // for-of without type: for (let item of items)
             self.advance();
@@ -219,7 +229,7 @@ impl Parser {
             if !matches!(self.cur, TokenKind::RParen) { self.error("expected )"); }
             self.advance();
             let body = self.parse_block()?;
-            Some(Stmt::ForOf(ForOfStmt{item:name,iterator:Box::new(iter),body,span:Span::dummy()}))
+            Some(Stmt::ForOf(ForOfStmt{item:name,iterator:Box::new(iter),body,span:self.span()}))
         } else {
             // C-style: for (let i = 0; i < 10; i++)
             if !matches!(self.cur, TokenKind::Eq) { self.error("expected ="); return None; }
@@ -234,8 +244,8 @@ impl Parser {
             if !matches!(self.cur, TokenKind::RParen) { self.error("expected )"); }
             self.advance();
             let body = self.parse_block()?;
-            let init_stmt = Stmt::Let(LetStmt{name:name.clone(),ty:None,init:Box::new(init_val),mutable:true,span:Span::dummy()});
-            Some(Stmt::For(ForStmt{init:Box::new(init_stmt),condition:Box::new(cond),update:Box::new(update),body,span:Span::dummy()}))
+            let init_stmt = Stmt::Let(LetStmt{name:name.clone(),ty:None,init:Box::new(init_val),mutable:true,span:self.span()});
+            Some(Stmt::For(ForStmt{init:Box::new(init_stmt),condition:Box::new(cond),update:Box::new(update),body,span:self.span()}))
         }
     }
 
@@ -243,26 +253,26 @@ impl Parser {
         self.advance();
         let cond = self.parse_paren_expr()?;
         let body = self.parse_block()?;
-        Some(Stmt::While(WhileStmt{condition:Box::new(cond),body,span:Span::dummy()}))
+        Some(Stmt::While(WhileStmt{condition:Box::new(cond),body,span:self.span()}))
     }
 
     fn parse_loop(&mut self) -> Option<Stmt> {
         self.advance();
-        Some(Stmt::Loop(LoopExpr{body:self.parse_block()?,span:Span::dummy()}))
+        Some(Stmt::Loop(LoopExpr{body:self.parse_block()?,span:self.span()}))
     }
 
     fn parse_ret(&mut self) -> Option<Stmt> {
         self.advance();
         let v = if self.can_expr_start() { self.parse_expr() } else { None };
         self.expect_semi();
-        Some(Stmt::Return(ReturnStmt{value:v.map(Box::new),span:Span::dummy()}))
+        Some(Stmt::Return(ReturnStmt{value:v.map(Box::new),span:self.span()}))
     }
 
     fn parse_break(&mut self) -> Option<Stmt> {
         self.advance();
         let v = if self.can_expr_start() { self.parse_expr() } else { None };
         self.expect_semi();
-        Some(Stmt::Break(BreakStmt{value:v.map(Box::new),span:Span::dummy()}))
+        Some(Stmt::Break(BreakStmt{value:v.map(Box::new),span:self.span()}))
     }
 
     fn parse_paren_expr(&mut self) -> Option<Expr> {
@@ -296,7 +306,7 @@ impl Parser {
         self.advance();
         let path = match &self.cur { TokenKind::StrLiteral(s) => s.clone(), _ => { self.error("expected path"); return None; } };
         self.advance(); self.expect_semi();
-        Some(ImportDecl{kind,path,span:Span::dummy()})
+        Some(ImportDecl{kind,path,span:self.span()})
     }
 
     fn parse_export(&mut self) -> Option<ExportDecl> {
@@ -304,7 +314,7 @@ impl Parser {
         let def = matches!(self.cur, TokenKind::Default);
         if def { self.advance(); }
         let item = self.parse_stmt()?;
-        Some(ExportDecl{item:Box::new(item),default:def,span:Span::dummy()})
+        Some(ExportDecl{item:Box::new(item),default:def,span:self.span()})
     }
 
     // =================================================================
@@ -371,7 +381,7 @@ impl Parser {
                 TokenKind::As => { self.advance(); let ty = self.parse_type()?; lhs = Expr::AsCast{expr:Box::new(lhs),ty}; continue; }
                 TokenKind::Bang => { self.advance(); return Some(Expr::AssertUnwrap(Box::new(lhs))); }
                 TokenKind::Question => { self.advance(); return Some(Expr::TryPropagate(Box::new(lhs))); }
-                TokenKind::QuestionDot => { self.advance(); let f = self.expect_ident("field")?; lhs = Expr::MemberAccess(MemberAccess{object:Box::new(lhs),field:f,optional:true,span:Span::dummy()}); continue; }
+                TokenKind::QuestionDot => { self.advance(); let f = self.expect_ident("field")?; lhs = Expr::MemberAccess(MemberAccess{object:Box::new(lhs),field:f,optional:true,span:self.span()}); continue; }
                 _ => break,
             };
             if lbp < min { break; }
@@ -404,14 +414,14 @@ impl Parser {
                 TokenKind::LParen => { self.advance(); let mut args = vec![];
                     if !matches!(self.cur, TokenKind::RParen) { loop {
                         let mode = match &self.cur { TokenKind::InOut => { self.advance(); ParamMode::InOut } TokenKind::Move => { self.advance(); ParamMode::Move } _ => ParamMode::Default };
-                        let a = self.parse_expr()?; args.push(CallArg{mode,expr:Box::new(a),span:Span::dummy()});
+                        let a = self.parse_expr()?; args.push(CallArg{mode,expr:Box::new(a),span:self.span()});
                         if matches!(self.cur,TokenKind::Comma) { self.advance(); } else { break; }
                     }}
                     if !matches!(self.cur, TokenKind::RParen) { self.error("expected )"); }
                     self.advance();
-                    e = Expr::Call{callee:Box::new(e),args,span:Span::dummy()};
+                    e = Expr::Call{callee:Box::new(e),args,span:self.span()};
                 }
-                TokenKind::Dot => { self.advance(); let f = self.expect_ident("field")?; e = Expr::MemberAccess(MemberAccess{object:Box::new(e),field:f,optional:false,span:Span::dummy()}); }
+                TokenKind::Dot => { self.advance(); let f = self.expect_ident("field")?; e = Expr::MemberAccess(MemberAccess{object:Box::new(e),field:f,optional:false,span:self.span()}); }
                 _ => break,
             }
         }
@@ -436,8 +446,8 @@ impl Parser {
                     // (x) => expr
                     self.advance();
                     let body = if matches!(self.cur, TokenKind::LBrace) { ArrowBody::Block(self.parse_block()?) } else { ArrowBody::Expr(Box::new(self.parse_expr()?)) };
-                    let params = match e { Expr::Ident(n) => vec![Param{name:n,mode:ParamMode::Default,ty:None,optional:false,span:Span::dummy()}], _ => { self.error("expected param"); return None; } };
-                    return Some(Expr::ArrowFn(ArrowFn{params,body,is_move:false,span:Span::dummy()}));
+                    let params = match e { Expr::Ident(n) => vec![Param{name:n,mode:ParamMode::Default,ty:None,optional:false,span:self.span()}], _ => { self.error("expected param"); return None; } };
+                    return Some(Expr::ArrowFn(ArrowFn{params,body,is_move:false,span:self.span()}));
                 }
                 Some(e) // parenthesized expr
             }
@@ -450,7 +460,7 @@ impl Parser {
                 if !matches!(self.cur, TokenKind::RParen) { loop {
                     let n = self.expect_ident("param")?;
                     let ty = if matches!(self.cur, TokenKind::Colon) { self.advance(); self.parse_type() } else { None };
-                    params.push(Param{name:n,mode:ParamMode::Default,ty,optional:false,span:Span::dummy()});
+                    params.push(Param{name:n,mode:ParamMode::Default,ty,optional:false,span:self.span()});
                     if matches!(self.cur,TokenKind::Comma) { self.advance(); } else { break; }
                 }}
                 if !matches!(self.cur, TokenKind::RParen) { self.error("expected )"); }
@@ -458,7 +468,7 @@ impl Parser {
                 if !matches!(self.cur, TokenKind::Arrow) { self.error("expected =>"); return None; }
                 self.advance();
                 let body = if matches!(self.cur, TokenKind::LBrace) { ArrowBody::Block(self.parse_block()?) } else { ArrowBody::Expr(Box::new(self.parse_expr()?)) };
-                Some(Expr::ArrowFn(ArrowFn{params,body,is_move:true,span:Span::dummy()}))
+                Some(Expr::ArrowFn(ArrowFn{params,body,is_move:true,span:self.span()}))
             }
             TokenKind::TemplateHead(s) => { let h=s.clone(); self.advance(); Some(self.parse_template(h)) }
             _ => { self.error(&format!("unexpected {:?}", self.cur)); None }
