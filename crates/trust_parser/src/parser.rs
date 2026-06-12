@@ -479,11 +479,30 @@ impl Parser {
         let mut parts = vec![];
         if !head.is_empty() { parts.push(TemplatePart::Literal(head)); }
         loop {
-            // parse interpolation expression (between TemplateHead and TemplateTail/next TemplateHead)
-            if self.can_expr_start() { if let Some(e) = self.parse_expr() { parts.push(TemplatePart::Expr(Box::new(e))); } }
+            // parse interpolation expression (after TemplateHead or TemplateInterpolation)
+            if matches!(self.cur, TokenKind::TemplateInterpolation) { self.advance(); }
+            if self.can_expr_start() {
+                if let Some(e) = self.parse_expr() { parts.push(TemplatePart::Expr(Box::new(e))); }
+            }
+            // consume the closing } of ${expr}
+            if matches!(self.cur, TokenKind::RBrace) { self.advance(); }
+            // resume template mode: collect text until next `${` or closing `` ` ``
+            self.cur = self.lexer.resume_template();
             match &self.cur {
-                TokenKind::TemplateTail(s) => { if !s.is_empty() { parts.push(TemplatePart::Literal(s.clone())); } self.advance(); break; }
-                TokenKind::TemplateHead(s) => { if !s.is_empty() { parts.push(TemplatePart::Literal(s.clone())); } self.advance(); }
+                TokenKind::TemplateTail(s) => {
+                    if !s.is_empty() { parts.push(TemplatePart::Literal(s.clone())); }
+                    self.advance();
+                    break;
+                }
+                TokenKind::TemplateHead(s) => {
+                    if !s.is_empty() { parts.push(TemplatePart::Literal(s.clone())); }
+                    self.advance();
+                    // loop — TemplateInterpolation follows
+                }
+                TokenKind::TemplateInterpolation => {
+                    self.advance();
+                    // loop — expression follows
+                }
                 _ => break,
             }
         }

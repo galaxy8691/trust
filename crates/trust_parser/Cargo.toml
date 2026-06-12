@@ -7,6 +7,5 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-trust_error = { path = "../trust_error" }
-
-[dev-dependencies]
+# trust_error — Phase 1.6 迁移 Diagnostic 后启用
+# [dev-dependencies]
