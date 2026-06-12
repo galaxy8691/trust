@@ -70,9 +70,9 @@
 
 | 优先级 | 运算符 | 结合性 | 类别 |
 |--------|--------|--------|------|
-| 15 | `()` `[]` `::` `.` | 左 | 调用、索引、构造器、成员 |
+| 15 | `()` `[]` `::` `.` `++` `--` | 左 | 调用、索引、构造器、成员、后置自增自减 |
 | 14 | `expr!` `expr?` | 左 | 断言解包、Result 传播 |
-| 13 | `&expr` `!expr` `await expr` | 右→左 | 引用、逻辑非、异步等待 |
+| 13 | `&expr` `!expr` `await expr` `++expr` `--expr` | 右→左 | 引用、逻辑非、异步等待、前置自增自减 |
 | 12 | `expr as T` | 左 | 显式类型转换 |
 | 11 | `*` `/` `%` | 左 | 乘除取模 |
 | 10 | `+` `-` | 左 | 加减 |
@@ -106,12 +106,27 @@
 
 ## SYN：语法规范
 
+> **EBNF 阅读说明：** `ident` 为词法原子（见 LEX-REQ-001），`expr` 的完整优先级解析由 LEX-REQ-003 运算符优先级表定义。以下 EBNF 中未展开的原子非终结符定义：`block ::= "{" stmt* "}"`；`stmt` 汇总见下文 `stmt` 产生式；`pattern ::= ident | literal | "{" pattern_field ("," pattern_field)* "}" | ident "(" pattern ")"`；`param_list ::= param ("," param)*`；`closure ::= ("move")? "(" param_list? ")" "=>" (expr | block)`。
+
+```ebnf
+-- 汇总规则（以下非终结符的完整产生式）
+stmt    ::= var_decl | const_decl | shared_decl | function_decl
+         | if_expr | for_stmt | while_stmt | loop_expr
+         | return_stmt | break_stmt | continue_stmt
+         | switch_stmt | match_stmt | if_let_stmt
+         | expr_stmt
+block   ::= "{" stmt* "}"
+pattern ::= ident | literal | "{" pattern_field ("," pattern_field)* "}" | ident "(" pattern ")"
+param_list ::= param ("," param)*
+closure ::= ("move")? "(" param_list? ")" "=>" (expr | block)
+```
+
 ### SYN-REQ-001：变量声明
 
 ```ebnf
 var_decl ::= ("let" | "let" "mut") ident (":" type)? "=" expr ";"
            | "const" ident (":" type)? "=" expr ";"
-           | "shared" ident "=" expr ";"
+           | "shared" ident (":" type)? "=" expr ";"
 ```
 
 **验收标准：**
@@ -125,7 +140,8 @@ var_decl ::= ("let" | "let" "mut") ident (":" type)? "=" expr ";"
 ```ebnf
 function_decl ::= "function" ident generic_params? "(" param_list? ")" (":" type)? ("{" stmt* "}" | "=" expr ";")
 param         ::= ("inout" | "move")? ident (":" type)?
-generic_params ::= "<" ident ("," ident)* ("extends" (type | "{" field_list "}"))? ">"
+generic_param ::= ident ("extends" type ("+" type)*)?
+generic_params ::= "<" generic_param ("," generic_param)* ">"
 ```
 
 **验收标准：**
@@ -137,16 +153,16 @@ generic_params ::= "<" ident ("," ident)* ("extends" (type | "{" field_list "}")
 ### SYN-REQ-003：控制流
 
 ```ebnf
-if_stmt    ::= "if" "(" expr ")" block ("else" ("if" "(" expr ")" block | block))?
+if_expr    ::= "if" "(" expr ")" block ("else" ("if" "(" expr ")" block | block))?
 for_stmt   ::= "for" "(" ("let" ident "=" expr ";" expr ";" expr) ")" block
              | "for" "(" "let" ident "of" expr ")" block
 while_stmt ::= "while" "(" expr ")" block
-loop_stmt  ::= "loop" block
+loop_expr  ::= "loop" block
 return_stmt ::= "return" expr? ";"
 break_stmt ::= "break" expr? ";"
 ```
 
-**设计决策——`if` 和 `loop` 是表达式：** `let x = if (c) { a } else { b };` 合法。`loop { break val; }` 返回 `val`。`for`/`while` 是语句，无返回值。`break` 仅在 `loop` 中可带值。
+**设计决策——`if` 和 `loop` 是表达式：** `let x = if (c) { a } else { b };` 合法。`loop { break val; }` 返回 `val`。`for`/`while` 是语句，无返回值。`break` 仅在 `loop` 中可带值——其他上下文（`for`/`while`/`switch`）中 `break expr` 由 parser 拒绝。
 
 **验收标准：**
 - AC-SYN-009: `let label = if (score >= 60) { "pass" } else { "fail" };` → 解析为 `IfExpr`（表达式）
@@ -176,7 +192,7 @@ if_let_stmt ::= "if" "let" pattern "=" expr block ("else" block)?
 
 ```ebnf
 async_fn   ::= "async" "function" ident generic_params? "(" param_list? ")" (":" type)? block
-await_expr ::= "await" expr
+await_expr ::= "await" expr   -- expr 的优先级解析遵循 LEX-REQ-003；await 优先级(13)高于 +(10)，parser 按优先级表归约
 spawn_expr ::= "spawn" "(" ("move")? "async"? "(" param_list? ")" "=>" (block | expr) ")"
 ```
 
@@ -215,23 +231,65 @@ withlock_expr ::= ident "." "withLock" "(" closure ")"
 - AC-SYN-025: `select { case msg = rx.receive() => { console.log(msg); } }` → 解析（分支内**无** `await`）
 - AC-SYN-026: `counter.withLock(c => { c += 1; });` → 解析
 
-### SYN-REQ-008：类型与表达式补充
+### SYN-REQ-008：类型声明（interface / type / ADT）
 
-覆盖空值糖、泛型、ADT、闭包、引用、FFI、属性、生命周期。
+```ebnf
+interface_decl ::= "interface" ident generic_params? ("extends" type ("," type)*)? "{" method_sig* "}"
+method_sig     ::= ident "(" param_list? ")" ":" type ";"
+type_decl      ::= "type" ident generic_params? "=" type ";"
+adt_decl       ::= "type" ident "=" "|" adt_variant ("|" adt_variant)* ";"
+adt_variant    ::= "{" ident ":" string (":" type)? "}"
+```
 
 **验收标准：**
-- AC-SYN-027: `let val = maybeValue!;` → `!` 断言解析
-- AC-SYN-028: `let file = fs.open("a.txt")?;` → `?` 传播解析
-- AC-SYN-029: `let name = maybeName ?? "anonymous";` → `??` 解析
-- AC-SYN-030: `let street = user?.address?.street;` → `?.` 解析
-- AC-SYN-031: `type Msg = | { kind: "quit" } | { kind: "data"; payload: number[] };` → ADT 解析
-- AC-SYN-032: `interface Printable { print(): void; } impl Printable for Point { function print() { ... } }` → interface+impl 解析
-- AC-SYN-033: `let r = &data;` → `&` 引用解析
-- AC-SYN-034: `extern "rust" { fn sha256(data: number[]): [number; 32]; }` → FFI 解析
-- AC-SYN-035: `function getFirst<'a>(arr: &'a number[]): &'a number { return &arr[0]; }` → 生命周期标注解析
-- AC-SYN-036: `#[test] function add_works() { assert(1 + 1 == 2); }` → 属性语法解析
+- AC-SYN-027: `interface Printable { print(): void; }` → 成功解析 interface 声明
+- AC-SYN-028: `type Point2D = { x: number; y: number };` → 成功解析结构别名
+- AC-SYN-029: `type Msg = | { kind: "quit" } | { kind: "data"; payload: number[] };` → 成功解析 ADT
 
-### SYN-REQ-009：错误恢复
+### SYN-REQ-009：箭头函数与闭包
+
+```ebnf
+arrow_fn ::= ("move")? "(" param_list? ")" "=>" (expr | block)
+closure   ::= ("move")? "(" param_list? ")" "=>" block
+```
+
+**验收标准：**
+- AC-SYN-030: `let f = (x: number) => x * 2;` → 箭头函数解析
+- AC-SYN-031: `let c = move () => process(data);` → move 闭包解析
+
+### SYN-REQ-010：FFI（extern 块）
+
+```ebnf
+extern_decl   ::= "extern" string "{" extern_fn* "}"
+extern_fn     ::= "fn" ident generic_params? "(" param_list? ")" (":" type)? ";"
+```
+
+**验收标准：**
+- AC-SYN-032: `extern "rust" { fn sha256(data: number[]): [number; 32]; }` → FFI 解析
+- AC-SYN-033: `extern "rust" { fn sqlx_query<T>(query: string): Result<T, SqlxError>; }` → 泛型 FFI 解析
+
+### SYN-REQ-011：属性与测试语法
+
+```ebnf
+attribute    ::= "#[" ident ("(" expr ")")? "]"
+test_decl    ::= attribute? "test" "async"? "function" ident "(" param_list? ")" block
+```
+
+**验收标准：**
+- AC-SYN-034: `#[test] function add_works() { assert(1 + 1 == 2); }` → 属性语法解析
+- AC-SYN-035: `test function subtract_works() { assert(5 - 3 == 2); }` → test 关键字语法解析
+
+### SYN-REQ-012：引用、空值糖与构造器
+
+**验收标准（语法通过上文 EBNF 覆盖，此处仅追加补充验收）：**
+- AC-SYN-036: `let r = &data;` → `&` 引用解析
+- AC-SYN-037: `let val = maybeValue!;` → `!` 断言解析
+- AC-SYN-038: `let file = fs.open("a.txt")?;` → `?` 传播解析
+- AC-SYN-039: `let street = user?.address?.street;` → `?.` 可选链解析
+- AC-SYN-040: `let name = maybeName ?? "anonymous";` → `??` 空值合并解析
+- AC-SYN-041: `let pt = Box::new(Point { x: 1, y: 2 });` → `::` 构造器解析
+
+### SYN-REQ-013：错误恢复
 
 **需求：** Parser 采用 panic mode。遇到语法错误后，跳过 token 直到同步点。
 
@@ -241,7 +299,7 @@ withlock_expr ::= ident "." "withLock" "(" closure ")"
 - AC-SYN-037: 包含语法错误的 `.trust` 文件产生 ≥2 个诊断信息（非首个错误停止）
 - AC-SYN-038: 错误恢复后，后续合法代码仍产出正确的 AST 节点
 
-### SYN-REQ-010：分隔符规则
+### SYN-REQ-014：分隔符规则
 
 | 上下文 | 规则 |
 |--------|------|
@@ -254,7 +312,7 @@ withlock_expr ::= ident "." "withLock" "(" closure ")"
 - AC-SYN-039: `let x = { let y = 2; y };` → `y` 作为块返回值（省略 `;`）
 - AC-SYN-040: `let x = match (v) { case Some(n) => n, case None => 0 };` → `match` 分支 `,` 分隔
 
-### SYN-REQ-011：类型标注语法
+### SYN-REQ-015：类型标注语法
 
 **需求：** 类型标注的完整 EBNF，覆盖基本类型、数组、元组、泛型、trait object 等。
 
@@ -263,6 +321,7 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
        | ident                               -- 名义类型/ADT
        | type "[]"                            -- 数组
        | "[" type ("," type)* "]"             -- 元组
+       | "[" type ";" number "]"              -- 固定大小数组（如 [number; 32]）
        | ident "<" type ("," type)* ">"       -- 泛型实例化
        | "Box" "<" "dyn" ident ">"            -- trait object
        | "Option" "<" type ">"                -- Option 简写
@@ -279,6 +338,8 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 ## SEM：语义规范
 
+**设计决策——三层 IR 架构（AST → HIR → TIR）：** Trust 不直接在 AST 上进行类型和所有权分析——AST 是语法糖的"源代码视图"，HIR 消除语法糖并完成名称解析和类型检查，TIR 将控制流简化为基本块后执行所有权/借用检查。方案 B（AST 直接分析）被否决——同等能力下 AST 层分析需要处理语法糖变换（如 `if let` 展开为 `match`、方法调用展开为 `Printable::print(&pt)`），导致分析逻辑与语法耦合，增加编译器维护成本。三层分离使每层专注一个任务。
+
 ### SEM-REQ-001：AST 节点定义
 
 **需求：** Parser 产出以下 AST 节点：
@@ -291,7 +352,8 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 | `SharedStmt` | `name`, `init` | `shared` |
 | `FunctionDecl` | `name`, `generics`, `params`, `return_type`, `body` | `function` |
 | `IfExpr` | `condition`, `then_branch`, `else_branch` | 表达式，可赋值 |
-| `ForStmt` | `init`, `condition`, `update`, `body` | C-style / for-of |
+| `ForStmt` | `init`, `condition`, `update`, `body` | C-style `for` |
+| `ForOfStmt` | `iterator`, `item`, `body` | for-of `for (let item of items)` |
 | `LoopExpr` | `body` | 表达式，`break` 可带值 |
 | `SwitchStmt` | `discriminant`, `cases` | 语句 |
 | `MatchExpr` | `discriminant`, `arms` | 表达式 |
@@ -371,7 +433,7 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 **设计决策——方案 B（严格分离）：** 方案 A（`i32→f64` 自动提升）被否决——违反 §2.2 隐式转换禁止的安全承诺。方案 B 要求 `42 as f64 + 3.14`，TS 开发者付出的代价是显式 `as` 语法，换来"编译通过 = 数值无隐式精度丢失"。
 
 **验收标准：**
-- AC-TYP-001: `let a: i32 = 42; let b: f64 = 3.14; let c = a + b;` → 编译错误：`i32` 与 `f64` 不能混用
+- AC-TYP-001: `let a: number = 42; let b: number = 3.14; let c = a + b;` → 编译错误：`i32` 与 `f64` 不能混用（`number` 字面量 42 承载为 i32，3.14 承载为 f64）
 - AC-TYP-002: `let c = a as f64 + b;` → 类型检查通过，生成 Rust `a as f64 + b`
 - AC-TYP-003: `let c = a + b as i32;` → 类型检查通过（b 截断为 3）
 
@@ -397,13 +459,15 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 **验收标准：**
 - AC-TYP-006: `let val: Dynamic = 42; match (val) { case Dynamic.Number(n) => ..., case Dynamic.String(s) => ..., default => ... }` → 类型安全穷举
+- AC-TYP-007: `let val: Dynamic = "hello"; if let Dynamic.String(s) = val { ... }` → `if let` 解构 Dynamic 合法
 
 ### TYP-REQ-004：Box<dyn Trait>
 
 **需求：** `Box<dyn Trait>` 是 trait object。vtable 分发，不可穷举检查。与 `Dynamic` 的选择指南：已知集合 → Dynamic；开放集合 → `Box<dyn Trait>`。
 
 **验收标准：**
-- AC-TYP-007: `let pt: Box<dyn Serializable> = Box::new(Point { x: 1, y: 2 }); pt.serialize();` → vtable 分发，生成 Rust `Box<dyn Serializable>`
+- AC-TYP-008: `let pt: Box<dyn Serializable> = Box::new(Point { x: 1, y: 2 }); pt.serialize();` → vtable 分发，生成 Rust `Box<dyn Serializable>`
+- AC-TYP-009: `interface Handler { handle(): void; } let handlers: Vec<Box<dyn Handler>> = [...]; for (let h of handlers) { h.handle(); }` → 动态分发，无泛型单态化
 
 ### TYP-REQ-005：?? 与 ?. 类型规则
 
@@ -413,10 +477,10 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 - `?.` 在 owned `Option` 上 move 原变量
 
 **验收标准：**
-- AC-TYP-008: `let name: string = maybeName ?? "anonymous";` → 类型检查通过，映射 `unwrap_or`
-- AC-TYP-009: `let config: Config = loadConfig() ?? defaultConfig;` → Result 被 `??` 处理
-- AC-TYP-010: `user?.name` → `name: string`（非 Option） → 映射 `map`
-- AC-TYP-011: `user?.address?.street` → `address: Option<Address>`（Option） → 映射 `and_then`
+- AC-TYP-010: `let name: string = maybeName ?? "anonymous";` → 类型检查通过，映射 `unwrap_or`
+- AC-TYP-011: `let config: Config = loadConfig() ?? defaultConfig;` → Result 被 `??` 处理
+- AC-TYP-012: `user?.name` → `name: string`（非 Option） → 映射 `map`
+- AC-TYP-013: `user?.address?.street` → `address: Option<Address>`（Option） → 映射 `and_then`
 
 ### TYP-REQ-006：Send / Sync 推导
 
@@ -457,6 +521,7 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 **验收标准：**
 - AC-OWN-001: `let a = [1,2,3]; let b = a; console.log(a.length);` → 编译错误 E0382
+- AC-OWN-002: `let a = 42; let b = a; console.log(a);` → 合法（`number` 是 Copy 类型，不触发移动）
 
 ### OWN-REQ-002：三模式参数表
 
@@ -523,6 +588,7 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 **验收标准：**
 - AC-OWN-015: `for (let i = 0; i < 10; i++) { console.log(i); }` → 合法（无需 `let mut`）
+- AC-OWN-016: `let i = 0; i += 1;` → 编译错误：`let` 变量不可变（非 for 循环上下文中无隐式可变例外）
 
 ### OWN-REQ-008：Copy 类型判定
 
