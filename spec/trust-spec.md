@@ -613,6 +613,26 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 - AC-OWN-016: `let a: number = 42; let b = a; console.log(a);` → `a` 仍可用（`number` 是 Copy）
 - AC-OWN-017: `let a = [1,2,3]; let b = a; console.log(a);` → 编译错误（`Vec<number>` 非 Copy）
 
+### OWN-REQ-009：生命周期省略规则
+
+**需求：** 生命周期标注仅在以下场景需要手动标注 `'a`，其余全部自动推导：
+
+| 场景 | 需要标注？ | 说明 |
+|------|----------|------|
+| 函数返回非引用类型（如 `number`、`Vec<T>`） | ❌ 自动推导 | `function getLen(arr: number[]): number` — 无引用，无需生命周期 |
+| 函数参数是引用，返回值是引用 | ✅ 需标注 | `function getFirst<'a>(arr: &'a number[]): &'a number` — 返回值生命周期绑定到参数 |
+| 函数返回引用但无参数引用 | ✅ 需标注 | 返回值必须绑定到某个参数或标注为 `'static` |
+| 结构体包含引用字段 | ✅ 需标注 | `struct Ref<'a> { data: &'a number }` |
+| 方法调用（`&self`）返回 `&self` 的字段 | ❌ 自动推导 | 编译器自动绑定返回值生命周期到 `self` |
+| 闭包捕获引用 | ❌ 自动推导 | 编译器推断最小生命周期 |
+
+**设计决策——默认省略 vs 显式标注：** Trust 在绝大多数场景省略生命周期（与 Rust 的 elision rules 一致但更激进——方法返回 `&self` 字段时自动绑定）。仅在函数签名层面需要标注——当返回引用且无明确参数引用来源时。这与 Trust 的"局部便利，全局显式"哲学一致。
+
+**验收标准：**
+- AC-OWN-018: `function getLen(arr: number[]): number { return arr.length; }` → 无需生命周期标注，编译通过
+- AC-OWN-019: `function getFirst<'a>(arr: &'a number[]): &'a number { return &arr[0]; }` → 合法，`'a` 手动标注
+- AC-OWN-020: 返回引用且无标记 → 若 TIR 层无法推断来源 → 编译错误，提示添加 `'a` 标注
+
 ---
 
 ## CON：并发规则规范
@@ -712,5 +732,6 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 ---
 
-> **审计标记：** 本规范覆盖设计文档 §1–§11、§14.1、§15（被拒绝特性在 EBNF 中不存在）。  
+> **审计标记（Phase 0.3 审计后修正）：** 本规范覆盖设计文档 §2（保留/牺牲特性）、§3–§7（类型/所有权/并发/错误/模块）、§8 FFI 部分、§9.1 编译管线、§11（全部 20 子节语法参考）、§14.1（测试语法）、§15（被拒绝特性在 EBNF 中不存在）。  
+> **未覆盖：** §1（设计哲学——非规范内容）、§7.2–§7.3（包管理/动态导入——工具链范畴）、§9.2–§9.5（ferro_rt/source map/trust eval/`--fix`——工具链范畴）、§10（标准库——由 `spec/stdlib.md` 覆盖，Phase 0.2）、§12–§14.2+（未来展望/AI 友好性/高级测试——辅助内容）。  
 > **下一步：** `spec/stdlib.md`（Phase 0.2）。`docs/phases/0/TODO.md` 中 0.1.1–0.1.7 全部可勾选。
