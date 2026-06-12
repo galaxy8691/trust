@@ -72,7 +72,7 @@
 |--------|--------|--------|------|
 | 15 | `()` `[]` `::` `.` `++` `--` | 左 | 调用、索引、构造器、成员、后置自增自减 |
 | 14 | `expr!` `expr?` | 左 | 断言解包、Result 传播 |
-| 13 | `&expr` `!expr` `await expr` `++expr` `--expr` | 右→左 | 引用、逻辑非、异步等待、前置自增自减 |
+| 13 | `&expr` `*expr` `!expr` `await expr` `++expr` `--expr` | 右→左 | 引用、**解引用**、逻辑非、异步等待、前置自增自减 |
 | 12 | `expr as T` | 左 | 显式类型转换 |
 | 11 | `*` `/` `%` | 左 | 乘除取模 |
 | 10 | `+` `-` | 左 | 加减 |
@@ -139,7 +139,7 @@ closure ::= ("move")? "(" param_list? ")" "=>" (expr | block)
 
 ```ebnf
 function_decl ::= "function" ident generic_params? "(" param_list? ")" (":" type)? ("{" stmt* "}" | "=" expr ";")
-param         ::= ("inout" | "move")? ident (":" type)?
+param         ::= ("inout" | "move")? ident "?"? (":" type)?
 generic_param ::= ident ("extends" type ("+" type)*)?
 generic_params ::= "<" generic_param ("," generic_param)* ">"
 ```
