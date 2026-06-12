@@ -471,6 +471,7 @@ impl Parser {
                 Some(Expr::ArrowFn(ArrowFn{params,body,is_move:true,span:self.span()}))
             }
             TokenKind::TemplateHead(s) => { let h=s.clone(); self.advance(); Some(self.parse_template(h)) }
+            TokenKind::TemplateInterpolation => { self.advance(); Some(self.parse_template(String::new())) }
             _ => { self.error(&format!("unexpected {:?}", self.cur)); None }
         }
     }

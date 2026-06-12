@@ -29,9 +29,6 @@ dependencies = [
 [[package]]
 name = "trust_parser"
 version = "0.1.0"
-dependencies = [
- "trust_error",
-]
 
 [[package]]
 name = "trust_tir"

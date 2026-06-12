@@ -81,6 +81,12 @@ fn assert_error_snapshot(trust_source: &str, expected_error_substr: &str) {
     // AC-ERR-REC-001: ≥1 diagnostic for the syntax error
     let errs: Vec<_> = p.diagnostics.iter().filter(|d| d.level == parser::DiagLevel::Error).collect();
     assert!(errs.len() >= 1, "expected >=1 diagnostic, got {}", errs.len());
-    // AC-ERR-REC-002: recovery produces valid statements (x and z survive)
-    assert!(prog.statements.len() >= 1, "expected >=1 recovered statement, got {}", prog.statements.len());
+    // AC-ERR-REC-002: recovery produces valid statements (at least the first statement x survives)
+    // Note: Phase 1 MVP panic mode may skip past z, but must not skip past x.
+    let names: Vec<String> = prog.statements.iter().filter_map(|s| match s {
+        trust_parser::ast::Stmt::Let(l) => Some(l.name.clone()),
+        _ => None,
+    }).collect();
+    assert!(names.contains(&"x".to_string()), "x should be recovered after panic mode");
+    assert!(prog.statements.len() >= 1, "expected >=1 recovered stmt, got {}", prog.statements.len());
 }

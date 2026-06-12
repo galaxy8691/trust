@@ -133,7 +133,7 @@ impl Lexer {
                     break;
                 }
                 if had && self.last_token.as_ref().is_some_and(|t| t.can_end_stmt())
-                    && !matches!(self.cur(), Some(c) if c == '{' || c == '(' || c == '[' || c == '.' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '?' || c == ':' || c == ',') {
+                    && !matches!(self.cur(), Some(c) if c == '{' || c == '(' || c == '[' || c == '.' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '?' || c == ':' || c == ',' || c == '=') {
                     return Some(TokenKind::Semi);
                 }
             } else if ch == ' ' || ch == '\t' || ch == '\r' { self.advance(); }
