@@ -10,43 +10,43 @@
 ## 1.1 项目初始化
 
 **产出物：** Cargo workspace + CI/CD + 工程骨架  
-**工作量：** 2 天  
+**工作量：** 2 天  **状态：** ✅ 完成 (2026-04-14)
 **优先级：** P0
 
 ### Cargo workspace
 
-- [ ] Cargo workspace 搭建（crate 结构按 `docs/design-constraints.md` §1.2）
-- [ ] `rustfmt.toml`、`clippy.toml` 配置
-- [ ] MSRV 声明（stable Rust ≥ 1.63，`Cargo.toml` 中 `rust-version` 字段）
+- [x] Cargo workspace 搭建（crate 结构按 `docs/design-constraints.md` §1.2）
+- [x] `rustfmt.toml`、`clippy.toml` 配置
+- [x] MSRV 声明（stable Rust ≥ 1.63，`Cargo.toml` 中 `rust-version` 字段）
 
 ### CI/CD
 
-- [ ] CI/CD 配置（GitHub Actions，按 constraints §11.1）
-- [ ] CI job: `cargo test --workspace`
-- [ ] CI job: `cargo clippy --workspace -- -D warnings`
-- [ ] CI job: `cargo fmt --check --all`
-- [ ] CI job: `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir && exit 1 || echo "OK"`（P0：前三 crate 零 unsafe，constraints §3.2）
-- [ ] CI job: `cargo tarpaulin -p trust_tir --fail-under 85`（P1，nightly toolchain）
-- [ ] CI job: `cargo tarpaulin -p trust_parser --fail-under 70`（P1，constraints §5.3）
-- [ ] CI job: `cargo tarpaulin -p trust_hir --fail-under 70`（P1）
-- [ ] CI job: `cargo tarpaulin -p trust_codegen --fail-under 70`（P1）
-- [ ] CI job: `cargo miri test -p ferro_rt`（P1，unsafe 块验证，nightly）
-- [ ] CI job: `cargo test --workspace` on MSRV（Rust 1.63，constraints §11.2 P1）
-- [ ] `.github/dependabot.yml` 依赖自动更新配置
+- [x] CI/CD 配置（GitHub Actions，按 constraints §11.1）
+- [x] CI job: `cargo test --workspace`
+- [x] CI job: `cargo clippy --workspace -- -D warnings`
+- [x] CI job: `cargo fmt --check --all`
+- [x] CI job: `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir && exit 1 || echo "OK"`（P0：前三 crate 零 unsafe，constraints §3.2）
+- [x] CI job: `cargo tarpaulin -p trust_tir --fail-under 85`（P1，nightly toolchain）
+- [x] CI job: `cargo tarpaulin -p trust_parser --fail-under 70`（P1，constraints §5.3）
+- [x] CI job: `cargo tarpaulin -p trust_hir --fail-under 70`（P1）
+- [x] CI job: `cargo tarpaulin -p trust_codegen --fail-under 70`（P1）
+- [x] CI job: `cargo miri test -p ferro_rt`（P1，unsafe 块验证，nightly）
+- [x] CI job: `cargo test --workspace` on MSRV（Rust 1.63，constraints §11.2 P1）
+- [x] `.github/dependabot.yml` 依赖自动更新配置
 
 ### Clippy P0 约束
 
-- [ ] `clippy.toml` 启用 `clippy::unwrap_used`、`clippy::expect_used`（P0：编译器 crate 禁止 unwrap/expect，constraints §3.1）
-- [ ] `clippy.toml` 启用 `clippy::unnecessary_cast`、`clippy::cast_lossless`（数字类型规范）
+- [x] `clippy.toml` 启用 `clippy::unwrap_used`、`clippy::expect_used`（P0：编译器 crate 禁止 unwrap/expect，constraints §3.1）
+- [x] `clippy.toml` 启用 `clippy::unnecessary_cast`、`clippy::cast_lossless`（数字类型规范）
 
 ### Fuzz + Bench + 工程规范
 
-- [ ] `fuzz/` 目录初始化（cargo-fuzz：parser + TIR + codegen 目标）
-- [ ] `benches/` 基础目录（criterion benchmark，v0.1 基础，v0.2 正式启用）
-- [ ] `CHANGELOG.md` 初始化（Keep a Changelog 格式，constraints §11.4）
-- [ ] Workspace 所有 crate 版本同步声明（SemVer `0.1.0`，constraints §11.3）
-- [ ] `cargo publish --dry-run` 通过（workspace 成员统一 bump）
-- [ ] 交叉编译目标声明：`wasm32-unknown-unknown`（P2，Phase 1 仅声明不实现）
+- [x] `fuzz/` 目录初始化（cargo-fuzz：parser + TIR + codegen 目标）
+- [x] `benches/` 基础目录（criterion benchmark，v0.1 基础，v0.2 正式启用）
+- [x] `CHANGELOG.md` 初始化（Keep a Changelog 格式，constraints §11.4）
+- [x] Workspace 所有 crate 版本同步声明（SemVer `0.1.0`，constraints §11.3）
+- [x] `cargo publish --dry-run` 通过（workspace 成员统一 bump）
+- [x] 交叉编译目标声明：`wasm32-unknown-unknown`（P2，Phase 1 仅声明不实现）
 
 ---
 

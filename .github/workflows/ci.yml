@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, phase1-compiler]
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ========== JOB 1: 基础检查（stable） ==========
+  test-stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace
+      - run: cargo build --workspace --release
+
+  # ========== JOB 2: Clippy + Fmt（stable） ==========
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --check --all
+      - run: cargo clippy --workspace -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -W clippy::cognitive_complexity=30 -W clippy::too_many_arguments=8
+
+  # ========== JOB 3: Unsafe 检查（P0） ==========
+  no-unsafe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          for crate in trust_parser trust_hir trust_tir; do
+            if grep -r "unsafe" "crates/$crate/src/" 2>/dev/null; then
+              echo "ERROR: unsafe found in $crate (prohibited by constraints §3.2 P0)"
+              exit 1
+            fi
+          done
+          echo "OK: no unsafe in parser/hir/tir"
+
+  # ========== JOB 4: Unsafe 注释审计（P1） ==========
+  audit-unsafe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          for crate in trust_codegen ferro_rt; do
+            if grep -rn "unsafe" "crates/$crate/src/" 2>/dev/null | grep -v "SAFETY" | grep -v "// SAFETY:" > /tmp/unsafe_audit.txt; then
+              if [ -s /tmp/unsafe_audit.txt ]; then
+                echo "ERROR: unsafe block without // SAFETY: comment found in $crate:"
+                cat /tmp/unsafe_audit.txt
+                exit 1
+              fi
+            fi
+          done
+          echo "OK: all unsafe blocks have // SAFETY: comments"
+
+  # ========== JOB 5: audit-allow-unwrap（P0） ==========
+  audit-allow-unwrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          errors=0
+          for file in $(grep -rl '#\[allow(clippy::unwrap_used)\|#\[allow(clippy::expect_used)' crates/ 2>/dev/null); do
+            line=$(grep -n '#\[allow(clippy::unwrap_used)\|#\[allow(clippy::expect_used)' "$file" | head -1 | cut -d: -f1)
+            start=$((line > 3 ? line - 3 : 1))
+            if ! sed -n "${start},${line}p" "$file" | grep -q "// SAFETY:"; then
+              echo "ERROR: $file:$line #[allow(unwrap/expect)] without // SAFETY: comment"
+              errors=1
+            fi
+          done
+          if [ $errors -eq 1 ]; then exit 1; fi
+          echo "OK: all #[allow(unwrap/expect)] have // SAFETY: comments"
+
+  # ========== JOB 6: 设计文档引用检查（P1） ==========
+  doc-refs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "NOTE: doc-refs full check active from Phase 1.3+"
+
+  # ========== JOB 7: 覆盖率 — 工具检查（nightly） ==========
+  coverage-tool:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - run: cargo tarpaulin --version
+
+  # ========== JOB 8: 覆盖率 — 门控检查（nightly） ==========
+  coverage-gate:
+    runs-on: ubuntu-latest
+    needs: coverage-tool
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: trust_tir (>=85%)
+        run: cargo tarpaulin -p trust_tir --fail-under 85 --out xml
+      - name: trust_parser (>=70%)
+        run: cargo tarpaulin -p trust_parser --fail-under 70 --out xml
+      - name: trust_hir (>=70%)
+        run: cargo tarpaulin -p trust_hir --fail-under 70 --out xml
+      - name: trust_codegen (>=70%)
+        run: cargo tarpaulin -p trust_codegen --fail-under 70 --out xml
+
+  # ========== JOB 9: Miri unsafe 验证（nightly，P1） ==========
+  miri:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - run: cargo miri test -p ferro_rt
+
+  # ========== JOB 10: MSRV 测试（P1） ==========
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.63"
+      - run: cargo test --workspace

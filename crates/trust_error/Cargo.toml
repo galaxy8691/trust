@@ -1,0 +1,10 @@
+[package]
+name = "trust_error"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# 零依赖 — 基础 crate，被所有其他 crate 依赖

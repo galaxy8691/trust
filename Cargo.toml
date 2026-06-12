@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/trust_parser",
+    "crates/trust_hir",
+    "crates/trust_tir",
+    "crates/trust_codegen",
+    "crates/trust_error",
+    "crates/ferro_rt",
+    "crates/trustc",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.63"                   # MSRV: stable Rust ≥ 1.63
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/galaxy8691/trust"
+
+[workspace.dependencies]
+# 内部 crate 由各 Cargo.toml 以 path = "..." 引用
+# 外部依赖在此统一声明版本（Phase 1 最小化：零外部依赖）

@@ -1,0 +1,11 @@
+# === P0 约束（constraints §10） ===
+# 编译器 crate 禁止 unwrap/expect——通过 CI -D lint 强制执行
+# （见 .github/workflows/ci.yml 的 lint job 和 audit-allow-unwrap job）
+#
+# 局部豁免方式：
+#   #[allow(clippy::unwrap_used)]  // SAFETY: <说明理由>
+# CI 脚本检查每个 #[allow(...)] 上方 3 行内是否有 "// SAFETY:" 注释
+
+# === P1 约束 ===
+# 注：cognitive-complexity 和 too-many-arguments 阈值通过 CI 命令行传递
+# （clippy.toml 不支持这些字段），见 ci.yml 的 lint job。

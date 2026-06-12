@@ -1,0 +1,11 @@
+[package]
+name = "ferro_rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Trust 运行时库 — 最小 stub（Phase 1）"
+
+[dependencies]
+# Phase 1: 零外部依赖。Phase 4 后引入 tokio/crossbeam
