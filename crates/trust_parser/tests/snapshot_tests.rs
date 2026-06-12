@@ -88,5 +88,13 @@ fn assert_error_snapshot(trust_source: &str, expected_error_substr: &str) {
         _ => None,
     }).collect();
     assert!(names.contains(&"x".to_string()), "x should be recovered after panic mode");
-    assert!(prog.statements.len() >= 1, "expected >=1 recovered stmt, got {}", prog.statements.len());
+    // AC-ERR-REC-002: z MUST also be recovered. Panic mode stops at semi (sync point),
+    // parse_program loop advances past it, and the next stmt is parsed normally.
+    assert!(names.contains(&"z".to_string()), "z should be recovered after panic mode; got {:?}", names);
+    assert!(prog.statements.len() >= 2, "expected >=2 recovered stmts (x+z), got {}", prog.statements.len());
+}
+
+/// 模板字面量快照 — debate final R2 补充
+#[test] fn snap_template_literal() {
+    assert_ast_snapshot("let msg = `hello ${name}`", &["TemplateLiteral", "hello ", "name"]);
 }
