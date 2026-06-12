@@ -4,6 +4,35 @@
 //! `fn` — lexer 无条件识别，parser 仅在 extern 块内接受。
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+static KEYWORDS: LazyLock<HashMap<&str, TokenKind>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+    for (k, v) in [
+        ("let", TokenKind::Let), ("mut", TokenKind::Mut), ("const", TokenKind::Const),
+        ("shared", TokenKind::Shared), ("function", TokenKind::Function), ("fn", TokenKind::Fn),
+        ("inout", TokenKind::InOut), ("move", TokenKind::Move),
+        ("spawn", TokenKind::Spawn), ("async", TokenKind::Async), ("await", TokenKind::Await),
+        ("select", TokenKind::Select), ("if", TokenKind::If), ("else", TokenKind::Else),
+        ("for", TokenKind::For), ("of", TokenKind::Of), ("while", TokenKind::While),
+        ("loop", TokenKind::Loop), ("break", TokenKind::Break), ("continue", TokenKind::Continue),
+        ("return", TokenKind::Return), ("throw", TokenKind::Throw),
+        ("switch", TokenKind::Switch), ("case", TokenKind::Case), ("default", TokenKind::Default),
+        ("match", TokenKind::Match), ("import", TokenKind::Import), ("export", TokenKind::Export),
+        ("from", TokenKind::From), ("as", TokenKind::As),
+        ("interface", TokenKind::Interface), ("type", TokenKind::Type), ("impl", TokenKind::Impl),
+        ("extends", TokenKind::Extends), ("this", TokenKind::This), ("dyn", TokenKind::Dyn),
+        ("test", TokenKind::Test), ("extern", TokenKind::Extern),
+        ("true", TokenKind::True), ("false", TokenKind::False), ("undefined", TokenKind::Undefined),
+        ("None", TokenKind::None_), ("Some", TokenKind::Some_), ("Ok", TokenKind::Ok_),
+        ("Err", TokenKind::Err_), ("Rc", TokenKind::Rc), ("Arc", TokenKind::Arc),
+        ("Weak", TokenKind::Weak), ("Box", TokenKind::Box_),
+        ("number", TokenKind::NumberType), ("string", TokenKind::StringType),
+        ("boolean", TokenKind::BooleanType), ("bigint", TokenKind::BigIntType),
+        ("void", TokenKind::VoidType),
+    ] { m.insert(k, v); }
+    m
+});
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -39,6 +68,18 @@ impl TokenKind {
             | TokenKind::Bang
         )
     }
+
+    /// 阻止 ASI 在此 token 前插入分号（续行 token）
+    pub fn blocks_asi(&self) -> bool {
+        matches!(self,
+            TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket
+            | TokenKind::Dot | TokenKind::Plus | TokenKind::Minus
+            | TokenKind::Star | TokenKind::Slash | TokenKind::Percent
+            | TokenKind::And | TokenKind::Or | TokenKind::Arrow
+            | TokenKind::QuestionDot | TokenKind::QuestionQuestion
+            | TokenKind::Colon | TokenKind::Comma
+        )
+    }
 }
 
 pub struct Lexer {
@@ -56,34 +97,6 @@ impl Lexer {
         Lexer { source: source.chars().collect(), pos: 0,
             file: file.to_string(), line: 1, col: 1,
             last_token: None, line_has_content: false }
-    }
-
-    fn kw() -> HashMap<&'static str, TokenKind> {
-        let mut m = HashMap::new();
-        for (k, v) in [
-            ("let", TokenKind::Let), ("mut", TokenKind::Mut), ("const", TokenKind::Const),
-            ("shared", TokenKind::Shared), ("function", TokenKind::Function), ("fn", TokenKind::Fn),
-            ("inout", TokenKind::InOut), ("move", TokenKind::Move),
-            ("spawn", TokenKind::Spawn), ("async", TokenKind::Async), ("await", TokenKind::Await),
-            ("select", TokenKind::Select), ("if", TokenKind::If), ("else", TokenKind::Else),
-            ("for", TokenKind::For), ("of", TokenKind::Of), ("while", TokenKind::While),
-            ("loop", TokenKind::Loop), ("break", TokenKind::Break), ("continue", TokenKind::Continue),
-            ("return", TokenKind::Return), ("throw", TokenKind::Throw),
-            ("switch", TokenKind::Switch), ("case", TokenKind::Case), ("default", TokenKind::Default),
-            ("match", TokenKind::Match), ("import", TokenKind::Import), ("export", TokenKind::Export),
-            ("from", TokenKind::From), ("as", TokenKind::As),
-            ("interface", TokenKind::Interface), ("type", TokenKind::Type), ("impl", TokenKind::Impl),
-            ("extends", TokenKind::Extends), ("this", TokenKind::This), ("dyn", TokenKind::Dyn),
-            ("test", TokenKind::Test), ("extern", TokenKind::Extern),
-            ("true", TokenKind::True), ("false", TokenKind::False), ("undefined", TokenKind::Undefined),
-            ("None", TokenKind::None_), ("Some", TokenKind::Some_), ("Ok", TokenKind::Ok_),
-            ("Err", TokenKind::Err_), ("Rc", TokenKind::Rc), ("Arc", TokenKind::Arc),
-            ("Weak", TokenKind::Weak), ("Box", TokenKind::Box_),
-            ("number", TokenKind::NumberType), ("string", TokenKind::StringType),
-            ("boolean", TokenKind::BooleanType), ("bigint", TokenKind::BigIntType),
-            ("void", TokenKind::VoidType),
-        ] { m.insert(k, v); }
-        m
     }
 
     fn cur(&self) -> Option<char> { self.source.get(self.pos).copied() }
@@ -117,7 +130,8 @@ impl Lexer {
                     if c == ' ' || c == '\t' || c == '\r' || c == '\n' { self.advance(); continue; }
                     break;
                 }
-                if had && self.last_token.as_ref().map_or(false, |t| t.can_end_stmt()) {
+                if had && self.last_token.as_ref().is_some_and(|t| t.can_end_stmt())
+                    && !matches!(self.cur(), Some(c) if c == '{' || c == '(' || c == '[' || c == '.' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '?' || c == ':' || c == ',') {
                     return Some(TokenKind::Semi);
                 }
             } else if ch == ' ' || ch == '\t' || ch == '\r' { self.advance(); }
@@ -234,9 +248,14 @@ impl Lexer {
             None => break,
             Some('`') => { self.advance(); return self.emit(TokenKind::TemplateTail(s)); }
             Some('$') if self.peek() == Some('{') => {
-                self.advance(); self.advance();
-                return self.emit(if s.is_empty() { TokenKind::TemplateHead(String::new()) }
-                                 else { TokenKind::TemplateHead(s) });
+                self.advance(); self.advance(); // eat $ and {
+                if s.is_empty() {
+                    // ${ at start → emit Interpolation only (head is empty)
+                    return self.emit(TokenKind::TemplateInterpolation);
+                } else {
+                    // emit head string, Interpolation will follow on next call
+                    return self.emit(TokenKind::TemplateHead(s));
+                }
             }
             Some('\\') => { self.advance(); match self.cur() {
                 Some('`') => { s.push('`'); self.advance(); } Some('\\') => { s.push('\\'); self.advance(); }
@@ -251,7 +270,7 @@ impl Lexer {
     fn lex_number(&mut self) -> TokenKind {
         let start = self.pos;
         while let Some(c) = self.cur() { if c.is_ascii_digit() { self.advance(); } else { break; } }
-        if self.cur() == Some('.') && self.peek().map_or(false, |c| c.is_ascii_digit()) {
+        if self.cur() == Some('.') && self.peek().is_some_and(|c| c.is_ascii_digit()) {
             self.advance();
             while let Some(c) = self.cur() { if c.is_ascii_digit() { self.advance(); } else { break; } }
             let s: String = self.source[start..self.pos].iter().collect();
@@ -271,8 +290,7 @@ impl Lexer {
         self.advance();
         while let Some(c) = self.cur() { if c.is_ascii_alphanumeric() || c == '_' { self.advance(); } else { break; } }
         let ident: String = self.source[start..self.pos].iter().collect();
-        let map = Self::kw();
-        self.emit(map.get(ident.as_str()).cloned().unwrap_or(TokenKind::Ident(ident)))
+        self.emit(KEYWORDS.get(ident.as_str()).cloned().unwrap_or(TokenKind::Ident(ident)))
     }
 }
 
@@ -325,7 +343,7 @@ mod tests {
         assert_eq!(ts[4], TokenKind::Ident("c".into()));
     }
     #[test] fn lex_keyword_substring_returns_ident() { assert_eq!(tokenize("letx")[0], TokenKind::Ident("letx".into())); }
-    #[test] fn lex_keyword_count_is_54() { assert_eq!(Lexer::kw().len(), 54); }
+    #[test] fn lex_keyword_count_is_54() { assert_eq!(KEYWORDS.len(), 54); }
     #[test] fn lex_fn_keyword_recognized() { assert_eq!(tokenize("fn main() {}")[0], TokenKind::Fn); }
     #[test] fn lex_as_keyword_recognized() {
         let ts = tokenize("x as number");

@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ModuleGraph {
     pub modules: HashMap<String, ModuleInfo>,
     pub order: Vec<String>,

@@ -71,6 +71,16 @@ impl Parser {
         match &self.cur {
             TokenKind::Let => self.parse_let(false),
             TokenKind::Const => self.parse_let(true),
+            TokenKind::Shared => {
+                self.advance(); // shared
+                let name = self.expect_ident("shared name")?;
+                let ty = if matches!(self.cur, TokenKind::Colon) { self.advance(); self.parse_type() } else { None };
+                if !matches!(self.cur, TokenKind::Eq) { self.error("expected ="); return None; }
+                self.advance();
+                let init = self.parse_expr()?;
+                self.expect_semi();
+                Some(Stmt::Shared(SharedStmt{name,ty,init:Box::new(init),span:Span::dummy()}))
+            }
             TokenKind::Function => self.parse_fn(),
             TokenKind::If => self.parse_if(),
             TokenKind::For => self.parse_for(),

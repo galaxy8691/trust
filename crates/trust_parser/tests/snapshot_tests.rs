@@ -39,6 +39,7 @@ fn assert_error_snapshot(trust_source: &str, expected_error_substr: &str) {
 
 #[test] fn snap_let_basic() { assert_ast_snapshot("let x = 42", &["LetStmt", "x"]); }
 #[test] fn snap_let_mut() { assert_ast_snapshot("let mut y = 10", &["LetStmt", "y", "mutable: true"]); }
+#[test] fn snap_shared() { assert_ast_snapshot("shared counter = 0", &["SharedStmt", "counter"]); }
 #[test] fn snap_const() { assert_ast_snapshot("const MAX = 100", &["ConstStmt", "MAX"]); }
 #[test] fn snap_fn_basic() { assert_ast_snapshot("function add(a:number,b:number):number{return a+b}", &["FunctionDecl", "add"]); }
 #[test] fn snap_fn_inout() { assert_ast_snapshot("function push(inout arr:number[]){}", &["FunctionDecl", "InOut"]); }
@@ -74,8 +75,12 @@ fn assert_error_snapshot(trust_source: &str, expected_error_substr: &str) {
 }
 #[test] fn snap_error_keyword() { assert_error_snapshot("let async=42", "expected variable name"); }
 #[test] fn snap_error_panic_mode() {
-    match parser::parse("let x=;\nlet y=10") {
-        Ok(p) => assert!(!p.statements.is_empty()),
-        Err(_) => {},
-    }
+    use trust_parser::parser::Parser;
+    let mut p = Parser::new("let x = 42\nlet y = ;\nlet z = 10", "test.trust");
+    let prog = p.parse_program();
+    // AC-ERR-REC-001: ≥1 diagnostic for the syntax error
+    let errs: Vec<_> = p.diagnostics.iter().filter(|d| d.level == parser::DiagLevel::Error).collect();
+    assert!(errs.len() >= 1, "expected >=1 diagnostic, got {}", errs.len());
+    // AC-ERR-REC-002: recovery produces valid statements (x and z survive)
+    assert!(prog.statements.len() >= 1, "expected >=1 recovered statement, got {}", prog.statements.len());
 }
