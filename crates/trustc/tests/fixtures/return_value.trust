@@ -1,0 +1,7 @@
+function get_answer(): number {
+    return 42;
+}
+
+function main(): void {
+    console.log("return ok");
+}

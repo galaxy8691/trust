@@ -1,0 +1,8 @@
+function consume(move x: number): void {
+    console.log("move ok");
+}
+
+function main(): void {
+    let val = 42;
+    consume(move val);
+}

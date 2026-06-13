@@ -1,0 +1,5 @@
+function main(): void {
+    let x = 42;
+    let r = &x;
+    console.log("ref ok");
+}

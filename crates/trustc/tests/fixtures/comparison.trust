@@ -1,0 +1,11 @@
+function main(): void {
+    let a = 5;
+    let b = 10;
+    let lt = a < b;
+    let gt = a > b;
+    let le = a <= b;
+    let ge = a >= b;
+    let eq = a == b;
+    let ne = a != b;
+    console.log("comparison ok");
+}

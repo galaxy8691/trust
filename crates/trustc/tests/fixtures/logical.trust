@@ -1,0 +1,8 @@
+function main(): void {
+    let t = true;
+    let f = false;
+    let and_r = t && f;
+    let or_r = t || f;
+    let not_r = !f;
+    console.log("logical ok");
+}

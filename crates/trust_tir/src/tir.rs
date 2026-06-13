@@ -402,15 +402,13 @@ fn lower_let(let_s: &HirLet, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
                         diags.push(DiagError::new(format!("undefined: {name}"), Span::dummy()));
                         None
                     }
+                } else if let Some(existing) = ctx.map.lookup_name(name) {
+                    let new_tmp = ctx.next_tmp();
+                    ctx.emit(TirOp::Move(new_tmp, existing, let_s.span.clone()));
+                    Some(new_tmp)
                 } else {
-                    if let Some(existing) = ctx.map.lookup_name(name) {
-                        let new_tmp = ctx.next_tmp();
-                        ctx.emit(TirOp::Move(new_tmp, existing, let_s.span.clone()));
-                        Some(new_tmp)
-                    } else {
-                        diags.push(DiagError::new(format!("undefined: {name}"), Span::dummy()));
-                        None
-                    }
+                    diags.push(DiagError::new(format!("undefined: {name}"), Span::dummy()));
+                    None
                 }
             } else {
                 let val = lower_expr_to_value(&let_s.init, ctx, diags);

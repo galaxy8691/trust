@@ -1,0 +1,9 @@
+function main(): void {
+    let a: number = 42;
+    let b: number = 10;
+    let c: number = a + b;
+    let d: string = "hello";
+    let e: boolean = true;
+    let f: number = 3.14;
+    console.log("let ok");
+}

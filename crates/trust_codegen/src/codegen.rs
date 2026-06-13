@@ -308,14 +308,17 @@ fn generate_function(func: &TirFunction) -> (String, bool, Vec<CodegenError>, So
     ctx.indent_level += 1;
 
     // === K4: 声明局部变量（标记 mut） ===
+    // F1.8 fix: 类型为空时跳过声明，由 emit_op 内联 let 声明+初始化
     let local_vars = collect_local_vars(func);
     for tmp in &local_vars {
-        let name = ctx.var_name(*tmp);
         let ty = infer_tmp_type(tmp, func);
+        if ty.is_empty() {
+            continue; // 类型无法推断——由首次赋值处内联声明
+        }
+        let name = ctx.var_name(*tmp);
         let is_mut_decl = ctx.mut_vars.contains(tmp);
         let mut_str = if is_mut_decl { " mut" } else { "" };
-        let colon = if ty.is_empty() { "" } else { ": " };
-        ctx.write_line(&format!("let{mut_str} {name}{colon}{ty};"));
+        ctx.write_line(&format!("let{mut_str} {name}: {ty};"));
     }
 
     // === 控制流生成 ===
