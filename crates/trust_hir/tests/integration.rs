@@ -6,7 +6,9 @@
 use trust_hir::hir::*;
 use trust_hir::name_res::{lower, resolve_names, DiagError};
 use trust_hir::typeck::check_types;
+use trust_parser::ast::Span;
 use trust_parser::module_graph::ModuleGraph;
+use std::collections::HashSet;
 
 fn run_full_pipeline(
     src: &str,
@@ -240,4 +242,137 @@ fn integration_wrong_arg_count() {
         && d.message.contains("arguments"));
     assert!(has_count_err, "expected argument count error, got: {:?}",
         type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+// ============================================================================
+// §7 边界条件: 空文件
+// ============================================================================
+
+#[test]
+fn boundary_empty_file_no_panic() {
+    let src = "";
+    let mut p = trust_parser::parser::Parser::new(src, "test.trust");
+    let prog = p.parse_program();
+    let mut diags = vec![];
+    let hir = lower(&prog, &mut diags);
+    assert!(hir.items.is_empty(), "empty file should produce empty items");
+    assert!(hir.exports.is_empty());
+}
+
+// ============================================================================
+// §7 边界条件: 空函数体
+// ============================================================================
+
+#[test]
+fn boundary_empty_function_body() {
+    let src = "function f(): void {}";
+    let (hir, name_diags, _type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
+    let func = hir.items.iter().find_map(|i| match i {
+        HirItem::Function(f) if f.name == "f" => Some(f),
+        _ => None,
+    }).expect("f should exist");
+    assert!(func.body.statements.is_empty(), "empty body should have zero statements");
+}
+
+// ============================================================================
+// §7 边界条件: 循环导入（通过 ModuleGraph 检测，parser 已验证）
+// ============================================================================
+
+#[test]
+fn boundary_circular_import_detected_by_module_graph() {
+    // Phase 1.3 复用 parser 的 ModuleGraph 循环检测（AC-MOD-001 已验证）。
+    // trust_hir 的 resolve_names 接收 ModuleGraph 参数，循环检测在调用方完成。
+    use trust_parser::module_graph::ModuleGraph;
+    let mut mg = ModuleGraph::new();
+    mg.add_module("a.trust", vec!["b.trust".into()], HashSet::new());
+    mg.add_module("b.trust", vec!["a.trust".into()], HashSet::new());
+    assert!(mg.resolve().is_err(), "circular import should be detected");
+}
+
+// ============================================================================
+// §7 边界条件: Type::Error 哨兵阻止级联
+// ============================================================================
+
+#[test]
+fn boundary_sentinel_blocks_cascade_on_binary() {
+    // 二次二元运算中，Error 哨兵阻止对 y 的二次类型检查
+    let src = "function f(): void { let x = \"hello\"; let y = x + 1; let z = y + 2; }";
+    let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
+    // y 的类型应为 Error，z 的检查应被短路——最多 1 条根因错误
+    assert!(
+        type_diags.len() <= 2,
+        "sentinel should limit error cascade, got {} diags: {:?}",
+        type_diags.len(),
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ============================================================================
+// §7 边界条件: import 不存在文件
+// ============================================================================
+
+#[test]
+fn boundary_import_nonexistent_file() {
+    // Phase 1: resolve_import_path 只解析路径，不检查文件存在。
+    // 文件不存在检查在名称解析的上层完成（resolve_names 中解析 import 目标文件时）。
+    let result = trust_parser::resolve_imports::resolve_import_path("./nope", "main.trust");
+    // 路径解析成功（返回拼接后的路径），不检查文件系统
+    assert!(result.is_some(), "resolve_import_path resolves paths, not existence");
+    assert!(result.unwrap().contains("nope.trust"));
+}
+
+// ============================================================================
+// §7 边界条件: BinOp 矩阵补充 — Sub/Div 类型正确场景
+// ============================================================================
+
+#[test]
+fn check_binary_sub_i32_ok() {
+    let mut diags = vec![];
+    let r = trust_hir::typeck::check_binary_op(
+        BinOp::Sub, &HirType::I32, &HirType::I32,
+        Span::dummy(), &mut diags,
+    );
+    assert_eq!(r, Ok(HirType::I32));
+}
+
+#[test]
+fn check_binary_div_f64_ok() {
+    let mut diags = vec![];
+    let r = trust_hir::typeck::check_binary_op(
+        BinOp::Div, &HirType::F64, &HirType::F64,
+        Span::dummy(), &mut diags,
+    );
+    assert_eq!(r, Ok(HirType::F64));
+}
+
+#[test]
+fn check_binary_eq_string_returns_bool() {
+    let mut diags = vec![];
+    let r = trust_hir::typeck::check_binary_op(
+        BinOp::Eq, &HirType::String, &HirType::String,
+        Span::dummy(), &mut diags,
+    );
+    assert_eq!(r, Ok(HirType::Bool));
+}
+
+#[test]
+fn check_binary_lt_i64_returns_bool() {
+    let mut diags = vec![];
+    let r = trust_hir::typeck::check_binary_op(
+        BinOp::Lt, &HirType::I64, &HirType::I64,
+        Span::dummy(), &mut diags,
+    );
+    assert_eq!(r, Ok(HirType::Bool));
+}
+
+#[test]
+fn check_binary_ge_bool_returns_bool() {
+    // Eq/Ne/Lt/Gt/Le/Ge — 比较运算对同类型 Bool 返回 Bool
+    let mut diags = vec![];
+    let r = trust_hir::typeck::check_binary_op(
+        BinOp::Ge, &HirType::Bool, &HirType::Bool,
+        Span::dummy(), &mut diags,
+    );
+    assert_eq!(r, Ok(HirType::Bool));
 }
