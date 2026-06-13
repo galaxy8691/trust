@@ -580,7 +580,10 @@ fn expr_type(expr: &HirExpr) -> HirType {
         HirExpr::If(if_s, _) => infer_if_type(if_s),
         HirExpr::Loop(l, _) => infer_loop_type(&l.body),
         HirExpr::Block(block, _) => infer_block_type(block),
-        HirExpr::ArrowFn(..) => HirType::Function(vec![], Box::new(HirType::Void)),
+        HirExpr::ArrowFn(params, ret, ..) => {
+            let param_types: Vec<HirType> = params.iter().map(|p| p.ty.clone()).collect();
+            HirType::Function(param_types, Box::new(ret.clone()))
+        },
         HirExpr::Reference(inner, _) => HirType::Ref(Box::new(expr_type(inner))),
         HirExpr::TemplateLiteral(..) => HirType::String,
         HirExpr::AssertUnwrap(..) | HirExpr::TryPropagate(..) => HirType::Error,
@@ -602,15 +605,20 @@ fn infer_block_type(block: &HirBlock) -> HirType {
 }
 
 fn infer_loop_type(body: &HirBlock) -> HirType {
-    // Scan for break statements in the loop body and infer their value types
     let mut break_types: Vec<HirType> = Vec::new();
     collect_break_types(body, &mut break_types);
     if break_types.is_empty() {
-        HirType::Void // loop without break value
-    } else if break_types.iter().all(|t| t == &break_types[0]) {
-        break_types[0].clone()
+        HirType::Void
     } else {
-        HirType::Error // mixed break types
+        // Filter out Error sentinels before comparing (prevents mixed-type false positives)
+        let clean: Vec<&HirType> = break_types.iter().filter(|t| **t != HirType::Error).collect();
+        if clean.is_empty() {
+            HirType::Error
+        } else if clean.iter().all(|t| *t == clean[0]) {
+            clean[0].clone()
+        } else {
+            HirType::Error
+        }
     }
 }
 
