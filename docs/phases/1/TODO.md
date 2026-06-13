@@ -3,7 +3,7 @@
 > 目标：实现最小可用 Trust 编译器（Trust → Rust 源码 → 二进制）  
 > 期限：第 2–4 个月  
 > 优先级：P0（阻塞所有后续 Phase）  
-> 最后辩论：与 OpenClaw 三轮对抗审查，23 条发现全部修正（🔴8 🟠5 🟡11 → 0）
+> 最后辩论：与 OpenClaw 三轮对抗审查，R1 发现 23 条 → R2 共识 20 项独立发现（🔴2 🟠6 🟡12），全部达成共识裂口清零
 
 ---
 
@@ -17,7 +17,7 @@
 
 - [x] Cargo workspace 搭建（crate 结构按 `docs/design-constraints.md` §1.2）
 - [x] `rustfmt.toml`、`clippy.toml` 配置
-- [x] MSRV 声明（stable Rust ≥ 1.63，`Cargo.toml` 中 `rust-version` 字段）
+- [x] MSRV 声明（stable Rust ≥ 1.80，`Cargo.toml` 中 `rust-version` 字段；对齐代码依赖 `LazyLock` 1.80）
 
 ### CI/CD
 
@@ -31,7 +31,7 @@
 - [x] CI job: `cargo tarpaulin -p trust_hir --fail-under 70`（P1）
 - [x] CI job: `cargo tarpaulin -p trust_codegen --fail-under 70`（P1）
 - [x] CI job: `cargo miri test -p ferro_rt`（P1，unsafe 块验证，nightly）
-- [x] CI job: `cargo test --workspace` on MSRV（Rust 1.63，constraints §11.2 P1）
+- [x] CI job: `cargo test --workspace` on MSRV（Rust 1.80，constraints §11.2 P1）
 - [x] `.github/dependabot.yml` 依赖自动更新配置
 
 ### Clippy P0 约束
@@ -46,7 +46,7 @@
 - [x] `CHANGELOG.md` 初始化（Keep a Changelog 格式，constraints §11.4）
 - [x] Workspace 所有 crate 版本同步声明（SemVer `0.1.0`，constraints §11.3）
 - [x] `cargo publish --dry-run` 通过（workspace 成员统一 bump）
-- [x] 交叉编译目标声明：`wasm32-unknown-unknown`（P2，Phase 1 仅声明不实现）
+- [x] 交叉编译目标声明：`wasm32-unknown-unknown`（P2，Phase 1 仅声明不实现；声明见 `.cargo/config.toml`）
 
 ---
 
@@ -69,7 +69,7 @@
 
 ### 1.2.2 Lexer（词法分析器）
 
-- [x] `crates/trust_parser/src/lexer.rs`：Tokenizer（402 行）
+- [x] `crates/trust_parser/src/lexer.rs`：Tokenizer（392 行）
 - [x] 关键字识别：54 关键字（LazyLock 静态缓存）
 - [x] 字面量解析：整数（`i32`）、浮点（`f64`）、BigInt（`i64`）、字符串、模板（3-token 拆分 + in_template 状态机 + TemplateInterpolation 产出）、布尔
 - [x] 注释跳过：`//` 行注释、`/* */` 块注释、`///` 文档注释
@@ -78,7 +78,7 @@
 
 ### 1.2.3 Parser（语法分析器）
 
-- [x] `crates/trust_parser/src/parser.rs`：递归下降 + Pratt + postfix 解析器（558 行）
+- [x] `crates/trust_parser/src/parser.rs`：递归下降 + Pratt + postfix 解析器（560 行）
 - [x] **Phase 1 语法子集**（对齐 ROADMAP §1.2 + §1.4）：
   - [x] `let` / `let mut` / `shared` 变量声明
   - [x] `const` 编译时常量声明
@@ -93,7 +93,7 @@
   - [x] 函数调用 — 含 `inout` / `move` 调用处标注（OWN-REQ-002）
   - [x] `import` / `export` 模块声明
   - [x] 模板字面量 `` `...${expr}...` ``
-- [x] 错误恢复：panic mode + 同步点（`;` `}` `function` `import` `export` `type` `interface` `impl` `test` `async`）
+- [x] 错误恢复：panic mode + 同步点（`;` `}` `function` `import` `export` `type` `interface` `impl` `test` `async`；**MVP 限制**：不保证恢复全部后续语句，完整恢复见 Phase 1.3）
 - [x] 验收标准：25 AC-SYN + 2 AC-ERR-REC 全部通过（30 unit tests + 34 snapshot tests）
   > **Phase 1 AC-SYN 覆盖：** AC-SYN-001~006（变量/函数基本声明）、AC-SYN-009~012（控制流）、AC-SYN-020~023（模块）、AC-SYN-030~031（箭头函数/闭包）、AC-SYN-036~042（引用/运算符/错误恢复/分隔规则）
   > **不覆盖：** 007~008（泛型）、013~016（match/switch/if let）、017~019（async/await/spawn）、024~026（Channel/select/withLock）、027~029（interface/type/ADT）、032~033（FFI）、034~035（test/属性）
@@ -246,9 +246,9 @@
 
 > **优先级：P0**（阻塞交付标准——`console.log` 依赖 ferro_rt 实现）
 
-- [ ] `crates/ferro_rt/Cargo.toml` 创建（零依赖，Phase 1 无 tokio/crossbeam）
-- [ ] `crates/ferro_rt/src/console.rs`：`pub fn log(msg: &str)` 函数（→ `println!("{}", msg)`）
-- [ ] `crates/ferro_rt/src/lib.rs`：导出 `console` 模块
+- [x] `crates/ferro_rt/Cargo.toml` 创建（零依赖，Phase 1 无 tokio/crossbeam）
+- [x] `crates/ferro_rt/src/console.rs`：`pub fn log(msg: &str)` 函数（→ `println!("{}", msg)`）
+- [x] `crates/ferro_rt/src/lib.rs`：导出 `console` 模块
 - [ ] 无 `unsafe`（Phase 1 的 ferro_rt 是纯安全 Rust 包装）
 
 ### 1.5.5 测试
@@ -368,7 +368,7 @@ tests/integration/
 
 ### 1.8.3 性能基准
 
-- [ ] `benches/` 目录初始化（criterion）
+- [x] `benches/` 目录初始化（criterion；BASELINE.md 已就位）
 - [ ] 基准指标：编译 **100 行** Trust 代码（含函数、变量、控制流、函数调用）≤ 5 秒（冷启动）
 - [ ] 5000 行基准移至 Phase 2（v0.1.1，届时 `trust_std` 可用作为输入源）
 - [ ] CI 性能回归监控：基准记录在 `benches/BASELINE.md`，`±10%` 视为回归（P1）
@@ -410,4 +410,4 @@ function main() {
 ---
 
 > **下一步：** Phase 2 — 类型系统与泛型（`phase2-types` 分支）  
-> **辩论记录：** 与 OpenClaw 三轮对抗审查，R1 发现 23 处缺口（🔴8 🟠5 🟡11），修正后全部归零。
+> **辩论记录：** 2026-06-13 与 OpenClaw 三轮对抗审查，R1 发现 23 条 → 闸门裁决 → R2 共识 20 项独立发现（🔴2 🟠6 🟡12），P0/P1 已修复，裂口清零。
