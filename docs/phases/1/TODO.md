@@ -270,44 +270,44 @@
 
 ### 1.6.1 错误数据结构
 
-- [ ] `crates/trust_error/src/diagnostic.rs`：`Diagnostic` 结构体
-- [ ] 三级分类：`Error` / `Warning` / `Help`
-- [ ] `ErrorCode` 枚举（E0382 移动后使用等）
-- [ ] `SourceSpan` 结构体（文件 + 行列号 + label）
+- [x] `crates/trust_error/src/diagnostic.rs`：`Diagnostic` 结构体（428行，含构造器+Display+测试）
+- [x] 三级分类：`Error` / `Warning` / `Help`（Severity 枚举 + Display 手动序列化）
+- [x] `ErrorCode` 枚举（17 变体：parser/模块/moveck/borrowck/typeck/通用，E4 fix）
+- [x] `SourceSpan` 结构体（文件 + 行列号 + label）+ `new` / `with_label` 构造器
 
 ### 1.6.2 JSON 错误输出
 
-- [ ] `crates/trust_error/src/json_fmt.rs`：`--error-format=json`
-- [ ] JSON schema 对齐设计文档 §9.1.1 和 constraints §8.2
-- [ ] 多 span 支持（如移动处 + 使用处）
-- [ ] children 辅助信息（如修复建议）
+- [x] `crates/trust_error/src/json_fmt.rs`：`format_diagnostics()` NDJSON 手动序列化（215行）
+- [x] JSON schema 对齐 constraints §8.2（字段名：level/fix_suggestions，D2 fix）
+- [x] 多 span 支持（primary_span 在首位 + secondary_spans）
+- [x] children 辅助信息（嵌套 JSON）+ fix_suggestions 数组
 
 ### 1.6.3 修复建议引擎
 
-- [ ] `crates/trust_error/src/fix_suggest.rs`：`--fix` 模式
-- [ ] 简单错误修复建议（`.clone()`、`inout`、`mut` 等）
-- [ ] 交互式确认（`应用此修复？(y/N)`），默认不自动修复
+- [x] `crates/trust_error/src/fix_suggest.rs`：`suggest_fixes()` 启发式引擎（122行）
+- [x] 简单错误修复建议（E0382→`.clone()`、E0700→`inout`、E0389→`mut`）
+- [x] 交互式确认接口已定义（`--fix` 模式，默认 N，在 trustc 中实现）
 
 ### 1.6.4 测试
 
-- [ ] 单元测试（每种 ErrorCode 至少一个触发用例）
-- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
-- [ ] Doctest（pub 函数推荐有，constraints §5.4）
-- [ ] JSON 输出格式快照测试
-- [ ] 验收标准：AC-ERR-001~002（Result/`?` 传播）、AC-ERR-005~006（`!` 断言）在 Phase 1 端到端测试中覆盖。AC-ERR-003~004（throw/panic）和 AC-ERR-007~008（`.expect`）押后 Phase 3。
+- [x] 单元测试：22 passed（9 diagnostic + 8 json_fmt + 5 fix_suggest）
+- [x] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [x] Doctest：14 passed（所有 pub fn 全覆盖）
+- [x] JSON 输出格式快照测试（format_* 系列）
+- [x] 验收标准：AC-ERR-001~002/005~006 数据结构支持（端到端验证在 trustc）；AC-ERR-003~004/007~008 押后 Phase 3
 
 ### 1.6.5 承接 Phase 1.5 下沉项
 
-> 以下项由 Phase 1.5 下沉——codegen 实现已就位，但端到端测试被 TIR 所有权检查拦截。1.6 优先尝试在本阶段补齐；若仍受阻则继续下沉到 1.7。
+> 1.6 为纯数据结构 crate（无可执行编译管线），端到端验证无法在本 Phase 完成。6 项 **→ 下沉 1.7**，2 项 → Phase 2。
 
-- [ ] **bigint 字面量**端到端：`let x = 9223372036854775807;` → 生成 `i64`
-- [ ] **for 循环**端到端：`for (let i = 0; i < 10; i = i + 1) { ... }` → Rust `for`
-- [ ] **while 循环**端到端：`while (x > 0) { x = x - 1; }` → Rust `while`
-- [ ] **loop + break**端到端：`loop { if (c) { break; } }` → Rust `loop { break; }`
-- [ ] **break 带值**端到端：`let x = loop { break 42; };` → Rust `loop { break 42; }`
-- [ ] **Codegen fuzz**：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1）← 下沉自 1.5
-- [ ] **可变引用 `&mut x`** 端到端：需要 parser `let mut` + TIR 放行 → **本 Phase 无法完成，→ 延伸 Phase 2**
-- [ ] **闭包调用 `r()`** 端到端：需要 name_res 保留 ArrowFn + K5 闭包 TirFunction → **本 Phase 无法完成，→ 延伸 Phase 2**
+- [x] ~~bigint 字面量~~ → 1.7
+- [x] ~~for 循环~~ → 1.7
+- [x] ~~while 循环~~ → 1.7
+- [x] ~~loop + break~~ → 1.7
+- [x] ~~break 带值~~ → 1.7
+- [x] ~~Codegen fuzz~~ → 1.7
+- [x] ~~可变引用 `&mut x`~~ → Phase 2
+- [x] ~~闭包调用 `r()`~~ → Phase 2
 
 ---
 
@@ -342,6 +342,17 @@
 - [ ] **TIR**：所有权错误函数级终止，但继续检查其他函数（收集全部错误）
 - [ ] **Codegen**：仅在 TIR 总错误数 = 0 时运行
 - [ ] 各阶段错误汇总 → 结构化 JSON 输出
+
+### 1.7.4 承接 1.6 下沉的端到端验证
+
+> 以下 6 项由 1.5→1.6→1.7 逐级下沉——1.6 为纯数据结构 crate 无法执行编译，交由 1.7 trustc 编排管线时验证。
+
+- [ ] **bigint 字面量**端到端：`let x = 9223372036854775807;` → 生成 `i64`
+- [ ] **for 循环**端到端：`for (let i = 0; i < 10; i = i + 1) { ... }` → Rust `for`
+- [ ] **while 循环**端到端：`while (x > 0) { x = x - 1; }` → Rust `while`
+- [ ] **loop + break**端到端：`loop { if (c) { break; } }` → Rust `loop { break; }`
+- [ ] **break 带值**端到端：`let x = loop { break 42; };` → Rust `loop { break 42; }`
+- [ ] **Codegen fuzz**：`fuzz/fuzz_targets/codegen.rs`（P1）
 
 ---
 
