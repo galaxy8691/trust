@@ -14,7 +14,7 @@ use trust_parser::ast::Span;
 pub fn check_borrows(tir: &TirProgram) -> Result<(), Vec<BorrowError>> {
     let mut errors = Vec::new();
     for f in &tir.functions {
-        check_function_borrows(f, &mut errors);
+        check_function_borrows(f, &tir.functions, &mut errors);
     }
     if errors.is_empty() {
         Ok(())
@@ -29,24 +29,22 @@ enum ActiveBorrow {
     Mutable,
 }
 
-fn check_function_borrows(func: &TirFunction, errors: &mut Vec<BorrowError>) {
-    // 参数模式表用于调用处对称标注检查
+fn check_function_borrows(func: &TirFunction, all_functions: &[TirFunction], errors: &mut Vec<BorrowError>) {
     let param_modes: Vec<ParamMode> = func.params.iter().map(|p| p.mode).collect();
 
     for block in &func.blocks {
         let mut active: HashMap<TmpVar, Vec<(ActiveBorrow, Span)>> = HashMap::new();
 
         for op in &block.ops {
-            check_borrow_op(op, &param_modes, &mut active, &func.var_map, errors);
+            check_borrow_op(op, &param_modes, all_functions, &mut active, &func.var_map, errors);
         }
-        // 基本块边界：释放所有活跃借用（词法作用域）
-        // active 在块结束时丢弃
     }
 }
 
 fn check_borrow_op(
     op: &TirOp,
-    param_modes: &[ParamMode],
+    _caller_param_modes: &[ParamMode],
+    all_functions: &[TirFunction],
     active: &mut HashMap<TmpVar, Vec<(ActiveBorrow, Span)>>,
     var_map: &VarMapping,
     errors: &mut Vec<BorrowError>,
@@ -74,8 +72,14 @@ fn check_borrow_op(
             active.entry(*src).or_default().push((borrow_kind, span.clone()));
         }
         TirOp::Call(_, TirValue::Function(name), args, span) => {
+            // 查找被调用函数的参数模式（而非当前函数）
+            let callee_params: Vec<ParamMode> = all_functions
+                .iter()
+                .find(|f| &f.name == name)
+                .map(|f| f.params.iter().map(|p| p.mode).collect())
+                .unwrap_or_default();
             for (i, arg) in args.iter().enumerate() {
-                let declared = param_modes.get(i).copied().unwrap_or(ParamMode::Default);
+                let declared = callee_params.get(i).copied().unwrap_or(ParamMode::Default);
                 if declared != arg.mode {
                     let mode_str = |m: ParamMode| match m {
                         ParamMode::Default => "read-only (no annotation)",
