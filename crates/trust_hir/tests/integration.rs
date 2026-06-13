@@ -161,9 +161,23 @@ fn integration_as_cast_in_expression() {
 fn integration_function_call() {
     let src = "function add(a: number, b: number): number { return a + b; }
                function main(): number { return add(1, 2); }";
-    let (_hir, name_diags, _type_diags) = run_full_pipeline(src);
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
     assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
-    // 注：跨函数名称解析在 Phase 1 已实现（模块作用域）
+    assert!(type_diags.is_empty(), "unexpected type diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+// Regression: function call type checking preserves param_types (Issue 2)
+#[test]
+fn regression_function_call_with_wrong_type_detected() {
+    let src = "function add(a: number, b: number): number { return a + b; }
+               function main(): number { return add(\"hello\", 2); }";
+    let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
+    assert!(
+        type_diags.iter().any(|d| d.message.contains("type mismatch") || d.message.contains("argument")),
+        "should detect argument type mismatch. Diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // ============================================================================

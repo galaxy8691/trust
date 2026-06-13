@@ -566,7 +566,7 @@ fn expr_type(expr: &HirExpr) -> HirType {
             HirBinding::LocalVar { ty, .. } => ty.clone(),
             HirBinding::ModuleConst { ty, .. } => ty.clone(),
             HirBinding::ModuleShared { ty, .. } => ty.clone(),
-            HirBinding::Function { return_type, .. } => HirType::Function(vec![], Box::new(return_type.clone())),
+            HirBinding::Function { param_types, return_type, .. } => HirType::Function(param_types.clone(), Box::new(return_type.clone())),
             HirBinding::Import { ty, .. } => ty.clone(),
             HirBinding::Unresolved { .. } => HirType::Error,
         },
