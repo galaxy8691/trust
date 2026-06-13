@@ -389,8 +389,9 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
         }
 
         ast::Expr::BlockExpr(block) => {
+            let block_span = block.span.clone();
             let b = lower_block(block, diagnostics);
-            HirExpr::Block(b, Span::dummy())
+            HirExpr::Block(b, block_span)
         }
 
         ast::Expr::ArrowFn(a) => {
