@@ -384,12 +384,29 @@ pub fn check_binary_op(
         }
 
         // TY-RULE-02: 比较运算 — 操作数类型必须相同，结果 Bool
-        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+        // Eq/Ne 允许 Bool；Lt/Gt/Le/Ge 禁止 Bool（布尔值不可排序）
+        BinOp::Eq | BinOp::Ne => {
             if *lhs != *rhs {
                 diagnostics.push(DiagError::new(
-                    format!(
-                        "type mismatch: cannot compare `{lhs}` and `{rhs}` (operands must be same type)",
-                    ),
+                    format!("type mismatch: cannot compare `{lhs}` and `{rhs}` (operands must be same type)"),
+                    span,
+                ));
+                return Err(());
+            }
+            Ok(HirType::Bool)
+        }
+        BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+            if *lhs != *rhs {
+                diagnostics.push(DiagError::new(
+                    format!("type mismatch: cannot compare `{lhs}` and `{rhs}` (operands must be same type)"),
+                    span,
+                ));
+                return Err(());
+            }
+            // 禁止 Bool 排序比较
+            if *lhs == HirType::Bool {
+                diagnostics.push(DiagError::new(
+                    format!("cannot compare booleans with ordering operators (use `==` or `!=`)"),
                     span,
                 ));
                 return Err(());

@@ -382,13 +382,13 @@ fn check_binary_lt_i64_returns_bool() {
 
 #[test]
 fn check_binary_ge_bool_returns_bool() {
-    // Eq/Ne/Lt/Gt/Le/Ge — 比较运算对同类型 Bool 返回 Bool
+    // Lt/Gt/Le/Ge should reject Bool operands (cannot order booleans)
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
         BinOp::Ge, &HirType::Bool, &HirType::Bool,
         Span::dummy(), &mut diags,
     );
-    assert_eq!(r, Ok(HirType::Bool));
+    assert!(r.is_err(), "Ge should reject Bool operands");
 }
 
 // ============================================================================
