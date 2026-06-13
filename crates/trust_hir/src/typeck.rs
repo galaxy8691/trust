@@ -79,7 +79,7 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
     match stmt {
         HirStmt::Let(let_s) => {
             check_expr(&mut let_s.init, scope, diagnostics, fn_return_type);
-            let mut init_ty = expr_type(&let_s.init);
+            let init_ty = expr_type(&let_s.init);
             // §3.3.2: `let x: number = 3.14` → HirType::F64（类型标注覆盖字面量推断）
             // from_ast_type 将 NumberType 默认降级为 I32；此处根据 init 修正为 F64
             if let_s.ty == HirType::I32 && init_ty == HirType::F64 {

@@ -36,10 +36,35 @@ pub fn lower(program: &ast::Program, diagnostics: &mut Vec<DiagError>) -> HirPro
 fn lower_exports(exports: &[ast::ExportDecl], diagnostics: &mut Vec<DiagError>) -> Vec<HirExport> {
     let mut result = Vec::new();
     for exp in exports {
-        let name = match exp.item.as_ref() {
-            ast::Stmt::Function(f) => f.name.clone(),
-            ast::Stmt::Let(l) => l.name.clone(),
-            ast::Stmt::Const(c) => c.name.clone(),
+        let (name, binding) = match exp.item.as_ref() {
+            ast::Stmt::Function(f) => {
+                let param_types: Vec<HirType> = f.params.iter()
+                    .map(|p| p.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error))
+                    .collect();
+                let return_type = f.return_type.as_ref()
+                    .map(HirType::from_ast_type)
+                    .unwrap_or(HirType::Void);
+                (f.name.clone(), HirBinding::Function {
+                    param_types,
+                    return_type,
+                    span: f.span.clone(),
+                })
+            }
+            ast::Stmt::Let(l) => {
+                let ty = l.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
+                (l.name.clone(), HirBinding::LocalVar {
+                    ty,
+                    mutable: l.mutable,
+                    span: l.span.clone(),
+                })
+            }
+            ast::Stmt::Const(c) => {
+                let ty = c.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
+                (c.name.clone(), HirBinding::ModuleConst {
+                    ty,
+                    span: c.span.clone(),
+                })
+            }
             _ => {
                 diagnostics.push(DiagError::new(
                     "export of unsupported item type".into(),
@@ -50,10 +75,7 @@ fn lower_exports(exports: &[ast::ExportDecl], diagnostics: &mut Vec<DiagError>) 
         };
         result.push(HirExport {
             name: name.clone(),
-            binding: HirBinding::Unresolved {
-                name,
-                span: exp.span.clone(),
-            },
+            binding,
             is_default: exp.default,
             span: exp.span.clone(),
         });
@@ -595,8 +617,13 @@ fn register_module_bindings(
     // 此处将 HirProgram 的 exports 注册到作用域，使 import 符号可解析。
     for exp in &hir.exports {
         if let Some(b) = scope.lookup(&exp.name) {
-            // 已有绑定——检查冲突（本地声明 vs import）
-            let _ = b; // Phase 1 简化：不检查冲突
+            // 已有绑定 — 符号冲突：本地声明与 import/export 同名
+            if !matches!(b, HirBinding::Unresolved { .. }) {
+                _diagnostics.push(DiagError::new(
+                    format!("symbol conflict: `{}` already declared in this scope", exp.name),
+                    exp.span.clone(),
+                ));
+            }
         } else {
             scope.insert(&exp.name, exp.binding.clone());
         }
@@ -792,19 +819,19 @@ fn resolve_expr_names(
         }
         HirExpr::If(if_s, ..) => {
             resolve_expr_names(&mut if_s.condition, scope, diagnostics);
-            let mut then_scope = Scope::new_child(Box::new(scope.clone()));
+            let then_scope = Scope::new_child(Box::new(scope.clone()));
             resolve_block_names(&mut if_s.then_branch, &then_scope, diagnostics);
             if let Some(ref mut else_b) = if_s.else_branch {
-                let mut else_scope = Scope::new_child(Box::new(scope.clone()));
+                let else_scope = Scope::new_child(Box::new(scope.clone()));
                 resolve_block_names(else_b, &else_scope, diagnostics);
             }
         }
         HirExpr::Loop(l, ..) => {
-            let mut loop_scope = Scope::new_child(Box::new(scope.clone()));
+            let loop_scope = Scope::new_child(Box::new(scope.clone()));
             resolve_block_names(&mut l.body, &loop_scope, diagnostics);
         }
         HirExpr::Block(b, ..) => {
-            let mut block_scope = Scope::new_child(Box::new(scope.clone()));
+            let block_scope = Scope::new_child(Box::new(scope.clone()));
             resolve_block_names(b, &block_scope, diagnostics);
         }
         HirExpr::AsCast(inner, ..) => {
