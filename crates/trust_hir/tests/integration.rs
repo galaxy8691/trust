@@ -376,3 +376,49 @@ fn check_binary_ge_bool_returns_bool() {
     );
     assert_eq!(r, Ok(HirType::Bool));
 }
+
+// ============================================================================
+// Regression: B-3 顶层 const 类型检查 (R2 debate fix)
+// ============================================================================
+
+#[test]
+fn regression_top_level_const_type_error_detected() {
+    let src = "const x: number = \"hello\";";
+    let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
+    assert!(
+        type_diags.iter().any(|d| d.message.contains("type mismatch")),
+        "const type mismatch should be detected. Diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ============================================================================
+// Regression: B-4 return 类型检查 (R2 debate fix)
+// ============================================================================
+
+#[test]
+fn regression_return_type_mismatch_detected() {
+    let src = "function f(): number { return \"hello\"; }";
+    let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
+    assert!(
+        type_diags.iter().any(|d| d.message.contains("return type mismatch")),
+        "return type mismatch should be detected. Diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ============================================================================
+// Regression: B-6 number 类型标注 + F64 字面量 (R2 debate fix)
+// ============================================================================
+
+#[test]
+fn regression_number_annotation_with_f64_literal() {
+    // let x: number = 3.14 → should infer F64, not I32
+    let src = "function f(): number { let x: number = 3.14; return x; }";
+    let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
+    assert!(
+        type_diags.is_empty(),
+        "number annotation + f64 literal should be compatible. Diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

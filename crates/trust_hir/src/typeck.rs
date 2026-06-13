@@ -31,6 +31,7 @@ pub fn check_types(
                 check_function(f, diagnostics);
             }
             HirItem::Const(c) => {
+                check_expr(&mut c.init, &hir.scope, diagnostics, &HirType::Void);
                 let init_ty = expr_type(&c.init);
                 if c.ty != HirType::Error && init_ty != HirType::Error
                     && !types_compatible(&c.ty, &init_ty) {
@@ -41,6 +42,7 @@ pub fn check_types(
                 }
             }
             HirItem::Shared(s) => {
+                check_expr(&mut s.init, &hir.scope, diagnostics, &HirType::Void);
                 let init_ty = expr_type(&s.init);
                 if s.ty != HirType::Error && init_ty != HirType::Error
                     && !types_compatible(&s.ty, &init_ty) {
@@ -76,8 +78,13 @@ fn check_block(block: &mut HirBlock, scope: &Scope, diagnostics: &mut Vec<DiagEr
 fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError>, fn_return_type: &HirType) {
     match stmt {
         HirStmt::Let(let_s) => {
-            check_expr(&mut let_s.init, scope, diagnostics);
-            let init_ty = expr_type(&let_s.init);
+            check_expr(&mut let_s.init, scope, diagnostics, fn_return_type);
+            let mut init_ty = expr_type(&let_s.init);
+            // §3.3.2: `let x: number = 3.14` → HirType::F64（类型标注覆盖字面量推断）
+            // from_ast_type 将 NumberType 默认降级为 I32；此处根据 init 修正为 F64
+            if let_s.ty == HirType::I32 && init_ty == HirType::F64 {
+                let_s.ty = HirType::F64;
+            }
             // 类型标注兼容性检查
             if let_s.ty != HirType::Error
                 && init_ty != HirType::Error
@@ -97,21 +104,21 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
             }
         }
         HirStmt::Const(c) => {
-            check_expr(&mut c.init, scope, diagnostics);
+            check_expr(&mut c.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&c.init);
             if c.ty == HirType::Error && init_ty != HirType::Error {
                 c.ty = init_ty;
             }
         }
         HirStmt::Shared(s) => {
-            check_expr(&mut s.init, scope, diagnostics);
+            check_expr(&mut s.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&s.init);
             if s.ty == HirType::Error && init_ty != HirType::Error {
                 s.ty = init_ty;
             }
         }
         HirStmt::If(if_s) => {
-            check_expr(&mut if_s.condition, scope, diagnostics);
+            check_expr(&mut if_s.condition, scope, diagnostics, fn_return_type);
             check_block(&mut if_s.then_branch, scope, diagnostics, fn_return_type);
             if let Some(ref mut else_b) = if_s.else_branch {
                 check_block(else_b, scope, diagnostics, fn_return_type);
@@ -119,16 +126,16 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
         HirStmt::For(f) => {
             check_stmt(&mut f.init, scope, diagnostics, fn_return_type);
-            check_expr(&mut f.condition, scope, diagnostics);
-            check_expr(&mut f.update, scope, diagnostics);
+            check_expr(&mut f.condition, scope, diagnostics, fn_return_type);
+            check_expr(&mut f.update, scope, diagnostics, fn_return_type);
             check_block(&mut f.body, scope, diagnostics, fn_return_type);
         }
         HirStmt::ForOf(f) => {
-            check_expr(&mut f.iterator, scope, diagnostics);
+            check_expr(&mut f.iterator, scope, diagnostics, fn_return_type);
             check_block(&mut f.body, scope, diagnostics, fn_return_type);
         }
         HirStmt::While(w) => {
-            check_expr(&mut w.condition, scope, diagnostics);
+            check_expr(&mut w.condition, scope, diagnostics, fn_return_type);
             check_block(&mut w.body, scope, diagnostics, fn_return_type);
         }
         HirStmt::Loop(l) => {
@@ -136,7 +143,7 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
         HirStmt::Return(r) => {
             if let Some(ref mut v) = r.value {
-                check_expr(v, scope, diagnostics);
+                check_expr(v, scope, diagnostics, fn_return_type);
                 let val_ty = expr_type(v);
                 if *fn_return_type != HirType::Error && val_ty != HirType::Error
                     && !types_compatible(fn_return_type, &val_ty) {
@@ -152,12 +159,12 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
         HirStmt::Break(b) => {
             if let Some(ref mut v) = b.value {
-                check_expr(v, scope, diagnostics);
+                check_expr(v, scope, diagnostics, fn_return_type);
             }
         }
         HirStmt::Continue(_) => {}
         HirStmt::Expr(e) => {
-            check_expr(e, scope, diagnostics);
+            check_expr(e, scope, diagnostics, fn_return_type);
         }
         HirStmt::Error => {}
     }
@@ -167,7 +174,7 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
 // 表达式类型检查
 // ============================================================================
 
-fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError>) {
+fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError>, fn_return_type: &HirType) {
     match expr {
         // 字面量——类型已固定
         HirExpr::IntLiteral(..) => {}
@@ -187,8 +194,8 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
 
         // §TYP-REQ-001: 二元运算类型检查
         HirExpr::Binary(lhs, op, rhs, ref mut ty, span) => {
-            check_expr(lhs, scope, diagnostics);
-            check_expr(rhs, scope, diagnostics);
+            check_expr(lhs, scope, diagnostics, fn_return_type);
+            check_expr(rhs, scope, diagnostics, fn_return_type);
 
             let lhs_ty = expr_type(lhs);
             let rhs_ty = expr_type(rhs);
@@ -209,7 +216,7 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
 
         HirExpr::Unary(_op, inner, ref mut ty, _span) => {
-            check_expr(inner, scope, diagnostics);
+            check_expr(inner, scope, diagnostics, fn_return_type);
             let inner_ty = expr_type(inner);
             *ty = match inner_ty {
                 HirType::I32 | HirType::F64 | HirType::I64 => inner_ty,
@@ -226,10 +233,10 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
 
         HirExpr::Call(callee, args, ref mut ty, span) => {
-            check_expr(callee, scope, diagnostics);
+            check_expr(callee, scope, diagnostics, fn_return_type);
 
             for arg in args.iter_mut() {
-                check_expr(&mut arg.expr, scope, diagnostics);
+                check_expr(&mut arg.expr, scope, diagnostics, fn_return_type);
             }
 
             let callee_ty = expr_type(callee);
@@ -274,7 +281,7 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
                     },
                 );
             }
-            check_block(body, &fn_scope, diagnostics, &HirType::Void);
+            check_block(body, &fn_scope, diagnostics, fn_return_type);
 
             // 从 body 推断返回类型
             if *ret == HirType::Error {
@@ -283,7 +290,7 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
 
         HirExpr::AsCast(inner, ref target_ty, span) => {
-            check_expr(inner, scope, diagnostics);
+            check_expr(inner, scope, diagnostics, fn_return_type);
             let inner_ty = expr_type(inner);
             if inner_ty == HirType::Error {
                 *expr = HirExpr::Error(span.clone());
@@ -295,40 +302,40 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
 
         HirExpr::Reference(inner, _span) => {
-            check_expr(inner, scope, diagnostics);
+            check_expr(inner, scope, diagnostics, fn_return_type);
         }
 
         HirExpr::AssertUnwrap(inner, _span) => {
-            check_expr(inner, scope, diagnostics);
+            check_expr(inner, scope, diagnostics, fn_return_type);
         }
 
         HirExpr::TryPropagate(inner, _span) => {
-            check_expr(inner, scope, diagnostics);
+            check_expr(inner, scope, diagnostics, fn_return_type);
         }
 
         HirExpr::TemplateLiteral(parts, _span) => {
             for part in parts {
                 if let HirTemplatePartKind::Expr(ref mut e) = part.kind {
-                    check_expr(e, scope, diagnostics);
+                    check_expr(e, scope, diagnostics, fn_return_type);
                 }
             }
         }
 
         // AC-SEM-002: if 表达式类型检查
         HirExpr::If(if_s, _span) => {
-            check_expr(&mut if_s.condition, scope, diagnostics);
-            check_block(&mut if_s.then_branch, scope, diagnostics, &HirType::Void);
+            check_expr(&mut if_s.condition, scope, diagnostics, fn_return_type);
+            check_block(&mut if_s.then_branch, scope, diagnostics, fn_return_type);
             if let Some(ref mut else_b) = if_s.else_branch {
-                check_block(else_b, scope, diagnostics, &HirType::Void);
+                check_block(else_b, scope, diagnostics, fn_return_type);
             }
         }
 
         HirExpr::Loop(l, _span) => {
-            check_block(&mut l.body, scope, diagnostics, &HirType::Void);
+            check_block(&mut l.body, scope, diagnostics, fn_return_type);
         }
 
         HirExpr::Block(b, _span) => {
-            check_block(b, scope, diagnostics, &HirType::Void);
+            check_block(b, scope, diagnostics, fn_return_type);
         }
     }
 }

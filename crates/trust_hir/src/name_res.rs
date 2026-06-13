@@ -624,28 +624,25 @@ fn resolve_function_names(
     }
 
     // 在 body 中递归解析
-    resolve_block_names(&mut func.body, &mut func_scope, diagnostics);
+    resolve_block_names(&mut func.body, &func_scope, diagnostics);
 
     func.scope = func_scope;
 }
 
 fn resolve_block_names(
     block: &mut HirBlock,
-    parent_scope: &mut Scope,
+    _parent_scope: &Scope,
     diagnostics: &mut Vec<DiagError>,
 ) {
-    let mut block_scope = Scope::new_child(Box::new(parent_scope.clone()));
+    let mut block_scope = Scope::new_child(Box::new(_parent_scope.clone()));
 
     for stmt in &mut block.statements {
         match stmt {
             HirStmt::Let(let_s) => {
-                // 先解析 init 表达式（在当前作用域；let 自身暂未注册）
-                resolve_expr_names(&mut let_s.init, parent_scope, diagnostics);
-                // 根据 init 推断类型（如果尚未有类型）
+                resolve_expr_names(&mut let_s.init, &block_scope, diagnostics);
                 if let_s.ty == HirType::Error {
                     let_s.ty = infer_type_from_expr(&let_s.init);
                 }
-                // 注册到当前块作用域
                 block_scope.insert(
                     &let_s.name,
                     HirBinding::LocalVar {
@@ -654,11 +651,9 @@ fn resolve_block_names(
                         span: let_s.span.clone(),
                     },
                 );
-                // 替换 init 中尚未解析的 Ident
-                resolve_ident_in_expr(&mut let_s.init, &block_scope, diagnostics);
             }
             HirStmt::Const(c) => {
-                resolve_expr_names(&mut c.init, parent_scope, diagnostics);
+                resolve_expr_names(&mut c.init, &block_scope, diagnostics);
                 if c.ty == HirType::Error {
                     c.ty = infer_type_from_expr(&c.init);
                 }
@@ -669,10 +664,9 @@ fn resolve_block_names(
                         span: c.span.clone(),
                     },
                 );
-                resolve_ident_in_expr(&mut c.init, &block_scope, diagnostics);
             }
             HirStmt::Shared(s) => {
-                resolve_expr_names(&mut s.init, parent_scope, diagnostics);
+                resolve_expr_names(&mut s.init, &block_scope, diagnostics);
                 if s.ty == HirType::Error {
                     s.ty = infer_type_from_expr(&s.init);
                 }
@@ -683,18 +677,17 @@ fn resolve_block_names(
                         span: s.span.clone(),
                     },
                 );
-                resolve_ident_in_expr(&mut s.init, &block_scope, diagnostics);
             }
             HirStmt::If(if_s) => {
                 resolve_expr_names(&mut if_s.condition, &block_scope, diagnostics);
-                resolve_block_names(&mut if_s.then_branch, &mut block_scope, diagnostics);
+                // then/else 使用独立作用域，互不可见
+                resolve_block_names(&mut if_s.then_branch, &block_scope, diagnostics);
                 if let Some(ref mut else_b) = if_s.else_branch {
-                    resolve_block_names(else_b, &mut block_scope, diagnostics);
+                    resolve_block_names(else_b, &block_scope, diagnostics);
                 }
             }
             HirStmt::For(f) => {
                 if let HirStmt::Let(ref mut let_s) = *f.init {
-                    // for init 中的变量在当前作用域
                     resolve_expr_names(&mut let_s.init, &block_scope, diagnostics);
                     block_scope.insert(
                         &let_s.name,
@@ -707,7 +700,7 @@ fn resolve_block_names(
                 }
                 resolve_expr_names(&mut f.condition, &block_scope, diagnostics);
                 resolve_expr_names(&mut f.update, &block_scope, diagnostics);
-                resolve_block_names(&mut f.body, &mut block_scope, diagnostics);
+                resolve_block_names(&mut f.body, &block_scope, diagnostics);
             }
             HirStmt::ForOf(f) => {
                 resolve_expr_names(&mut f.iterator, &block_scope, diagnostics);
@@ -715,19 +708,19 @@ fn resolve_block_names(
                 inner_scope.insert(
                     &f.item,
                     HirBinding::LocalVar {
-                        ty: HirType::Error, // 由类型检查阶段推断
+                        ty: HirType::Error,
                         mutable: false,
                         span: Span::dummy(),
                     },
                 );
-                resolve_block_names(&mut f.body, &mut inner_scope, diagnostics);
+                resolve_block_names(&mut f.body, &inner_scope, diagnostics);
             }
             HirStmt::While(w) => {
                 resolve_expr_names(&mut w.condition, &block_scope, diagnostics);
-                resolve_block_names(&mut w.body, &mut block_scope, diagnostics);
+                resolve_block_names(&mut w.body, &block_scope, diagnostics);
             }
             HirStmt::Loop(l) => {
-                resolve_block_names(&mut l.body, &mut block_scope, diagnostics);
+                resolve_block_names(&mut l.body, &block_scope, diagnostics);
             }
             HirStmt::Return(r) => {
                 if let Some(ref mut v) = r.value {
@@ -747,7 +740,7 @@ fn resolve_block_names(
         }
     }
 
-    *parent_scope = block_scope;
+    // Note: block_scope is dropped here — no variable leaks to parent.
 }
 
 fn resolve_expr_names(
@@ -786,24 +779,24 @@ fn resolve_expr_names(
             let mut fn_scope = Scope::new_child(Box::new(scope.clone()));
             // 注册闭包参数
             // (params are already resolved during lowering)
-            resolve_block_names(body, &mut fn_scope, diagnostics);
+            resolve_block_names(body, &fn_scope, diagnostics);
         }
         HirExpr::If(if_s, ..) => {
             resolve_expr_names(&mut if_s.condition, scope, diagnostics);
             let mut then_scope = Scope::new_child(Box::new(scope.clone()));
-            resolve_block_names(&mut if_s.then_branch, &mut then_scope, diagnostics);
+            resolve_block_names(&mut if_s.then_branch, &then_scope, diagnostics);
             if let Some(ref mut else_b) = if_s.else_branch {
                 let mut else_scope = Scope::new_child(Box::new(scope.clone()));
-                resolve_block_names(else_b, &mut else_scope, diagnostics);
+                resolve_block_names(else_b, &else_scope, diagnostics);
             }
         }
         HirExpr::Loop(l, ..) => {
             let mut loop_scope = Scope::new_child(Box::new(scope.clone()));
-            resolve_block_names(&mut l.body, &mut loop_scope, diagnostics);
+            resolve_block_names(&mut l.body, &loop_scope, diagnostics);
         }
         HirExpr::Block(b, ..) => {
             let mut block_scope = Scope::new_child(Box::new(scope.clone()));
-            resolve_block_names(b, &mut block_scope, diagnostics);
+            resolve_block_names(b, &block_scope, diagnostics);
         }
         HirExpr::AsCast(inner, ..) => {
             resolve_expr_names(inner, scope, diagnostics);
@@ -834,13 +827,6 @@ fn resolve_expr_names(
     }
 }
 
-fn resolve_ident_in_expr(
-    expr: &mut HirExpr,
-    scope: &Scope,
-    diagnostics: &mut Vec<DiagError>,
-) {
-    resolve_expr_names(expr, scope, diagnostics);
-}
 
 fn infer_type_from_expr(expr: &HirExpr) -> HirType {
     match expr {
