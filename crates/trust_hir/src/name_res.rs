@@ -509,7 +509,7 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
         // 返回 Ident 使父 Expr::Call 处理器正常接收 args（避免双重 Call 包裹）
         ast::Expr::MemberAccess(ma) => {
             if let ast::Expr::Ident(obj_name) = ma.object.as_ref() {
-                if obj_name == "console" {
+                if obj_name == "console" && ma.field == "log" {
                     return HirExpr::Ident(
                         "ferro_rt::console::log".into(),
                         HirBinding::Unresolved {
@@ -703,7 +703,12 @@ fn lower_imports(
                             span: export.span.clone(),
                         };
                         bindings.push((export_name.clone(), binding.clone()));
-                        scope.insert(&export_name, binding);
+                        // 默认导入使用本地别名（如 `import foo from "./lib"` 中 foo 是本地名）
+                        let local_name = match &imp.kind {
+                            ast::ImportKind::Default(name) => name.clone(),
+                            _ => export_name.clone(),
+                        };
+                        scope.insert(&local_name, binding);
                     }
                 }
             } else {
