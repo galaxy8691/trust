@@ -260,17 +260,20 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
                     *ty = HirType::Error;
                 }
                 _ => {
-                    // Phase 1: 对于 console.log → ferro_rt::console::log 的调用，
-                    // callee 是 Ident，其类型可能未设置。
-                    // 允许任意类型的调用（兼容 console.log 映射）。
-                    *ty = HirType::Void;
+                    diagnostics.push(DiagError::new(
+                        format!("cannot call value of type `{callee_ty}` (only functions are callable in Phase 1)"),
+                        span.clone(),
+                    ));
+                    *ty = HirType::Error;
+                    *expr = HirExpr::Error(span.clone());
                 }
             }
         }
 
         HirExpr::ArrowFn(params, ret, body, _is_move, _span) => {
             // 闭包类型检查：推断返回类型
-            let mut fn_scope = Scope::new();
+            // 使用 parent scope 以访问外部变量（与 name_res 行为一致）
+            let mut fn_scope = Scope::new_child(Box::new(scope.clone()));
             for p in params.iter() {
                 fn_scope.insert(
                     &p.name,
@@ -574,11 +577,11 @@ fn expr_type(expr: &HirExpr) -> HirType {
         HirExpr::Unary(.., ty, _) => ty.clone(),
         HirExpr::Call(.., ty, _) => ty.clone(),
         HirExpr::AsCast(_, ty, _) => ty.clone(),
-        HirExpr::If(..) => HirType::Error, // if 表达式类型由分支推断，Phase 1 简化
-        HirExpr::Loop(..) => HirType::I32, // loop break 带值 → 值类型；Phase 1 简化
+        HirExpr::If(if_s, _) => infer_if_type(if_s),
+        HirExpr::Loop(l, _) => infer_loop_type(&l.body),
         HirExpr::Block(block, _) => infer_block_type(block),
         HirExpr::ArrowFn(..) => HirType::Function(vec![], Box::new(HirType::Void)),
-        HirExpr::Reference(..) => HirType::Ref(Box::new(HirType::Error)),
+        HirExpr::Reference(inner, _) => HirType::Ref(Box::new(expr_type(inner))),
         HirExpr::TemplateLiteral(..) => HirType::String,
         HirExpr::AssertUnwrap(..) | HirExpr::TryPropagate(..) => HirType::Error,
         HirExpr::Error(..) => HirType::Error,
@@ -596,6 +599,54 @@ fn infer_block_type(block: &HirBlock) -> HirType {
             _ => HirType::Void,
         })
         .unwrap_or(HirType::Void)
+}
+
+fn infer_loop_type(body: &HirBlock) -> HirType {
+    // Scan for break statements in the loop body and infer their value types
+    let mut break_types: Vec<HirType> = Vec::new();
+    collect_break_types(body, &mut break_types);
+    if break_types.is_empty() {
+        HirType::Void // loop without break value
+    } else if break_types.iter().all(|t| t == &break_types[0]) {
+        break_types[0].clone()
+    } else {
+        HirType::Error // mixed break types
+    }
+}
+
+fn collect_break_types(block: &HirBlock, types: &mut Vec<HirType>) {
+    for stmt in &block.statements {
+        match stmt {
+            HirStmt::Break(b) => {
+                if let Some(ref v) = b.value {
+                    types.push(expr_type(v));
+                }
+            }
+            HirStmt::If(if_s) => {
+                collect_break_types(&if_s.then_branch, types);
+                if let Some(ref else_b) = if_s.else_branch {
+                    collect_break_types(else_b, types);
+                }
+            }
+            HirStmt::For(f) => collect_break_types(&f.body, types),
+            HirStmt::While(w) => collect_break_types(&w.body, types),
+            HirStmt::Loop(l) => collect_break_types(&l.body, types),
+            _ => {}
+        }
+    }
+}
+
+fn infer_if_type(if_s: &HirIf) -> HirType {
+    let then_ty = infer_block_type(&if_s.then_branch);
+    let else_ty = if_s.else_branch.as_ref()
+        .map(infer_block_type)
+        .unwrap_or(HirType::Void);
+    if then_ty == else_ty {
+        then_ty
+    } else {
+        // Sentinel: Error type in either branch, or incompatible types
+        HirType::Error
+    }
 }
 
 fn infer_return_type(body: &HirBlock) -> HirType {
