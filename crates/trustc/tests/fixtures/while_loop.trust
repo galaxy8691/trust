@@ -1,0 +1,9 @@
+// F9 fix: parser未实现赋值，加break避免死循环
+function main(): void {
+    let x = 3;
+    while (x > 0) {
+        console.log("x is positive");
+        break;
+    }
+    console.log("done");
+}

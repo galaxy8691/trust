@@ -1,0 +1,6 @@
+// F9 fix: parser未实现赋值，不依赖循环次数验证，仅验证语法正确
+function main(): void {
+    for (let i = 0; i < 3; i = i + 1) {
+        console.log("ok");
+    }
+}

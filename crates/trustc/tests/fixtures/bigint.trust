@@ -1,0 +1,4 @@
+function main(): void {
+    let x = 9223372036854775807;
+    console.log("bigint ok");
+}

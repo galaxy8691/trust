@@ -1,0 +1,6 @@
+function main(): void {
+    loop {
+        break;
+    }
+    console.log("escaped");
+}
