@@ -775,10 +775,19 @@ fn resolve_expr_names(
                 resolve_expr_names(&mut arg.expr, scope, diagnostics);
             }
         }
-        HirExpr::ArrowFn(_params, _ret, body, ..) => {
+        HirExpr::ArrowFn(params, _ret, body, ..) => {
             let mut fn_scope = Scope::new_child(Box::new(scope.clone()));
-            // 注册闭包参数
-            // (params are already resolved during lowering)
+            // 注册闭包参数到作用域——否则 body 中对参数的引用被误报为 undefined
+            for p in params.iter() {
+                fn_scope.insert(
+                    &p.name,
+                    HirBinding::LocalVar {
+                        ty: p.ty.clone(),
+                        mutable: false,
+                        span: p.span.clone(),
+                    },
+                );
+            }
             resolve_block_names(body, &fn_scope, diagnostics);
         }
         HirExpr::If(if_s, ..) => {
@@ -838,6 +847,7 @@ fn infer_type_from_expr(expr: &HirExpr) -> HirType {
         HirExpr::Ident(_, binding, _) => match binding {
             HirBinding::LocalVar { ty, .. } => ty.clone(),
             HirBinding::ModuleConst { ty, .. } => ty.clone(),
+            HirBinding::ModuleShared { ty, .. } => ty.clone(),
             HirBinding::Function { .. } => HirType::Error, // 无调用上下文无法推断
             HirBinding::Import { ty, .. } => ty.clone(),
             _ => HirType::Error,
