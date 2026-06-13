@@ -592,7 +592,11 @@ pub fn resolve_names(
         }
     }
 
-    // resolve import 绑定
+    // 处理 AST import 声明 → 填充 hir.imports + 注册模块作用域绑定
+    let imports = lower_imports(&program.imports, &hir, &mut module_scope, diagnostics);
+    hir.imports = imports;
+
+    // register_module_bindings 处理 exports → scope
     register_module_bindings(&hir, &mut module_scope, diagnostics);
 
     // 对每个函数做名称解析
@@ -606,6 +610,93 @@ pub fn resolve_names(
     hir.scope = module_scope;
 
     hir
+}
+
+/// §SEM-REQ-002: 将 AST import 声明转换为 HirImport 条目并注册模块作用域绑定。
+///
+/// Phase 1 实现：
+/// - 解析 import 路径（通过 parser 的 resolve_import_path）
+/// - 尝试加载目标文件的 AST 并注册其 exports 到当前作用域
+/// - 构建 HirImport 条目回填到 HirProgram.imports
+fn lower_imports(
+    ast_imports: &[ast::ImportDecl],
+    hir: &HirProgram,
+    scope: &mut Scope,
+    diagnostics: &mut Vec<DiagError>,
+) -> Vec<HirImport> {
+    let mut result = Vec::new();
+
+    for imp in ast_imports {
+        // 解析路径
+        let source_path = trust_parser::resolve_imports::resolve_import_path(
+            &imp.path, &hir.file,
+        );
+
+        let mut bindings: Vec<(String, HirBinding)> = Vec::new();
+
+        // 提取导入的符号名
+        let names: Vec<String> = match &imp.kind {
+            ast::ImportKind::Named(names) => names.clone(),
+            ast::ImportKind::Default(name) => vec![name.clone()],
+            ast::ImportKind::Namespace(name) => vec![name.clone()],
+        };
+
+        if let Some(ref target_path) = source_path {
+            // 尝试加载目标文件（Phase 1: 仅文件系统直接路径）
+            if let Ok(src) = std::fs::read_to_string(target_path) {
+                let mut p = trust_parser::parser::Parser::new(&src, target_path);
+                let target_prog = p.parse_program();
+
+                // 将目标文件的 exports 注册到当前作用域
+                for export in &target_prog.exports {
+                    let export_name = match export.item.as_ref() {
+                        ast::Stmt::Function(f) => f.name.clone(),
+                        ast::Stmt::Const(c) => c.name.clone(),
+                        ast::Stmt::Let(l) => l.name.clone(),
+                        _ => continue,
+                    };
+
+                    // 检查是否在本次 import 的请求列表中
+                    let is_requested = match &imp.kind {
+                        ast::ImportKind::Named(req_names) => req_names.contains(&export_name),
+                        ast::ImportKind::Namespace(_) => true,
+                        ast::ImportKind::Default(_) => export.default || export_name == names[0],
+                    };
+
+                    if is_requested {
+                        let binding = HirBinding::Import {
+                            source: target_path.clone(),
+                            export_name: export_name.clone(),
+                            ty: HirType::Named(export_name.clone()),
+                            span: export.span.clone(),
+                        };
+                        bindings.push((export_name.clone(), binding.clone()));
+                        scope.insert(&export_name, binding);
+                    }
+                }
+            } else {
+                diagnostics.push(DiagError::new(
+                    format!("cannot read import target `{target_path}`"),
+                    imp.span.clone(),
+                ));
+            }
+        } else {
+            // Phase 1: std:: 路径暂不支持
+            diagnostics.push(DiagError::new(
+                format!("cannot resolve import path `{}`", imp.path),
+                imp.span.clone(),
+            ));
+        }
+
+        result.push(HirImport {
+            kind: imp.kind.clone(),
+            source_path: source_path.unwrap_or_default(),
+            bindings,
+            span: imp.span.clone(),
+        });
+    }
+
+    result
 }
 
 fn register_module_bindings(
