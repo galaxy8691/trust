@@ -105,14 +105,22 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
         HirStmt::Const(c) => {
             check_expr(&mut c.init, scope, diagnostics, fn_return_type);
-            let init_ty = expr_type(&c.init);
+            let mut init_ty = expr_type(&c.init);
+            // §3.3.2 number+F64 adjustment (same as let)
+            if c.ty == HirType::I32 && init_ty == HirType::F64 {
+                c.ty = HirType::F64;
+            }
             if c.ty == HirType::Error && init_ty != HirType::Error {
                 c.ty = init_ty;
             }
         }
         HirStmt::Shared(s) => {
             check_expr(&mut s.init, scope, diagnostics, fn_return_type);
-            let init_ty = expr_type(&s.init);
+            let mut init_ty = expr_type(&s.init);
+            // §3.3.2 number+F64 adjustment (same as let)
+            if s.ty == HirType::I32 && init_ty == HirType::F64 {
+                s.ty = HirType::F64;
+            }
             if s.ty == HirType::Error && init_ty != HirType::Error {
                 s.ty = init_ty;
             }
@@ -215,16 +223,24 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
             }
         }
 
-        HirExpr::Unary(_op, inner, ref mut ty, _span) => {
+        HirExpr::Unary(op, inner, ref mut ty, _span) => {
             check_expr(inner, scope, diagnostics, fn_return_type);
             let inner_ty = expr_type(inner);
-            *ty = match inner_ty {
-                HirType::I32 | HirType::F64 | HirType::I64 => inner_ty,
-                HirType::Bool => HirType::Bool, // !true → Bool
-                HirType::Error => HirType::Error,
-                _ => {
+            *ty = match (op, &inner_ty) {
+                (UnaryOp::Neg, HirType::I32 | HirType::F64 | HirType::I64) => inner_ty.clone(),
+                (UnaryOp::Neg, HirType::Error) => HirType::Error,
+                (UnaryOp::Neg, _) => {
                     diagnostics.push(DiagError::new(
-                        format!("cannot apply unary operator to type `{inner_ty}`"),
+                        format!("cannot negate type `{inner_ty}` (only numeric types allowed)"),
+                        Span::dummy(),
+                    ));
+                    HirType::Error
+                }
+                (UnaryOp::Not, HirType::Bool) => HirType::Bool,
+                (UnaryOp::Not, HirType::Error) => HirType::Error,
+                (UnaryOp::Not, _) => {
+                    diagnostics.push(DiagError::new(
+                        format!("cannot apply `!` to type `{inner_ty}` (only booleans allowed)"),
                         Span::dummy(),
                     ));
                     HirType::Error
@@ -623,42 +639,60 @@ fn infer_block_type(block: &HirBlock) -> HirType {
 
 fn infer_loop_type(body: &HirBlock) -> HirType {
     let mut break_types: Vec<HirType> = Vec::new();
-    collect_break_types(body, &mut break_types);
-    if break_types.is_empty() {
-        HirType::Void
-    } else {
-        // Filter out Error sentinels before comparing (prevents mixed-type false positives)
-        let clean: Vec<&HirType> = break_types.iter().filter(|t| **t != HirType::Error).collect();
-        if clean.is_empty() {
-            HirType::Error
-        } else if clean.iter().all(|t| *t == clean[0]) {
+    let mut has_bare_break: bool = false;
+    collect_break_info(body, &mut break_types, &mut has_bare_break);
+
+    let clean: Vec<&HirType> = break_types.iter().filter(|t| **t != HirType::Error).collect();
+
+    if has_bare_break && !clean.is_empty() {
+        // Mixed: some breaks have values, some don't → type error
+        HirType::Error
+    } else if !clean.is_empty() {
+        // All breaks have values of the same non-Error type
+        if clean.iter().all(|t| *t == clean[0]) {
             clean[0].clone()
         } else {
             HirType::Error
         }
+    } else if has_bare_break && clean.is_empty() && break_types.is_empty() {
+        // All breaks are bare (no values) → Void
+        HirType::Void
+    } else if break_types.is_empty() {
+        // No breaks at all
+        HirType::Void
+    } else {
+        // All breaks had Error types only
+        HirType::Error
     }
 }
 
-fn collect_break_types(block: &HirBlock, types: &mut Vec<HirType>) {
+fn collect_break_info(block: &HirBlock, types: &mut Vec<HirType>, has_bare: &mut bool) {
     for stmt in &block.statements {
         match stmt {
             HirStmt::Break(b) => {
                 if let Some(ref v) = b.value {
                     types.push(expr_type(v));
+                } else {
+                    *has_bare = true;
                 }
             }
             HirStmt::If(if_s) => {
-                collect_break_types(&if_s.then_branch, types);
+                collect_break_info(&if_s.then_branch, types, has_bare);
                 if let Some(ref else_b) = if_s.else_branch {
-                    collect_break_types(else_b, types);
+                    collect_break_info(else_b, types, has_bare);
                 }
             }
-            HirStmt::For(f) => collect_break_types(&f.body, types),
-            HirStmt::While(w) => collect_break_types(&w.body, types),
-            HirStmt::Loop(l) => collect_break_types(&l.body, types),
+            HirStmt::For(f) => collect_break_info(&f.body, types, has_bare),
+            HirStmt::While(w) => collect_break_info(&w.body, types, has_bare),
+            HirStmt::Loop(l) => collect_break_info(&l.body, types, has_bare),
             _ => {}
         }
     }
+}
+
+fn collect_break_types(block: &HirBlock, types: &mut Vec<HirType>) {
+    let mut _bare = false;
+    collect_break_info(block, types, &mut _bare);
 }
 
 fn infer_if_type(if_s: &HirIf) -> HirType {
