@@ -8,4 +8,5 @@ repository.workspace = true
 
 [dependencies]
 trust_hir = { path = "../trust_hir" }
+trust_parser = { path = "../trust_parser" }
 trust_error = { path = "../trust_error" }

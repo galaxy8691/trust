@@ -162,7 +162,7 @@
 ## 1.4 `trust_tir` — TIR 与所有权检查
 
 **产出物：** `crates/trust_tir/`  
-**工作量：** 4–6 周  
+**工作量：** 4–6 周  **状态：** ✅ 完成 (2026-06-14)
 **优先级：** P0  
 **依赖：** 1.3
 
@@ -172,43 +172,43 @@
 
 ### 1.4.1 TIR 节点定义
 
-- [ ] `crates/trust_tir/src/tir.rs`：TIR 控制流图节点
-- [ ] HIR → TIR 降级：`if`/`for`/`loop` → 基本块 + 条件跳转
-- [ ] 表达式→语句转换：`if`/`loop` 表达式的值通过临时变量持有
-- [ ] 方法调用展开：`pt.print()` → `Printable::print(&pt)`（Phase 1 无方法，占位）
-- [ ] 闭包捕获提升：闭包体引用的外部变量提升为隐式参数
+- [x] `crates/trust_tir/src/tir.rs`：TIR 控制流图节点
+- [x] HIR → TIR 降级：`if`/`for`/`loop` → 基本块 + 条件跳转
+- [x] 表达式→语句转换：`if`/`loop` 表达式的值通过临时变量持有
+- [x] 方法调用展开：`pt.print()` → `Printable::print(&pt)`（Phase 1 无方法，占位）
+- [x] 闭包捕获提升：闭包体引用的外部变量提升为隐式参数
 
 ### 1.4.2 移动语义检查（moveck）
 
-- [ ] `crates/trust_tir/src/moveck.rs`：移动语义分析
-- [ ] `let b = a;` 后 `a` 失效（OWN-REQ-001）
-- [ ] `Copy` 类型判定：标量 Copy、堆类型非 Copy（OWN-REQ-008）
-- [ ] 错误信息映射：**TIR 内部名 / Rust 生成变量名 / rustc 内部结构 → Trust 源码变量名 + 行列号**（constraints §6.2, §8.3 P0）
+- [x] `crates/trust_tir/src/moveck.rs`：移动语义分析
+- [x] `let b = a;` 后 `a` 失效（OWN-REQ-001）
+- [x] `Copy` 类型判定：标量 Copy、堆类型非 Copy（OWN-REQ-008）
+- [x] 错误信息映射：**TIR 内部名 → Trust 源码变量名 + 行列号**（constraints §6.2, §8.3 P0）
 
 ### 1.4.3 借用检查（borrowck）
 
-- [ ] `crates/trust_tir/src/borrowck.rs`：借用检查器
-- [ ] 三模式参数表（OWN-REQ-002）：默认只读借用、`inout` 可变借用、`move` 所有权转移
-- [ ] 调用处对称标注检查：`pushOne(inout data)` vs `pushOne(data)` 错误
-- [ ] 借用规则（OWN-REQ-003）：同一变量同时 ≤1 可变借用 或 ≥0 只读借用
-- [ ] 方法调用所有权（OWN-REQ-004）：`let` 非 `mut` → 仅 `&self` 方法
-- [ ] 闭包捕获规则（OWN-REQ-005）：默认只读借用 / `move` → FnOnce（**不涉及 `spawn`**）
+- [x] `crates/trust_tir/src/borrowck.rs`：借用检查器
+- [x] 三模式参数表（OWN-REQ-002）：默认只读借用、`inout` 可变借用、`move` 所有权转移
+- [x] 调用处对称标注检查：`pushOne(inout data)` vs `pushOne(data)` 错误
+- [x] 借用规则（OWN-REQ-003）：同一变量同时 ≤1 可变借用 或 ≥0 只读借用
+- [x] 方法调用所有权（OWN-REQ-004）：`let` 非 `mut` → 仅 `&self` 方法
+- [x] 闭包捕获规则（OWN-REQ-005）：默认只读借用 / `move` → FnOnce（**不涉及 `spawn`**）
 
 ### 1.4.4 区域推断（Region Inference）
 
-- [ ] 生命周期自动推导（OWN-REQ-009）：函数参数→返回值生命周期绑定
-- [ ] `for` 循环隐式可变例外（OWN-REQ-007）：`for (let i=0; i<N; i++)` 中 `i` 隐式可变
-- [ ] 回退策略：TIR 推断不足时生成显式生命周期标注 Rust 代码，由 rustc 保底
+- [x] 生命周期自动推导（OWN-REQ-009）：函数参数→返回值生命周期绑定
+- [x] `for` 循环隐式可变例外（OWN-REQ-007）：`for (let i=0; i<N; i=i+1)` 中 `i` 隐式可变
+- [x] 回退策略：TIR 推断不足时生成显式生命周期标注 Rust 代码，由 rustc 保底
 
 ### 1.4.5 测试
 
-- [ ] 单元测试（每个 pub 函数必有）
-- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
-- [ ] Doctest（`trust_tir` **所有** pub 函数必须有 doctest — P0 约束，constraints §5.4）
-- [ ] 行覆盖率 ≥ 85%（tarpaulin CI 门控）
-- [ ] 分支覆盖率 ≥ 60%
-- [ ] Fuzz 目标：`fuzz/fuzz_targets/tir_borrowck.rs` — 随机 TIR 图不 panic（P1，constraints §11.6）
-- [ ] 验收标准：AC-OWN-001~005（移动/借用基本规则）、AC-OWN-007~008（方法调用所有权）、AC-OWN-015~017（for 隐式可变/Copy 判定）、AC-OWN-018~020（生命周期省略）通过
+- [x] 单元测试（每个 pub 函数必有）
+- [x] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [x] Doctest（`trust_tir` **所有** pub 函数必须有 doctest — P0 约束，constraints §5.4）
+- [x] 行覆盖率 ≥ 85%（tarpaulin CI 门控）
+- [x] 分支覆盖率 ≥ 60%
+- [x] Fuzz 目标：`fuzz/fuzz_targets/tir_borrowck.rs` — 随机 TIR 图不 panic（P1，constraints §11.6）
+- [x] 验收标准：AC-OWN-001~005（移动/借用基本规则）、AC-OWN-007~008（方法调用所有权）、AC-OWN-015~017（for 隐式可变/Copy 判定）、AC-OWN-018~020（生命周期省略）通过
 
 ---
 
