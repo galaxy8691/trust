@@ -664,10 +664,31 @@ fn lower_imports(
                     };
 
                     if is_requested {
+                        // 从 AST 导出项提取实际类型（非 HirType::Named）
+                        let actual_ty = match export.item.as_ref() {
+                            ast::Stmt::Function(f) => {
+                                let param_types: Vec<HirType> = f.params.iter()
+                                    .map(|p| p.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error))
+                                    .collect();
+                                let ret = f.return_type.as_ref()
+                                    .map(HirType::from_ast_type)
+                                    .unwrap_or(HirType::Void);
+                                HirType::Function(param_types, Box::new(ret))
+                            }
+                            ast::Stmt::Const(c) => {
+                                c.ty.as_ref().map(HirType::from_ast_type)
+                                    .unwrap_or_else(|| HirType::from_ast_type(&trust_parser::ast::Type::NumberType))
+                            }
+                            ast::Stmt::Let(l) => {
+                                l.ty.as_ref().map(HirType::from_ast_type)
+                                    .unwrap_or_else(|| HirType::from_ast_type(&trust_parser::ast::Type::NumberType))
+                            }
+                            _ => HirType::Error,
+                        };
                         let binding = HirBinding::Import {
                             source: target_path.clone(),
                             export_name: export_name.clone(),
-                            ty: HirType::Named(export_name.clone()),
+                            ty: actual_ty,
                             span: export.span.clone(),
                         };
                         bindings.push((export_name.clone(), binding.clone()));
