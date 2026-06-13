@@ -86,8 +86,13 @@ fn check_op(
             }
         }
         // TirOp::Let 读取源变量 - 检查读取 Moved 变量
-        TirOp::Let(_dst, val, span) => {
+        TirOp::Let(dst, val, span) => {
             check_value_use_mut(val, state, var_map, errors, span);
+            // 标记目标变量为 Active（新赋值覆盖 Moved 状态）
+            let di = dst.0 as usize;
+            if di < state.len() {
+                state[di] = VarState::Active;
+            }
         }
         TirOp::Binary(_, lhs, _, rhs, span) => {
             check_value_use_mut(lhs, state, var_map, errors, span);

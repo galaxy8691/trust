@@ -596,6 +596,17 @@ pub fn resolve_names(
     let imports = lower_imports(&program.imports, &hir, &mut module_scope, diagnostics);
     hir.imports = imports;
 
+    // 注册内置符号（console.log → ferro_rt::console::log）
+    // 此绑定使 console.log MemberAccess 降级产生的 Ident 在名称解析时能找到
+    module_scope.insert(
+        "ferro_rt::console::log",
+        HirBinding::Function {
+            param_types: vec![HirType::String],
+            return_type: HirType::Void,
+            span: Span::dummy(),
+        },
+    );
+
     // register_module_bindings 处理 exports → scope
     register_module_bindings(&hir, &mut module_scope, diagnostics);
 
