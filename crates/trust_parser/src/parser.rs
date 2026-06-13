@@ -291,7 +291,9 @@ impl Parser {
     fn parse_import(&mut self) -> Option<ImportDecl> {
         self.advance();
         let kind = match &self.cur {
-            TokenKind::Star => { self.advance(); self.advance(); // as
+            TokenKind::Star => { self.advance(); // *
+                if !matches!(self.cur, TokenKind::As) { self.error("expected 'as' after *"); return None; }
+                self.advance(); // as
                 let n = self.expect_ident("ns name")?; ImportKind::Namespace(n) }
             TokenKind::LBrace => { self.advance();
                 let mut ns = vec![];

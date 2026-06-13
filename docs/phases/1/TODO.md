@@ -62,8 +62,8 @@
 ### 1.2.1 AST 节点定义
 
 - [x] `crates/trust_parser/src/ast.rs`：完整 AST 节点定义（按 `spec/trust-spec.md` §SEM-REQ-001）
-- [x] 表达式节点：`LetStmt`、`ConstStmt`、`FunctionDecl`、`IfExpr`、`ForStmt`、`ForOfStmt`、`LoopExpr`、`SwitchStmt`、`MatchExpr`、`IfLetStmt`、`SelectStmt`
-  > *Phase 1 实际实现 13 Stmt 变体（Let/Const/Shared/Function/If/For/ForOf/While/Loop/Return/Break/Continue/Expr），其余占位。*
+- [x] Stmt 13 变体：`Let`/`Const`/`Shared`/`Function`/`If`/`For`/`ForOf`/`While`/`Loop`/`Return`/`Break`/`Continue`/`Expr`。Expr 20 变体含 `IfExpr`/`LoopExpr`/`ArrowFn`/`TemplateLiteral` 等。
+  > *Phase 1 实际解析全部 13 Stmt。Phase 2+ Stmt（Switch/Match/IfLet/Select）预留于 Expr 枚举中转义。*
 - [x] 类型节点：9 Type 变体（NumberType/StringType/BooleanType/BigIntType/VoidType/Named/Array/Tuple/Ref），Phase 2+ 追加 Generic/TraitObject/Option/Result
 - [x] Source span 附加到每个 AST 节点（文件路径 + 真实行列号，parser `self.span()` 读取 lexer 坐标）
 
@@ -74,7 +74,7 @@
 - [x] 字面量解析：整数（`i32`）、浮点（`f64`）、BigInt（`i64`）、字符串、模板（3-token 拆分 + in_template 状态机 + TemplateInterpolation 产出）、布尔
 - [x] 注释跳过：`//` 行注释、`/* */` 块注释、`///` 文档注释
 - [x] 运算符/分隔符/箭头（`=>`）token 生成 + ASI 换行分隔（含续行 `=` `{` `(` 等阻止）
-- [x] 验收标准：16 AC-LEX tests 全部通过（超覆蓋 14 AC-LEX）
+- [x] 验收标准：17 AC-LEX tests 全部通过（超覆蓋 14 AC-LEX）
 
 ### 1.2.3 Parser（语法分析器）
 
@@ -101,12 +101,12 @@
 ### 1.2.4 模块图
 
 - [x] `crates/trust_parser/src/module_graph.rs`：跨文件依赖解析（117 行，DAG + 循环检测 + 拓扑排序，3 AC-MOD）
-- [x] `crates/trust_parser/src/resolve_imports.rs`：3 种导入格式 + 路径解析（47 行，3 AC-IMP）
+- [x] `crates/trust_parser/src/resolve_imports.rs`：4 种路径格式（`./` `../` `/` `std::`）+ 3 种导入语法格式（Named/Default/Namespace）（47 行，3 AC-IMP）
 - [x] 循环导入检测 + 报错
 
 ### 1.2.5 测试
 
-- [x] 单元测试：57 lib tests（4 AST + 16 LEX + 31 SYN + 3 MOD + 3 IMP）
+- [x] 单元测试：57 lib tests（4 AST + 17 LEX + 30 SYN + 3 MOD + 3 IMP）
 - [x] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
 - [x] 快照测试：34 snapshot tests（`tests/snapshot_tests.rs`，覆盖全部 25 AC-SYN）
 - [x] Fuzz 目标：`fuzz/fuzz_targets/parse.rs` 调用 `parser::parse()`，nightly fuzz 可启动

@@ -34,7 +34,7 @@ fn assert_error_snapshot(trust_source: &str, expected_error_substr: &str) {
 }
 
 // =================================================================
-// 快照测试 — 每语法特性 ≥1 个，共 33 个
+// 快照测试 — 每语法特性 ≥1 个，共 34 个
 // =================================================================
 
 #[test] fn snap_let_basic() { assert_ast_snapshot("let x = 42", &["LetStmt", "x"]); }

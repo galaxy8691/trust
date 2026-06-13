@@ -69,18 +69,8 @@ impl TokenKind {
         )
     }
 
-    /// 阻止 ASI 在此 token 前插入分号（续行 token）
-    pub fn blocks_asi(&self) -> bool {
-        matches!(self,
-            TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket
-            | TokenKind::Dot | TokenKind::Plus | TokenKind::Minus
-            | TokenKind::Star | TokenKind::Slash | TokenKind::Percent
-            | TokenKind::And | TokenKind::Or | TokenKind::Arrow
-            | TokenKind::QuestionDot | TokenKind::QuestionQuestion
-            | TokenKind::Colon | TokenKind::Comma
-        )
-    }
 }
+
 
 pub struct Lexer {
     source: Vec<char>,
