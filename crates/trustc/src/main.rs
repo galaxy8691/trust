@@ -19,6 +19,7 @@ use trust_parser::parser::{self, Parser};
 use trust_tir::borrowck;
 use trust_tir::moveck;
 use trust_tir::tir;
+use trust_tir::tir::{BorrowError, MoveError};
 
 // ============================================================================
 // §3.1.1: CLI 数据结构
@@ -121,6 +122,7 @@ fn parse_args(args: &[String]) -> Result<CliOptions, String> {
 struct CompileSession {
     diagnostics: Vec<Diagnostic>,
     error_count: usize,
+    warning_count: usize,
     format: OutputFormat,
     verbose: bool,
     quiet: bool,
@@ -128,12 +130,21 @@ struct CompileSession {
 
 impl CompileSession {
     fn new(format: OutputFormat, verbose: bool, quiet: bool) -> Self {
-        CompileSession { diagnostics: vec![], error_count: 0, format, verbose, quiet }
+        CompileSession {
+            diagnostics: vec![],
+            error_count: 0,
+            warning_count: 0,
+            format,
+            verbose,
+            quiet,
+        }
     }
 
     fn add(&mut self, diag: Diagnostic) {
-        if diag.level == Severity::Error {
-            self.error_count += 1;
+        match diag.level {
+            Severity::Error => self.error_count += 1,
+            Severity::Warning => self.warning_count += 1,
+            _ => {}
         }
         self.diagnostics.push(diag);
     }
@@ -215,7 +226,7 @@ fn run(opts: CliOptions) -> Result<(), String> {
 }
 
 // ============================================================================
-// §3.2.3: 四阶段编译管线
+// §3.2.3: 五阶段编译管线
 // ============================================================================
 
 fn run_pipeline(file: &str, session: &mut CompileSession, codegen: bool) -> Result<String, String> {
@@ -232,7 +243,7 @@ fn run_pipeline(file: &str, session: &mut CompileSession, codegen: bool) -> Resu
         return Err("parse errors".into());
     }
 
-    // 2. HIR
+    // 2. HIR（错误收集后继续 TIR，不提前返回——constraints §3.1.1）
     session.log_stage("hir");
     let mut hir_diags: Vec<DiagError> = vec![];
     let mg = ModuleGraph::new();
@@ -365,89 +376,63 @@ fn run_fix_mode(diagnostics: &[Diagnostic]) {
 // §3.2.7: 跨 crate 错误类型转换
 // ============================================================================
 
-fn convert_parser_diag(diag: &parser::Diagnostic) -> Diagnostic {
-    let level = match diag.level {
-        parser::DiagLevel::Error => Severity::Error,
-        parser::DiagLevel::Warning => Severity::Warning,
-    };
-    let span = SourceSpan {
-        file: diag.span.file.clone(),
-        line_start: diag.span.line_start,
-        col_start: diag.span.col_start,
-        line_end: diag.span.line_end,
-        col_end: diag.span.col_end,
+fn span_to_source_span(span: &trust_parser::ast::Span) -> SourceSpan {
+    SourceSpan {
+        file: span.file.clone(),
+        line_start: span.line_start,
+        col_start: span.col_start,
+        line_end: span.line_end,
+        col_end: span.col_end,
         label: None,
-    };
-    Diagnostic::error(ErrorCode::E0001, format!("parse: {}", diag.message), span)
+    }
+}
+
+fn convert_parser_diag(diag: &parser::Diagnostic) -> Diagnostic {
+    let span = span_to_source_span(&diag.span);
+    match diag.level {
+        parser::DiagLevel::Error => {
+            Diagnostic::error(ErrorCode::E0001, format!("parse: {}", diag.message), span)
+        }
+        parser::DiagLevel::Warning => {
+            Diagnostic::warning(ErrorCode::E0001, format!("parse: {}", diag.message), span)
+        }
+    }
 }
 
 fn convert_hir_diag(diag: &DiagError) -> Diagnostic {
-    let span = SourceSpan {
-        file: diag.span.file.clone(),
-        line_start: diag.span.line_start,
-        col_start: diag.span.col_start,
-        line_end: diag.span.line_end,
-        col_end: diag.span.col_end,
-        label: None,
-    };
+    let span = span_to_source_span(&diag.span);
     Diagnostic::error(ErrorCode::E0425, format!("hir: {}", diag.message), span)
 }
 
-// TIR/Move/Borrow 错误类型为 private——用内联转换
-fn convert_tir_diag<E: std::fmt::Debug>(diag: &E) -> Diagnostic {
-    Diagnostic::error(
-        ErrorCode::E9999,
-        format!("tir: {:?}", diag),
-        SourceSpan {
-            file: "unknown".into(),
-            line_start: 1,
-            col_start: 1,
-            line_end: 1,
-            col_end: 1,
-            label: None,
-        },
-    )
+fn convert_tir_diag(diag: &DiagError) -> Diagnostic {
+    let span = span_to_source_span(&diag.span);
+    Diagnostic::error(ErrorCode::E9999, format!("tir: {}", diag.message), span)
 }
 
-fn convert_move_error<E: std::fmt::Debug>(e: &E) -> Diagnostic {
-    Diagnostic::error(
+fn convert_move_error(e: &MoveError) -> Diagnostic {
+    let primary = span_to_source_span(&e.moved_at);
+    let secondary = vec![span_to_source_span(&e.used_at)];
+    Diagnostic::error_with_secondary(
         ErrorCode::E0382,
-        format!("move: {:?}", e),
-        SourceSpan {
-            file: "unknown".into(),
-            line_start: 1,
-            col_start: 1,
-            line_end: 1,
-            col_end: 1,
-            label: None,
-        },
+        format!("move: {}", e.message),
+        primary,
+        secondary,
     )
 }
 
-fn convert_borrow_error<E: std::fmt::Debug>(e: &E) -> Diagnostic {
-    Diagnostic::error(
+fn convert_borrow_error(e: &BorrowError) -> Diagnostic {
+    let primary = span_to_source_span(&e.first_borrow_at);
+    let secondary = vec![span_to_source_span(&e.conflict_at)];
+    Diagnostic::error_with_secondary(
         ErrorCode::E0501,
-        format!("borrow: {:?}", e),
-        SourceSpan {
-            file: "unknown".into(),
-            line_start: 1,
-            col_start: 1,
-            line_end: 1,
-            col_end: 1,
-            label: None,
-        },
+        format!("borrow: {}", e.message),
+        primary,
+        secondary,
     )
 }
 
 fn convert_codegen_error(e: &trust_codegen::codegen::CodegenError) -> Diagnostic {
-    let span = SourceSpan {
-        file: e.span.file.clone(),
-        line_start: e.span.line_start,
-        col_start: e.span.col_start,
-        line_end: e.span.line_end,
-        col_end: e.span.col_end,
-        label: None,
-    };
+    let span = span_to_source_span(&e.span);
     Diagnostic::error(ErrorCode::E9999, format!("codegen: {}", e.message), span)
 }
 

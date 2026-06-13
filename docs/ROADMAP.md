@@ -185,6 +185,8 @@ function main() {
 
 ## Phase 2：类型系统与泛型 (v0.1.1)
 
+> **持续承接（贯穿 Phase 2-3）：** #12 各 crate 错误类型渐进迁移至 `trust_error::Diagnostic`（每子阶段迁移一批，不设截止时间）。
+
 ### 2.1 `interface` 与 `type`
 
 **工作量：** 2 周  
@@ -195,6 +197,8 @@ function main() {
 - 结构别名（`type` 透明等价）
 - `{x, y}` 属性简写
 - 类型上下文推断
+
+> **承接 Phase 1：** #7 可变引用 `&mut x`（parser `let mut` + TIR borrowck 可变借用）、#10 JSON→serde 迁移评估（零依赖策略决策）
 
 ### 2.2 泛型
 
@@ -207,6 +211,8 @@ function main() {
 - `extends` 约束（名义 trait + 结构化）
 - 隐式 trait 生成（`HasLength` 等）
 - 单态化代码生成
+
+> **承接 Phase 1：** #8 闭包调用 `r()`（name_res ArrowFn 保留 + K5 闭包 TirFunction 实现；闭包类型推断与泛型参数推断共享机制）
 
 ### 2.3 ADT（代数数据类型）
 
@@ -231,6 +237,8 @@ function main() {
 - `inout this` / `move this` 方法
 - vtable 生成（与 Rust 对齐）
 
+> **承接 Phase 1：** #9 跨函数 inout 标注检查（borrowck 对称检查需支持跨 crate 调用，`inout this` 方法是典型触发场景）
+
 ---
 
 ## Phase 3：错误处理与 Option/Result (v0.1.2)
@@ -252,6 +260,8 @@ function main() {
 - `?.` 可选链（`map`/`and_then` 自动选择）
 - `!` 断言解包（仅 Option）
 - `.expect()`
+
+> **承接 Phase 1：** #11 修复建议覆盖率扩展（从 3 种规则扩展到 ≥8 种；用户在此阶段频繁遇到所有权+Option/Result 错误，修复建议价值最大）
 
 ### 3.3 `throw` → `panic!`
 
