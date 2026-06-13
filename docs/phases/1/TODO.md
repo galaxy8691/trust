@@ -116,7 +116,7 @@
 ## 1.3 `trust_hir` — HIR 与类型检查
 
 **产出物：** `crates/trust_hir/`  
-**工作量：** 2–3 周  
+**工作量：** 2–3 周  **状态：** ✅ 完成 (2026-06-13)
 **优先级：** P0  
 **依赖：** 1.2
 
@@ -124,38 +124,38 @@
 
 ### 1.3.1 HIR 节点定义
 
-- [ ] `crates/trust_hir/src/hir.rs`：HIR 节点（AST → HIR 降级）
-- [ ] 名称解析后的符号绑定（`import` → 实际文件/导出）
-- [ ] 作用域结构（函数参数、`let` 局部作用域、`const`/`shared` 模块作用域）
+- [x] `crates/trust_hir/src/hir.rs`：HIR 节点（AST → HIR 降级）
+- [x] 名称解析后的符号绑定（`import` → 实际文件/导出）
+- [x] 作用域结构（函数参数、`let` 局部作用域、`const`/`shared` 模块作用域）
 
 ### 1.3.2 类型检查
 
-- [ ] `crates/trust_hir/src/typeck.rs`：类型检查器
-- [ ] 基本类型兼容性检查
-- [ ] 函数签名验证（参数数量、类型、返回值）
-- [ ] 二元运算类型检查（`i32 + f64` → 编译错误，TYP-REQ-001）
-- [ ] `as` 显式类型转换检查
-- [ ] 验收标准：AC-TYP-001~003 通过
+- [x] `crates/trust_hir/src/typeck.rs`：类型检查器
+- [x] 基本类型兼容性检查
+- [x] 函数签名验证（参数数量、类型、返回值）
+- [x] 二元运算类型检查（`i32 + f64` → 编译错误，TYP-REQ-001）
+- [x] `as` 显式类型转换检查
+- [x] 验收标准：AC-TYP-001~003 通过
 
 ### 1.3.3 名称解析
 
-- [ ] `crates/trust_hir/src/name_res.rs`：跨文件名称解析
-- [ ] `import` 目标验证（导出是否存在）
-- [ ] `export` 冲突检测
+- [x] `crates/trust_hir/src/name_res.rs`：跨文件名称解析
+- [x] `import` 目标验证（导出是否存在）
+- [x] `export` 冲突检测
 
 ### 1.3.4 错误收集
 
-- [ ] 函数级独立检查：同一模块内不同函数间的错误互不影响
-- [ ] `Vec<Diagnostic>` 收集，统一报告（constraints §3.1.1）
-- [ ] `Type::Error` 哨兵占位（避免级联类型报错）
+- [x] 函数级独立检查：同一模块内不同函数间的错误互不影响
+- [x] `Vec<Diagnostic>` 收集，统一报告（constraints §3.1.1）
+- [x] `Type::Error` 哨兵占位（避免级联类型报错）
 
 ### 1.3.5 测试
 
-- [ ] 单元测试（happy path + 错误路径）
-- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
-- [ ] Doctest（pub 函数推荐有，constraints §5.4）
-- [ ] 集成测试：`.` 文件 → HIR 快照比对
-- [ ] 验收标准：AC-SEM-001~010 中 Phase 1 相关项通过（AST→HIR 降级、名称解析、作用域、`if`/`loop` 表达式→语句转换）
+- [x] 单元测试（happy path + 错误路径）
+- [x] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [x] Doctest（pub 函数推荐有，constraints §5.4）
+- [x] 集成测试：`.` 文件 → HIR 快照比对
+- [x] 验收标准：AC-SEM-001~010 中 Phase 1 相关项通过（AST→HIR 降级、名称解析、作用域、`if`/`loop` 表达式→语句转换）
 
 ---
 
