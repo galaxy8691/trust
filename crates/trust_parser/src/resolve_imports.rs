@@ -44,4 +44,12 @@ mod tests {
         let result = resolve_import_path("/lib/util", "src/main.trust");
         assert_eq!(result, Some("/lib/util.trust".into()));
     }
+
+    #[test]
+    fn resolve_parent_import_handles_dotdot_path() {
+        let result = resolve_import_path("../lib/math", "src/sub/main.trust");
+        let path = result.expect("../ import should resolve (dotdot branch)");
+        assert!(path.contains("lib/math.trust"), "path should contain lib/math.trust, got: {path}");
+        assert!(path.contains(".."), "Phase 1 does not canonicalize '..', got: {path}");
+    }
 }

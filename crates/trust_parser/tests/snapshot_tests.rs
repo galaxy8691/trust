@@ -99,3 +99,8 @@ fn assert_error_snapshot(trust_source: &str, expected_error_substr: &str) {
 #[test] fn snap_template_literal() {
     assert_ast_snapshot("let msg = `hello ${name}`", &["TemplateLiteral", "hello ", "name"]);
 }
+
+/// 模板头部即插值（首个 token 是 TemplateInterpolation）
+#[test] fn snap_template_head_interpolation() {
+    assert_ast_snapshot("let msg = `${name} world`", &["TemplateLiteral", "name"]);
+}
