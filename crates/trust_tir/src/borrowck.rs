@@ -115,7 +115,7 @@ fn check_borrow_op(
             if let Some(existing) = active.get(src) {
                 if !existing.is_empty() {
                     let info = var_map.lookup_tmp(src);
-                    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", src.0));
+                    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
                     errors.push(BorrowError {
                         code: ErrorCode::E0506,
                         var_name,
@@ -138,7 +138,7 @@ fn borrow_conflict(
     span: &Span,
 ) -> BorrowError {
     let info = var_map.lookup_tmp(src);
-    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", src.0));
+    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
     let code = if new_kind == "mutable" {
         ErrorCode::E0501
     } else {
@@ -163,6 +163,15 @@ fn borrow_conflict(
 ///
 /// 对每个函数，检查返回值与参数引用关系，自动推导生命周期。
 /// 成功→填充 `lifetime_params`；失败→报错。
+///
+/// ```
+/// # use trust_tir::borrowck::infer_regions;
+/// # use trust_tir::tir::TirProgram;
+/// # let mut errors = vec![];
+/// # let mut program = TirProgram { file: String::new(), functions: vec![] };
+/// infer_regions(&mut program, &mut errors);
+/// assert!(errors.is_empty()); // 空程序无生命周期错误
+/// ```
 pub fn infer_regions(tir: &mut TirProgram, errors: &mut Vec<BorrowError>) {
     for func in &mut tir.functions {
         infer_function_regions(func, errors);

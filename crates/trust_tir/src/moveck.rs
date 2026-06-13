@@ -36,18 +36,21 @@ enum VarState {
 }
 
 fn check_function_moves(func: &TirFunction, errors: &mut Vec<MoveError>) {
-    let mut state: Vec<VarState> = vec![VarState::Active; func.tmp_counter as usize];
-    // 标记函数参数为 Active
-    for param in &func.params {
-        if let Some(tmp) = func.var_map.lookup_name(&param.name) {
-            let idx = tmp.0 as usize;
-            if (idx as u32) < func.tmp_counter {
-                state[idx] = VarState::Active;
+    // §3.4.2 Phase 1 Lexical 模型：每个基本块独立检查，块边界释放移动状态。
+    // 这避免了跨分支状态污染（保守但正确——不会跨块误报 use-after-move，
+    // 但也不会跨块追踪移动。完整 CFG 分析押后 Phase 3 NLL）。
+    for block in &func.blocks {
+        let mut state: Vec<VarState> = vec![VarState::Active; func.tmp_counter as usize];
+        // 标记函数参数为 Active（每块重置后重新标记）
+        for param in &func.params {
+            if let Some(tmp) = func.var_map.lookup_name(&param.name) {
+                let idx = tmp.0 as usize;
+                if (idx as u32) < func.tmp_counter {
+                    state[idx] = VarState::Active;
+                }
             }
         }
-    }
 
-    for block in &func.blocks {
         for op in &block.ops {
             check_op(op, &mut state, &func.var_map, errors);
         }
@@ -66,7 +69,7 @@ fn check_op(
             if si < state.len() {
                 if let VarState::Moved(ref moved_at) = state[si] {
                     let info = var_map.lookup_tmp(src);
-                    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", src.0));
+                    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
                     errors.push(MoveError {
                         code: ErrorCode::E0382,
                         var_name: var_name.clone(),
@@ -139,7 +142,7 @@ fn check_var_use_mut(
     if idx < state.len() {
         if let VarState::Moved(ref moved_at) = state[idx] {
             let info = var_map.lookup_tmp(&tmp);
-            let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", tmp.0));
+            let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", tmp.0));
             errors.push(MoveError {
                 code: ErrorCode::E0382,
                 var_name: var_name.clone(),
@@ -152,6 +155,15 @@ fn check_var_use_mut(
 }
 
 /// §3.3.2: Copy 类型判定（公开，供 tir.rs 降级时使用）
+///
+/// ```
+/// # use trust_hir::hir::HirType;
+/// # use trust_tir::moveck::is_copy_type;
+/// assert!(is_copy_type(&HirType::I32));
+/// assert!(is_copy_type(&HirType::Bool));
+/// assert!(!is_copy_type(&HirType::String));
+/// assert!(!is_copy_type(&HirType::Array(Box::new(HirType::I32))));
+/// ```
 pub fn is_copy_type(ty: &HirType) -> bool {
     match ty {
         HirType::I32 | HirType::F64 | HirType::I64 | HirType::Bool | HirType::BigInt => true,

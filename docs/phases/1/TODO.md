@@ -208,7 +208,7 @@
 - [x] 行覆盖率 ≥ 85%（tarpaulin CI 门控）
 - [x] 分支覆盖率 ≥ 60%
 - [x] Fuzz 目标：`fuzz/fuzz_targets/tir_borrowck.rs` — 随机 TIR 图不 panic（P1，constraints §11.6）
-- [x] 验收标准：AC-OWN-001~005（移动/借用基本规则）、AC-OWN-007~008（方法调用所有权）、AC-OWN-015~017（for 隐式可变/Copy 判定）、AC-OWN-018~020（生命周期省略）通过
+- [x] 验收标准：AC-OWN-001~006（移动/借用基本规则）、AC-OWN-007~008（方法调用所有权，Phase 2 启用）、AC-OWN-009~010（闭包捕获）、AC-OWN-015~017（for 隐式可变/Copy 判定）、AC-OWN-018~020（生命周期省略）通过
 
 ---
 

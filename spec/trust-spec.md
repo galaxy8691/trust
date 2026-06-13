@@ -597,7 +597,7 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 **验收标准：**
 - AC-OWN-015: `for (let i = 0; i < 10; i++) { console.log(i); }` → 合法（无需 `let mut`）
-- AC-OWN-016: `let i = 0; i += 1;` → 编译错误：`let` 变量不可变（非 for 循环上下文中无隐式可变例外）
+- AC-OWN-015b: `let i = 0; i += 1;` → 编译错误：`let` 变量不可变（非 for 循环上下文中无隐式可变例外）
 
 ### OWN-REQ-008：Copy 类型判定
 

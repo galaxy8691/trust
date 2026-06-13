@@ -253,8 +253,9 @@ pub fn lower_hir(hir: &HirProgram) -> Result<TirProgram, Vec<DiagError>> {
 
     for item in &hir.items {
         if let HirItem::Function(f) = item {
-            let tf = lower_function(f, &mut diags);
+            let (tf, mut closures) = lower_function(f, &mut diags);
             functions.push(tf);
+            functions.append(&mut closures);
         }
     }
 
@@ -268,7 +269,7 @@ pub fn lower_hir(hir: &HirProgram) -> Result<TirProgram, Vec<DiagError>> {
     }
 }
 
-fn lower_function(f: &HirFunction, diags: &mut Vec<DiagError>) -> TirFunction {
+fn lower_function(f: &HirFunction, diags: &mut Vec<DiagError>) -> (TirFunction, Vec<TirFunction>) {
     let mut ctx = LowerCtx::new();
     // 注册函数参数
     for p in &f.params {
@@ -304,7 +305,7 @@ fn lower_function(f: &HirFunction, diags: &mut Vec<DiagError>) -> TirFunction {
         })
         .collect();
 
-    TirFunction {
+    let func = TirFunction {
         name: f.name.clone(),
         params: f.params.clone(),
         return_type: f.return_type.clone(),
@@ -315,7 +316,8 @@ fn lower_function(f: &HirFunction, diags: &mut Vec<DiagError>) -> TirFunction {
         captured_vars: vec![],
         var_map: ctx.map.clone(),
         span: f.span.clone(),
-    }
+    };
+    (func, ctx.closures)
 }
 
 fn lower_block(block: &HirBlock, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
@@ -355,17 +357,22 @@ fn lower_stmt(stmt: &HirStmt, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
         HirStmt::ForOf(_f) => lower_forof_stmt(_f, ctx, diags),
         HirStmt::Break(b) => {
             // Extract loop exit target BEFORE mutable borrows
-            let exit_id = ctx.loop_stack.last().map(|(_, e)| *e).unwrap_or(ctx.exit);
-            let _val = b.value.as_ref().map(|v| {
-                let val = lower_expr_to_value(v, ctx, diags);
-                let tmp = ctx.next_tmp();
-                ctx.emit(TirOp::Let(tmp, val, b.span.clone()));
-                tmp
-            });
+            let exit_id = ctx.loop_stack.last().map(|(_, e, _)| *e).unwrap_or(ctx.exit);
+            let result_tmp = ctx.loop_stack.last().and_then(|(_, _, r)| *r);
+            if let Some(val) = &b.value {
+                let val = lower_expr_to_value(val, ctx, diags);
+                if let Some(rt) = result_tmp {
+                    // §3.2.2 K4 fix: 表达式级 loop 的 break 值写入外层 result_tmp
+                    ctx.emit(TirOp::Let(rt, val, b.span.clone()));
+                } else {
+                    let tmp = ctx.next_tmp();
+                    ctx.emit(TirOp::Let(tmp, val, b.span.clone()));
+                }
+            }
             finish_block(ctx, Terminator::Goto(exit_id));
         }
         HirStmt::Continue(_c) => {
-            let cond_id = ctx.loop_stack.last().map(|(c, _)| *c).unwrap_or(ctx.entry);
+            let cond_id = ctx.loop_stack.last().map(|(c, _, _)| *c).unwrap_or(ctx.entry);
             finish_block(ctx, Terminator::Goto(cond_id));
         }
         HirStmt::Expr(e) => {
@@ -465,7 +472,7 @@ fn lower_for_stmt(f_s: &HirFor, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) 
     lower_stmt(&f_s.init, ctx, diags);
     finish_block(ctx, Terminator::Goto(cond_id));
 
-    ctx.loop_stack.push((cond_id, exit_id));
+    ctx.loop_stack.push((cond_id, exit_id, None));
 
     // cond
     ctx.new_block(cond_id, f_s.span.clone());
@@ -497,7 +504,7 @@ fn lower_while_stmt(w: &HirWhile, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>
 
     finish_block(ctx, Terminator::Goto(cond_id));
 
-    ctx.loop_stack.push((cond_id, exit_id));
+    ctx.loop_stack.push((cond_id, exit_id, None));
 
     ctx.new_block(cond_id, w.span.clone());
     let cond_val = lower_expr_to_value(&w.condition, ctx, diags);
@@ -520,7 +527,7 @@ fn lower_loop_stmt(l: &HirLoop, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) 
     let exit_id = ctx.next_block_id();
 
     finish_block(ctx, Terminator::Goto(body_id));
-    ctx.loop_stack.push((body_id, exit_id)); // cond = body (loop always enters body)
+    ctx.loop_stack.push((body_id, exit_id, None)); // cond = body (loop always enters body)
 
     ctx.new_block(body_id, l.body.span.clone());
     lower_block(&l.body, ctx, diags);
@@ -533,9 +540,15 @@ fn lower_loop_stmt(l: &HirLoop, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) 
 }
 
 fn lower_forof_stmt(f: &HirForOf, ctx: &mut LowerCtx, _diags: &mut Vec<DiagError>) {
+    // §3.2.1 K6 fix: for-of 降级为单次迭代 + 条件出口，避免死循环。
+    // Phase 1 简化：不实现完整迭代器协议，使用计数标记控制迭代次数。
     let iter_val = lower_expr_to_value(&f.iterator, ctx, _diags);
-    let _iter_tmp = ctx.next_tmp();
-    ctx.emit(TirOp::Let(_iter_tmp, iter_val, f.span.clone()));
+    let iter_tmp = ctx.next_tmp();
+    ctx.emit(TirOp::Let(iter_tmp, iter_val, f.span.clone()));
+
+    // 迭代计数标记（Phase 1 简化：迭代恰好 1 次）
+    let count_tmp = ctx.next_tmp();
+    ctx.emit(TirOp::Let(count_tmp, TirValue::IntLiteral(1), f.span.clone()));
 
     let cond_id = ctx.next_block_id();
     let body_id = ctx.next_block_id();
@@ -543,14 +556,22 @@ fn lower_forof_stmt(f: &HirForOf, ctx: &mut LowerCtx, _diags: &mut Vec<DiagError
 
     finish_block(ctx, Terminator::Goto(cond_id));
 
-    ctx.loop_stack.push((cond_id, exit_id));
+    ctx.loop_stack.push((cond_id, exit_id, None));
 
+    // cond_block: 检查 count_tmp > 0 → 进入 body，否则 exit
     ctx.new_block(cond_id, f.span.clone());
-    // Phase 1: simplified — directly enters body
-    finish_block(ctx, Terminator::Goto(body_id));
+    let zero_tmp = ctx.next_tmp();
+    ctx.emit(TirOp::Let(zero_tmp, TirValue::IntLiteral(0), f.span.clone()));
+    let cond_tmp = ctx.next_tmp();
+    ctx.emit(TirOp::Binary(cond_tmp, TirValue::Var(count_tmp), BinOp::Gt, TirValue::Var(zero_tmp), f.span.clone()));
+    finish_block(ctx, Terminator::If(cond_tmp, body_id, exit_id));
 
     ctx.new_block(body_id, f.body.span.clone());
-    // Register iterator item
+    // 递减计数 → 第二次迭代时 count=0，条件为假退出
+    let dec_tmp = ctx.next_tmp();
+    ctx.emit(TirOp::Binary(dec_tmp, TirValue::Var(count_tmp), BinOp::Sub, TirValue::IntLiteral(1), f.span.clone()));
+    ctx.emit(TirOp::Let(count_tmp, TirValue::Var(dec_tmp), f.span.clone()));
+    // 注册迭代元素（Phase 1 简化：元素即迭代器引用）
     let item_tmp = ctx.next_tmp();
     ctx.map.insert(item_tmp, &f.item, f.span.clone());
     lower_block(&f.body, ctx, _diags);
@@ -618,7 +639,7 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
 
             let body_id = ctx.next_block_id();
             finish_block(ctx, Terminator::Goto(body_id));
-            ctx.loop_stack.push((body_id, exit_id));
+            ctx.loop_stack.push((body_id, exit_id, Some(result_tmp)));
 
             ctx.new_block(body_id, l.body.span.clone());
             lower_block(&l.body, ctx, diags);
@@ -647,10 +668,25 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
         }
         HirExpr::Call(callee, args, _ty, span) => {
             let c = lower_expr_to_value(callee, ctx, diags);
-            let targs: Vec<TirArg> = args.iter().map(|a| TirArg {
-                mode: a.mode,
-                value: lower_expr_to_value(&a.expr, ctx, diags),
-                span: a.span.clone(),
+            let targs: Vec<TirArg> = args.iter().map(|a| {
+                let val = lower_expr_to_value(&a.expr, ctx, diags);
+                // §3.2.2 K2 fix: move 实参需要 emit TirOp::Move，让 moveck 检测所有权转移
+                let call_val = if a.mode == ParamMode::Move {
+                    if let TirValue::Var(src) = &val {
+                        let dst = ctx.next_tmp();
+                        ctx.emit(TirOp::Move(dst, *src, a.span.clone()));
+                        TirValue::Var(dst)
+                    } else {
+                        val // 字面量等不需要 Move
+                    }
+                } else {
+                    val
+                };
+                TirArg {
+                    mode: a.mode,
+                    value: call_val,
+                    span: a.span.clone(),
+                }
             }).collect();
             let result_tmp = ctx.next_tmp();
             ctx.emit(TirOp::Call(Some(result_tmp), c, targs, span.clone()));
@@ -675,31 +711,91 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
                 TirValue::Var(tmp)
             }
         }
-        HirExpr::ArrowFn(params, _ret, body, is_move, _span) => {
-            // §3.2.4 闭包捕获提升:
-            // 1. 扫描 body 中引用的外部变量（不在 params 中的 Ident）
-            // 2. 默认闭包 → BorrowKind::Shared，move 闭包 → BorrowKind::Mutable
-            // 3. 将捕获变量加入 captured_vars，生成隐式参数
-
-            // Phase 1 简化：闭包降级为内联块 (ArrowFn body 作为 Block 处理)
-            // 捕获变量扫描在 name_res 阶段已完成（HirBinding 已解析）
-            // captured_vars 暂存外部引用的 TmpVar 映射
+        HirExpr::ArrowFn(params, ret_ty, body, is_move, span) => {
+            // §3.2.4 K5 fix: 闭包生成独立 TirFunction + 捕获变量提升为隐式参数。
+            // 注意：当前 name_res 阶段可能将闭包提升为 HirItem，此时本分支不会被触发。
             let kind = if *is_move { BorrowKind::Mutable } else { BorrowKind::Shared };
 
-            // 扫描 body 中的 Ident，查找外部变量
+            // 扫描 body 中的外部变量引用
             let mut captured = Vec::new();
             collect_free_vars(body, params, &ctx.map, &mut captured, kind);
 
-            // 为每个捕获变量在 var_map 中注册（确保 moveck/borrowck 可见）
+            // 生成唯一闭包名
+            let closure_name = format!("$closure_{}", ctx.closure_counter);
+            ctx.closure_counter += 1;
+
+            // 创建独立 LowerCtx 降级闭包体
+            let mut cctx = LowerCtx::new();
+            // 注册闭包自身参数
+            for p in params {
+                let tmp = cctx.next_tmp();
+                cctx.map.insert(tmp, &p.name, p.span.clone());
+            }
+            // 注册捕获的外部变量为隐式参数
             for cv in &captured {
-                if let Some(_existing) = ctx.map.lookup_name(&cv.name) {
-                    ctx.map.insert(cv.tmp, &cv.name, ctx.blocks[ctx.cur_block].span.clone());
-                }
+                let tmp = cctx.next_tmp();
+                cctx.map.insert(tmp, &cv.name, span.clone());
             }
 
-            // 返回哨兵值（闭包的实际 TirFunction 在后续实现中单独生成）
-            // Phase 1: 闭包体作为内联表达式处理，不生成独立 TirFunction
-            TirValue::Error
+            let entry_id = cctx.next_block_id();
+            let exit_id = cctx.next_block_id();
+            cctx.entry = entry_id;
+            cctx.exit = exit_id;
+
+            cctx.new_block(entry_id, span.clone());
+            lower_block(body, &mut cctx, diags);
+
+            // 确保入口块有终结指令
+            if matches!(cctx.blocks[entry_id].terminator, Terminator::Unreachable) {
+                cctx.blocks[entry_id].terminator = Terminator::Return(None);
+            }
+
+            let closure_blocks: Vec<BasicBlock> = (0..cctx.next_id)
+                .map(|id| {
+                    if id < cctx.blocks.len() {
+                        cctx.blocks[id].clone()
+                    } else {
+                        BasicBlock {
+                            id,
+                            ops: vec![],
+                            terminator: Terminator::Unreachable,
+                            span: span.clone(),
+                        }
+                    }
+                })
+                .collect();
+
+            // 构建闭包参数：自身参数 + 捕获变量
+            let mut all_params: Vec<HirParam> = params.clone();
+            for cv in &captured {
+                all_params.push(HirParam {
+                    name: cv.name.clone(),
+                    ty: HirType::Error, // Phase 1: 类型由父上下文推断
+                    mode: match cv.kind {
+                        BorrowKind::Shared => ParamMode::Default,
+                        BorrowKind::Mutable => ParamMode::Move, // FnOnce 语义
+                    },
+                    span: span.clone(),
+                });
+            }
+
+            let closure_func = TirFunction {
+                name: closure_name.clone(),
+                params: all_params,
+                return_type: ret_ty.clone(),
+                lifetime_params: vec![],
+                entry_block: entry_id,
+                blocks: closure_blocks,
+                tmp_counter: cctx.tmp_counter,
+                captured_vars: captured,
+                var_map: cctx.map.clone(),
+                span: span.clone(),
+            };
+
+            ctx.closures.push(closure_func);
+
+            // 返回闭包引用（codegen 据此生成 Rust 闭包）
+            TirValue::Function(closure_name)
         }
         HirExpr::TemplateLiteral(parts, _span) => {
             // Simple: concatenate literal parts
@@ -841,8 +937,13 @@ struct LowerCtx {
     entry: BlockId,
     exit: BlockId,
     map: VarMapping,
-    /// (cond_id, exit_id) — Break/Continue 跳转目标
-    loop_stack: Vec<(BlockId, BlockId)>,
+    /// (cond_id, exit_id, result_tmp) — Break/Continue 跳转目标。
+    /// result_tmp 仅在表达式级 loop 中有值（用于 break 带返回值）。
+    loop_stack: Vec<(BlockId, BlockId, Option<TmpVar>)>,
+    /// 闭包计数器——为每个闭包生成唯一名称
+    closure_counter: u32,
+    /// K5 fix: 闭包降级产出的独立 TirFunction 列表
+    closures: Vec<TirFunction>,
 }
 
 impl LowerCtx {
@@ -856,6 +957,8 @@ impl LowerCtx {
             exit: 0,
             map: VarMapping::new(),
             loop_stack: vec![],
+            closure_counter: 0,
+            closures: vec![],
         }
     }
 
@@ -922,8 +1025,9 @@ mod tests {
             span: Span::dummy(),
         };
         let mut diags = vec![];
-        let tf = lower_function(&f, &mut diags);
+        let (tf, closures) = lower_function(&f, &mut diags);
         assert!(diags.is_empty());
+        assert!(closures.is_empty());
         assert_eq!(tf.name, "empty");
         assert!(tf.blocks.len() >= 1);
     }
@@ -966,8 +1070,9 @@ mod tests {
             span: Span::dummy(),
         };
         let mut diags = vec![];
-        let tf = lower_function(&f, &mut diags);
+        let (tf, closures) = lower_function(&f, &mut diags);
         assert!(diags.is_empty(), "diags: {:?}", diags);
+        assert!(closures.is_empty());
         // 应该有 ≥5 个基本块：entry + cond + then + else + join
         assert!(tf.blocks.len() >= 5, "blocks: {}", tf.blocks.len());
     }
