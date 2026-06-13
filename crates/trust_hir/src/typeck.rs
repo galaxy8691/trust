@@ -105,7 +105,7 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
         HirStmt::Const(c) => {
             check_expr(&mut c.init, scope, diagnostics, fn_return_type);
-            let mut init_ty = expr_type(&c.init);
+            let init_ty = expr_type(&c.init);
             // §3.3.2 number+F64 adjustment (same as let)
             if c.ty == HirType::I32 && init_ty == HirType::F64 {
                 c.ty = HirType::F64;
@@ -116,7 +116,7 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
         HirStmt::Shared(s) => {
             check_expr(&mut s.init, scope, diagnostics, fn_return_type);
-            let mut init_ty = expr_type(&s.init);
+            let init_ty = expr_type(&s.init);
             // §3.3.2 number+F64 adjustment (same as let)
             if s.ty == HirType::I32 && init_ty == HirType::F64 {
                 s.ty = HirType::F64;
@@ -422,7 +422,7 @@ pub fn check_binary_op(
             // 禁止 Bool 排序比较
             if *lhs == HirType::Bool {
                 diagnostics.push(DiagError::new(
-                    format!("cannot compare booleans with ordering operators (use `==` or `!=`)"),
+                    "cannot compare booleans with ordering operators (use `==` or `!=`)".to_string(),
                     span,
                 ));
                 return Err(());
@@ -688,11 +688,6 @@ fn collect_break_info(block: &HirBlock, types: &mut Vec<HirType>, has_bare: &mut
             _ => {}
         }
     }
-}
-
-fn collect_break_types(block: &HirBlock, types: &mut Vec<HirType>) {
-    let mut _bare = false;
-    collect_break_info(block, types, &mut _bare);
 }
 
 fn infer_if_type(if_s: &HirIf) -> HirType {

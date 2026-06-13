@@ -646,7 +646,7 @@ fn lower_imports(
         let mut bindings: Vec<(String, HirBinding)> = Vec::new();
 
         // 提取导入的符号名
-        let names: Vec<String> = match &imp.kind {
+        let _names: Vec<String> = match &imp.kind {
             ast::ImportKind::Named(names) => names.clone(),
             ast::ImportKind::Default(name) => vec![name.clone()],
             ast::ImportKind::Namespace(name) => vec![name.clone()],
@@ -671,7 +671,7 @@ fn lower_imports(
                     let is_requested = match &imp.kind {
                         ast::ImportKind::Named(req_names) => req_names.contains(&export_name),
                         ast::ImportKind::Namespace(_) => true,
-                        ast::ImportKind::Default(_) => export.default || export_name == names[0],
+                        ast::ImportKind::Default(_) => export.default,
                     };
 
                     if is_requested {
