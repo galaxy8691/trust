@@ -81,47 +81,63 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
             check_expr(&mut let_s.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&let_s.init);
             // §3.3.2: `let x: number = 3.14` → HirType::F64（类型标注覆盖字面量推断）
-            // from_ast_type 将 NumberType 默认降级为 I32；此处根据 init 修正为 F64
             if let_s.ty == HirType::I32 && init_ty == HirType::F64 {
                 let_s.ty = HirType::F64;
             }
-            // 类型标注兼容性检查
-            if let_s.ty != HirType::Error
+
+            let was_unannotated = let_s.ty == HirType::Error;
+            let mismatched = let_s.ty != HirType::Error
                 && init_ty != HirType::Error
-                && !types_compatible(&let_s.ty, &init_ty)
-            {
+                && !types_compatible(&let_s.ty, &init_ty);
+
+            if mismatched {
                 diagnostics.push(DiagError::new(
-                    format!(
-                        "type mismatch: expected `{}`, found `{}`",
-                        let_s.ty, init_ty
-                    ),
+                    format!("type mismatch: expected `{}`, found `{}`", let_s.ty, init_ty),
                     let_s.span.clone(),
                 ));
                 let_s.ty = HirType::Error;
-            }
-            if let_s.ty == HirType::Error && init_ty != HirType::Error {
+            } else if was_unannotated && init_ty != HirType::Error {
+                // 只有原本无类型标注时才从 init 推断——类型不匹配后不应覆盖 Error 哨兵
                 let_s.ty = init_ty;
             }
         }
         HirStmt::Const(c) => {
             check_expr(&mut c.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&c.init);
-            // §3.3.2 number+F64 adjustment (same as let)
             if c.ty == HirType::I32 && init_ty == HirType::F64 {
                 c.ty = HirType::F64;
             }
-            if c.ty == HirType::Error && init_ty != HirType::Error {
+            let was_unannotated = c.ty == HirType::Error;
+            let mismatched = c.ty != HirType::Error
+                && init_ty != HirType::Error
+                && !types_compatible(&c.ty, &init_ty);
+            if mismatched {
+                diagnostics.push(DiagError::new(
+                    format!("type mismatch: expected `{}`, found `{}`", c.ty, init_ty),
+                    c.span.clone(),
+                ));
+                c.ty = HirType::Error;
+            } else if was_unannotated && init_ty != HirType::Error {
                 c.ty = init_ty;
             }
         }
         HirStmt::Shared(s) => {
             check_expr(&mut s.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&s.init);
-            // §3.3.2 number+F64 adjustment (same as let)
             if s.ty == HirType::I32 && init_ty == HirType::F64 {
                 s.ty = HirType::F64;
             }
-            if s.ty == HirType::Error && init_ty != HirType::Error {
+            let was_unannotated = s.ty == HirType::Error;
+            let mismatched = s.ty != HirType::Error
+                && init_ty != HirType::Error
+                && !types_compatible(&s.ty, &init_ty);
+            if mismatched {
+                diagnostics.push(DiagError::new(
+                    format!("type mismatch: expected `{}`, found `{}`", s.ty, init_ty),
+                    s.span.clone(),
+                ));
+                s.ty = HirType::Error;
+            } else if was_unannotated && init_ty != HirType::Error {
                 s.ty = init_ty;
             }
         }
