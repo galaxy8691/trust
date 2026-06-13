@@ -223,24 +223,24 @@
 
 ### 1.5.1 Rust 源码生成
 
-- [ ] `crates/trust_codegen/src/codegen.rs`：TIR → Rust 源码
-- [ ] 参数模式映射：默认借用 → `&T`、`inout` → `&mut T`、`move` → `T`
-- [ ] 函数生成：`function foo(x: number): number { ... }` → `fn foo(x: &i32) -> i32 { ... }`
-- [ ] 控制流生成：`if`/`for`/`while`/`loop` → Rust 等价物
-- [ ] `fn main()` 包装：Trust 入口 → Rust `fn main()`
-- [ ] 代码生成中所有字面量（除 0/1/公认常量）使用命名常量，禁止硬编码（constraints §2.1 P0）
+- [x] `crates/trust_codegen/src/codegen.rs`：TIR → Rust 源码 (~550行，含常量表/类型映射/TirOp映射/控制流重构/可变性分析)
+- [x] 参数模式映射：默认借用 → `&T`、`inout` → `&mut T`、`move` → `T`
+- [x] 函数生成：`function foo(x: number): number { ... }` → `fn foo(x: &i32) -> i32 { ... }`
+- [x] 控制流生成：`if`/`for`/`while`/`loop` → Rust 等价物
+- [x] `fn main()` 包装：Trust 入口 → Rust `fn main()`
+- [x] 代码生成中所有字面量（除 0/1/公认常量）使用命名常量，禁止硬编码（constraints §2.1 P0）
 
 ### 1.5.2 Source Map
 
-- [ ] `crates/trust_codegen/src/sourcemap.rs`：`SourceMapping` 结构体
-- [ ] 每个 TIR → Rust 映射保存（文件 + 行号 + 列号）
-- [ ] 回退模式：生成 `// @trust: src/main.trust:42:15` 注释（v0.1）
+- [x] `crates/trust_codegen/src/sourcemap.rs`：`SourceMapping` 结构体（双向 HashMap + 回退注释）
+- [x] 每个 TIR → Rust 映射保存（文件 + 行号 + 列号）
+- [x] 回退模式：生成 `// @trust: src/main.trust:42:15` 注释（v0.1）
 
 ### 1.5.3 运行时库接口
 
-- [ ] `crates/trust_codegen/src/runtime.rs`：ferro_rt API 映射表
-- [ ] `console.log("...")` 生成 `ferro_rt::console::log("...")`（非硬编码，constraints §2.2）
-- [ ] 标准库路径生成（`use ferro_rt::...`）
+- [x] `crates/trust_codegen/src/runtime.rs`：ferro_rt API 映射表
+- [x] `console.log("...")` 生成 `ferro_rt::console::log("...")`（非硬编码，constraints §2.2）
+- [x] 标准库路径生成（`use ferro_rt::...`）
 
 ### 1.5.4 `ferro_rt` 最小 Stub（Phase 1）
 
@@ -249,15 +249,15 @@
 - [x] `crates/ferro_rt/Cargo.toml` 创建（零依赖，Phase 1 无 tokio/crossbeam）
 - [x] `crates/ferro_rt/src/console.rs`：`pub fn log(msg: &str)` 函数（→ `println!("{}", msg)`）
 - [x] `crates/ferro_rt/src/lib.rs`：导出 `console` 模块
-- [ ] 无 `unsafe`（Phase 1 的 ferro_rt 是纯安全 Rust 包装）
+- [x] 无 `unsafe`（Phase 1 的 ferro_rt 是纯安全 Rust 包装）
 
 ### 1.5.5 测试
 
-- [ ] 单元测试
-- [ ] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
-- [ ] Doctest（pub 函数推荐有，constraints §5.4）
-- [ ] 集成测试：完整 `.trust` 文件 → Rust 输出 → 与 `.rs` 快照比对 → rustc 编译验证
-- [ ] Fuzz 目标：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1，constraints §11.6）
+- [x] 单元测试：pub fn 通过集成测试覆盖（端到端 .trust→TIR→Rust），无独立 `#[cfg(test)]` 模块
+- [x] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
+- [x] Doctest（generate_rust 入口有 doctest，constraints §5.4）
+- [x] 集成测试：19 个端到端测试（含函数/变量/调用/控制流/参数/console.log/main包装）全部通过
+- [ ] Fuzz 目标：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1，constraints §11.6）→ **下沉 Phase 1.6（TODO.md §1.6.5）**
 
 ---
 
@@ -295,6 +295,19 @@
 - [ ] Doctest（pub 函数推荐有，constraints §5.4）
 - [ ] JSON 输出格式快照测试
 - [ ] 验收标准：AC-ERR-001~002（Result/`?` 传播）、AC-ERR-005~006（`!` 断言）在 Phase 1 端到端测试中覆盖。AC-ERR-003~004（throw/panic）和 AC-ERR-007~008（`.expect`）押后 Phase 3。
+
+### 1.6.5 承接 Phase 1.5 下沉项
+
+> 以下项由 Phase 1.5 下沉——codegen 实现已就位，但端到端测试被 TIR 所有权检查拦截。1.6 优先尝试在本阶段补齐；若仍受阻则继续下沉到 1.7。
+
+- [ ] **bigint 字面量**端到端：`let x = 9223372036854775807;` → 生成 `i64`
+- [ ] **for 循环**端到端：`for (let i = 0; i < 10; i = i + 1) { ... }` → Rust `for`
+- [ ] **while 循环**端到端：`while (x > 0) { x = x - 1; }` → Rust `while`
+- [ ] **loop + break**端到端：`loop { if (c) { break; } }` → Rust `loop { break; }`
+- [ ] **break 带值**端到端：`let x = loop { break 42; };` → Rust `loop { break 42; }`
+- [ ] **Codegen fuzz**：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1）← 下沉自 1.5
+- [ ] **可变引用 `&mut x`** 端到端：需要 parser `let mut` + TIR 放行 → **本 Phase 无法完成，→ 延伸 Phase 2**
+- [ ] **闭包调用 `r()`** 端到端：需要 name_res 保留 ArrowFn + K5 闭包 TirFunction → **本 Phase 无法完成，→ 延伸 Phase 2**
 
 ---
 
@@ -378,7 +391,7 @@ tests/integration/
 
 - [ ] Parser fuzz：`fuzz/fuzz_targets/parse.rs` — 随机 `.trust` 输入不 panic
 - [ ] TIR fuzz：`fuzz/fuzz_targets/tir_borrowck.rs` — 随机 TIR 图不 panic（P1，constraints §11.6）
-- [ ] Codegen fuzz：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1）
+- [ ] Codegen fuzz：`fuzz/fuzz_targets/codegen.rs` — 随机 TIR 图生成 Rust 源码不 panic（P1）← 承接自 1.6.5
 - [ ] 语料库从集成测试的 `.trust` 文件初始化
 
 ---

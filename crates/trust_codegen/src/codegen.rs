@@ -8,6 +8,7 @@ use trust_hir::hir::*;
 use trust_parser::ast::Span;
 use trust_tir::tir::*;
 
+use crate::runtime;
 use crate::sourcemap::SourceMapping;
 
 // ============================================================================
@@ -147,8 +148,8 @@ impl GenCtx {
     }
 
     /// 记录 Source Map 映射
-    fn record_span(&mut self, _span: &Span) {
-        // 记录 Trust 源码位置 → 当前 Rust 输出位置
+    fn record_span(&mut self, span: &Span) {
+        self.source_map.insert(span, self.current_line, self.current_col);
     }
 
     /// 获取 TmpVar 的 Rust 变量名（缓存）
@@ -169,7 +170,16 @@ impl GenCtx {
 // §3.1.1: 类型映射
 // ============================================================================
 
-/// 将 HirType 映射为 Rust 类型字符串
+/// §3.1.1: 将 HirType 映射为 Rust 类型字符串（N3 fix: 补齐章引 + doctest）
+///
+/// ```
+/// # use trust_hir::hir::HirType;
+/// # use trust_codegen::codegen::hir_type_to_rust;
+/// assert_eq!(hir_type_to_rust(&HirType::I32), "i32");
+/// assert_eq!(hir_type_to_rust(&HirType::F64), "f64");
+/// assert_eq!(hir_type_to_rust(&HirType::Bool), "bool");
+/// assert_eq!(hir_type_to_rust(&HirType::Void), "()");
+/// ```
 pub fn hir_type_to_rust(ty: &HirType) -> &'static str {
     match ty {
         HirType::I32 => TYPE_I32,
@@ -200,16 +210,37 @@ pub fn hir_type_to_rust(ty: &HirType) -> &'static str {
 /// let result = generate_rust(&program);
 /// assert!(result.is_ok());
 /// ```
-pub fn generate_rust(tir: &TirProgram) -> Result<String, Vec<CodegenError>> {
+/// §设计文档 §7.1 / spec SEM-REQ-005: TIR → Rust 源码生成入口
+///
+/// 返回生成的 Rust 源码和 Source Map 映射表（N5 fix: SourceMapping 对外暴露）。
+///
+/// ```
+/// # use trust_tir::tir::TirProgram;
+/// # use trust_codegen::codegen::generate_rust;
+/// let program = TirProgram { file: String::new(), functions: vec![] };
+/// let result = generate_rust(&program);
+/// assert!(result.is_ok());
+/// let (_code, source_map) = result.unwrap();
+/// assert!(source_map.trust_to_rust.is_empty());
+/// ```
+pub fn generate_rust(tir: &TirProgram) -> Result<(String, SourceMapping), Vec<CodegenError>> {
     let mut errors = Vec::new();
     let mut output = String::new();
     let mut needs_console = false;
+    let mut combined_map = SourceMapping::new();
 
     for func in &tir.functions {
-        let (rust_code, uses_console, mut func_errors) = generate_function(func);
+        let (rust_code, uses_console, mut func_errors, func_map) = generate_function(func);
         errors.append(&mut func_errors);
         if uses_console {
             needs_console = true;
+        }
+        // 合并 Source Map
+        for (k, v) in func_map.trust_to_rust {
+            combined_map.trust_to_rust.insert(k, v);
+        }
+        for (k, v) in func_map.rust_to_trust {
+            combined_map.rust_to_trust.insert(k, v);
         }
         output.push_str(&rust_code);
         output.push('\n');
@@ -219,45 +250,49 @@ pub fn generate_rust(tir: &TirProgram) -> Result<String, Vec<CodegenError>> {
         return Err(errors);
     }
 
-    // 生成 fn main() 包装
-    let main_body = generate_main_wrapper(tir, needs_console);
+    // A3 fix: use 注入在第一个函数之前，而非文件末尾
+    if needs_console {
+        let import_line = runtime::emit_console_import();
+        if let Some(pos) = output.find("fn ") {
+            output.insert_str(pos, &import_line);
+        } else {
+            output.insert_str(0, &import_line);
+        }
+    }
+
+    // 生成 fn main() 包装（不再负责 use 注入）
+    let main_body = generate_main_wrapper(tir);
     output.push_str(&main_body);
 
-    Ok(output)
+    Ok((output, combined_map))
 }
 
 // ============================================================================
 // §3.1.5: fn main() 包装 (K8/K20 fix)
 // ============================================================================
 
-fn generate_main_wrapper(tir: &TirProgram, needs_console: bool) -> String {
-    let mut out = String::new();
-
-    // 检查是否已有用户定义的 main
+/// §3.1.5: 生成 fn main() 包装（N1 fix: 常量化）
+fn generate_main_wrapper(tir: &TirProgram) -> String {
     let has_user_main = tir.functions.iter().any(|f| f.name == "main");
-
     if !has_user_main {
-        if needs_console {
-            out.push_str("use ferro_rt::console;\n\n");
-        }
-        out.push_str("fn main() {\n}\n");
-    } else if needs_console {
-        // 用户定义了 main，但 console 使用是隐式的——在文件顶部加 use
-        // 简化处理：在第一个函数前插入 use
-        let full = String::from("use ferro_rt::console;\n\n");
-        // 实际的 use 插入由 generate_rust 在函数前处理
-        // 这里只标记需要
-        out.push_str(&full);
+        format!(
+            "{fn_kw} main{lp}{rp} {lb}\n{rb}\n",
+            fn_kw = FN_KEYWORD,
+            lp = LPAREN,
+            rp = RPAREN,
+            lb = LBRACE.trim_end(),
+            rb = RBRACE,
+        )
+    } else {
+        String::new()
     }
-
-    out
 }
 
 // ============================================================================
 // §3.1.2-3.1.4: 函数生成 — 含 TirOp 映射 + 控制流重构
 // ============================================================================
 
-fn generate_function(func: &TirFunction) -> (String, bool, Vec<CodegenError>) {
+fn generate_function(func: &TirFunction) -> (String, bool, Vec<CodegenError>, SourceMapping) {
     let mut errors = Vec::new();
     let mut ctx = GenCtx::new(func.blocks.clone());
 
@@ -291,7 +326,7 @@ fn generate_function(func: &TirFunction) -> (String, bool, Vec<CodegenError>) {
     ctx.indent_level -= 1;
     ctx.write_line(RBRACE);
 
-    (ctx.output, uses_console, errors)
+    (ctx.output, uses_console, errors, ctx.source_map)
 }
 
 // ============================================================================
@@ -414,7 +449,8 @@ fn func_uses_console(func: &TirFunction) -> bool {
     for block in &func.blocks {
         for op in &block.ops {
             if let TirOp::Call(_, TirValue::Function(name), _, _) = op {
-                if name == "console.log" || name.contains("console") {
+                // N4 fix: 精确匹配 console.log，避免 contains 误匹配 my_console_helper
+                if name == "console.log" || name == "console" {
                     return true;
                 }
             }
@@ -569,16 +605,16 @@ fn emit_block(
                 "{if_kw} ({cond}) {lbrace}",
                 if_kw = IF_KEYWORD,
                 cond = cond_name,
-                lbrace = " {"
+                lbrace = LBRACE.trim_end()
             ));
             ctx.indent_level += 1;
             emit_block(*then_id, func, ctx, errors);
             ctx.indent_level -= 1;
-            ctx.write_line(&format!("{rbrace} {else_kw} {lbrace}", rbrace = "}", else_kw = ELSE_KEYWORD, lbrace = "{"));
+            ctx.write_line(&format!("{rbrace} {else_kw} {lbrace}", rbrace = RBRACE, else_kw = ELSE_KEYWORD, lbrace = LBRACE.trim_end()));
             ctx.indent_level += 1;
             emit_block(*else_id, func, ctx, errors);
             ctx.indent_level -= 1;
-            ctx.write_line("}");
+            ctx.write_line(RBRACE);
         }
         Terminator::Return(val) => {
             match val {
@@ -650,7 +686,7 @@ fn emit_op(
                 let_kw = LET_KEYWORD, dst = dst_name, op = op_str, val = val_str));
         }
 
-        TirOp::Call(dst, callee, args, span) => {
+        TirOp::Call(dst, callee, args, _span) => {
             let callee_str = emit_call_target(callee, func, ctx);
             let args_str: Vec<String> = args
                 .iter()
@@ -658,13 +694,21 @@ fn emit_op(
                 .collect();
             let call_expr = format!("{}({})", callee_str, args_str.join(", "));
 
-            // 检查 console.log → 使用运行时映射
+            // A2 fix: 使用 runtime.rs 常量和函数，禁止硬编码 replace
             let call_code = if let TirValue::Function(name) = callee {
                 if name == "console.log" || name.contains("console.log") {
                     ctx.needs_console_use = true;
-                    // 映射到 ferro_rt::console::log
-                    let mapped = call_expr.replace("console.log", "ferro_rt::console::log");
-                    mapped
+                    // 使用 runtime 模块的路径常量和映射函数
+                    if args.len() == 1 {
+                        if let TirValue::StringLiteral(s) = &args[0].value {
+                            crate::runtime::emit_console_log(s)
+                        } else {
+                            let expr = emit_value(&args[0].value, func, ctx);
+                            crate::runtime::emit_console_log_expr(&expr)
+                        }
+                    } else {
+                        call_expr // Fallback: 多参数暂不支持
+                    }
                 } else {
                     call_expr
                 }
@@ -689,7 +733,7 @@ fn emit_op(
             let val_str = emit_value(val, func, ctx);
             let ty_str = hir_type_to_rust(ty);
             ctx.write_line(&format!("{let_kw} {dst} = {val} {as_kw} {ty};",
-                let_kw = LET_KEYWORD, dst = dst_name, val = val_str, as_kw = "as", ty = ty_str));
+                let_kw = LET_KEYWORD, dst = dst_name, val = val_str, as_kw = AS_KEYWORD.trim(), ty = ty_str));
         }
 
         TirOp::Nop(_) => {
@@ -706,9 +750,20 @@ fn emit_value(val: &TirValue, func: &TirFunction, ctx: &mut GenCtx) -> String {
     match val {
         TirValue::Var(tmp) => ctx.var_name(*tmp),
         TirValue::IntLiteral(v) => v.to_string(),
-        TirValue::FloatLiteral(v) => format!("{:.1}", v),
+        TirValue::FloatLiteral(v) => {
+            // C5 fix: 完整精度，使用 Rust 默认 Display
+            if v.fract() == 0.0 {
+                format!("{:.1}", v)
+            } else {
+                v.to_string()
+            }
+        }
         TirValue::BigIntLiteral(v) => v.to_string(),
-        TirValue::StringLiteral(s) => format!("\"{}\"", s),
+        TirValue::StringLiteral(s) => {
+            // C6 fix: 转义特殊字符
+            let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("\"{}\"", escaped)
+        }
         TirValue::BoolLiteral(b) => {
             if *b {
                 TRUE_LITERAL.to_string()
@@ -743,8 +798,8 @@ fn emit_call_target(callee: &TirValue, func: &TirFunction, ctx: &mut GenCtx) -> 
 fn emit_call_arg(arg: &TirArg, func: &TirFunction, ctx: &mut GenCtx) -> String {
     let val = emit_value(&arg.value, func, ctx);
     match arg.mode {
-        ParamMode::Default => format!("&{}", val),
-        ParamMode::InOut => format!("&mut {}", val),
+        ParamMode::Default => format!("{}{}", REF_OP, val),
+        ParamMode::InOut => format!("{}{}", MUT_REF_OP.trim_end(), val),
         ParamMode::Move => val,
     }
 }

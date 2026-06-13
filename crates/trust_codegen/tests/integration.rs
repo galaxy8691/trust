@@ -37,7 +37,7 @@ fn run_pipeline(src: &str) -> (TirProgram, String) {
         panic!("TIR ownership check failed");
     }
 
-    let rust_code = generate_rust(&tir).unwrap_or_else(|e| {
+    let (rust_code, _source_map) = generate_rust(&tir).unwrap_or_else(|e| {
         eprintln!("codegen errors: {:?}", e);
         panic!("codegen failed");
     });
@@ -134,14 +134,7 @@ fn gen_borrow_shared() {
 }
 
 #[test]
-fn gen_borrow_mutable() {
-    // 验证 codegen 能生成 mut 关键字（for 循环 init 变量为隐式可变）
-    // 注意：Phase 1 所有权检查可能拒绝某些场景，此处仅验证 codegen 语法输出
-    let src = "function f(): void {}";
-    let (_tir, rust) = run_pipeline(src);
-    // 可变性分析确保变量正确标记 mut（在需要时由 K4 首遍扫描处理）
-    assert!(rust.contains("fn f"), "should have function: {}", rust);
-}
+// N2 fix: 原 gen_borrow_shared (L130) 与本测试重复，删除此重复测试
 
 #[test]
 fn gen_binary_op() {
@@ -227,18 +220,19 @@ fn gen_empty_main_wrapper() {
 }
 
 #[test]
-fn rustc_compile_simple() {
-    // Phase 1: rustc 版本 / ferro_rt 链接路径差异可能导致编译失败。
-    // 跳过实际 rustc 编译，仅验证 codegen 产出语法正确的 Rust。
+fn gen_main_wrapper_present() {
+    // B3 fix: 原 rustc_compile_simple 名误导（不做实际 rustc 编译）。
+    // 重命名为 gen_main_wrapper_present，验证 fn main() 包装生成。
     let src = "function main(): void {}";
     let (_tir, rust) = run_pipeline(src);
     assert!(rust.contains("fn main"), "should have fn main: {}", rust);
     assert!(rust.contains("{"), "should have braces");
-    // verify_compiles(&rust) — 需要 cargo build ferro_rt 先，跳过
 }
 
 #[test]
-fn rustc_compile_console_log() {
+fn gen_console_log_mapping() {
+    // B3 fix: 原 rustc_compile_console_log 名误导。
+    // 重命名为 gen_console_log_mapping，验证 console.log → ferro_rt 映射。
     let src = "function main(): void { console.log(\"hello\"); }";
     let (_tir, rust) = run_pipeline(src);
     assert!(
@@ -246,4 +240,13 @@ fn rustc_compile_console_log() {
         "should map console.log: {}",
         rust
     );
+}
+
+/// A4 fix: 真正验证 rustc 编译（需要 cargo build ferro_rt 先）
+#[test]
+#[ignore = "requires cargo build ferro_rt first"]
+fn verify_rustc_compiles() {
+    let src = "function main(): void { console.log(\"hello\"); }";
+    let (_tir, rust) = run_pipeline(src);
+    assert!(verify_compiles(&rust), "generated code should compile with rustc");
 }
