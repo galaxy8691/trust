@@ -483,24 +483,18 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
             )
         }
 
-        // §3.1.4 降级策略: MemberAccess{ Ident("console"), "log" } → HirExpr::Call
+        // §3.1.4 降级策略: MemberAccess{ Ident("console"), "log" } → Ident
+        // 返回 Ident 使父 Expr::Call 处理器正常接收 args（避免双重 Call 包裹）
         ast::Expr::MemberAccess(ma) => {
             if let ast::Expr::Ident(obj_name) = ma.object.as_ref() {
                 if obj_name == "console" {
-                    // console.log(x) → ferro_rt::console::log(x)
-                    let call_span = ma.span.clone();
-                    return HirExpr::Call(
-                        Box::new(HirExpr::Ident(
-                            "ferro_rt::console::log".into(),
-                            HirBinding::Unresolved {
-                                name: "ferro_rt::console::log".into(),
-                                span: call_span.clone(),
-                            },
-                            call_span.clone(),
-                        )),
-                        vec![],
-                        HirType::Error,
-                        call_span,
+                    return HirExpr::Ident(
+                        "ferro_rt::console::log".into(),
+                        HirBinding::Unresolved {
+                            name: "ferro_rt::console::log".into(),
+                            span: ma.span.clone(),
+                        },
+                        ma.span.clone(),
                     );
                 }
             }
@@ -577,7 +571,7 @@ pub fn resolve_names(
     }
 
     // resolve import 绑定
-    resolve_imports(&hir, &mut module_scope, diagnostics);
+    register_module_bindings(&hir, &mut module_scope, diagnostics);
 
     // 对每个函数做名称解析
     for item in &mut hir.items {
@@ -592,7 +586,7 @@ pub fn resolve_names(
     hir
 }
 
-fn resolve_imports(
+fn register_module_bindings(
     hir: &HirProgram,
     scope: &mut Scope,
     _diagnostics: &mut Vec<DiagError>,

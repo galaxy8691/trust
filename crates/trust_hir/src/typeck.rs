@@ -30,8 +30,26 @@ pub fn check_types(
             HirItem::Function(f) => {
                 check_function(f, diagnostics);
             }
-            HirItem::Const(_c) => { /* Phase 1: const 无额外类型检查 */ }
-            HirItem::Shared(_s) => { /* Phase 1: shared 无额外类型检查 */ }
+            HirItem::Const(c) => {
+                let init_ty = expr_type(&c.init);
+                if c.ty != HirType::Error && init_ty != HirType::Error
+                    && !types_compatible(&c.ty, &init_ty) {
+                    diagnostics.push(DiagError::new(
+                        format!("const type mismatch: expected `{}`, found `{}`", c.ty, init_ty),
+                        c.span.clone(),
+                    ));
+                }
+            }
+            HirItem::Shared(s) => {
+                let init_ty = expr_type(&s.init);
+                if s.ty != HirType::Error && init_ty != HirType::Error
+                    && !types_compatible(&s.ty, &init_ty) {
+                    diagnostics.push(DiagError::new(
+                        format!("shared type mismatch: expected `{}`, found `{}`", s.ty, init_ty),
+                        s.span.clone(),
+                    ));
+                }
+            }
             HirItem::Stub(_) => {}
         }
     }
@@ -44,18 +62,18 @@ pub fn check_types(
 }
 
 fn check_function(func: &mut HirFunction, diagnostics: &mut Vec<DiagError>) {
-    // 创建局部作用域（复用 name_res 建立的 scope）
     let fn_scope = func.scope.clone();
-    check_block(&mut func.body, &fn_scope, diagnostics);
+    let ret_ty = func.return_type.clone();
+    check_block(&mut func.body, &fn_scope, diagnostics, &ret_ty);
 }
 
-fn check_block(block: &mut HirBlock, scope: &Scope, diagnostics: &mut Vec<DiagError>) {
+fn check_block(block: &mut HirBlock, scope: &Scope, diagnostics: &mut Vec<DiagError>, fn_return_type: &HirType) {
     for stmt in &mut block.statements {
-        check_stmt(stmt, scope, diagnostics);
+        check_stmt(stmt, scope, diagnostics, fn_return_type);
     }
 }
 
-fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError>) {
+fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError>, fn_return_type: &HirType) {
     match stmt {
         HirStmt::Let(let_s) => {
             check_expr(&mut let_s.init, scope, diagnostics);
@@ -94,30 +112,42 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
         }
         HirStmt::If(if_s) => {
             check_expr(&mut if_s.condition, scope, diagnostics);
-            check_block(&mut if_s.then_branch, scope, diagnostics);
+            check_block(&mut if_s.then_branch, scope, diagnostics, fn_return_type);
             if let Some(ref mut else_b) = if_s.else_branch {
-                check_block(else_b, scope, diagnostics);
+                check_block(else_b, scope, diagnostics, fn_return_type);
             }
         }
         HirStmt::For(f) => {
+            check_stmt(&mut f.init, scope, diagnostics, fn_return_type);
             check_expr(&mut f.condition, scope, diagnostics);
             check_expr(&mut f.update, scope, diagnostics);
-            check_block(&mut f.body, scope, diagnostics);
+            check_block(&mut f.body, scope, diagnostics, fn_return_type);
         }
         HirStmt::ForOf(f) => {
             check_expr(&mut f.iterator, scope, diagnostics);
-            check_block(&mut f.body, scope, diagnostics);
+            check_block(&mut f.body, scope, diagnostics, fn_return_type);
         }
         HirStmt::While(w) => {
             check_expr(&mut w.condition, scope, diagnostics);
-            check_block(&mut w.body, scope, diagnostics);
+            check_block(&mut w.body, scope, diagnostics, fn_return_type);
         }
         HirStmt::Loop(l) => {
-            check_block(&mut l.body, scope, diagnostics);
+            check_block(&mut l.body, scope, diagnostics, fn_return_type);
         }
         HirStmt::Return(r) => {
             if let Some(ref mut v) = r.value {
                 check_expr(v, scope, diagnostics);
+                let val_ty = expr_type(v);
+                if *fn_return_type != HirType::Error && val_ty != HirType::Error
+                    && !types_compatible(fn_return_type, &val_ty) {
+                    diagnostics.push(DiagError::new(
+                        format!(
+                            "return type mismatch: expected `{}`, found `{}`",
+                            fn_return_type, val_ty
+                        ),
+                        r.span.clone(),
+                    ));
+                }
             }
         }
         HirStmt::Break(b) => {
@@ -244,7 +274,7 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
                     },
                 );
             }
-            check_block(body, &fn_scope, diagnostics);
+            check_block(body, &fn_scope, diagnostics, &HirType::Void);
 
             // 从 body 推断返回类型
             if *ret == HirType::Error {
@@ -287,18 +317,18 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
         // AC-SEM-002: if 表达式类型检查
         HirExpr::If(if_s, _span) => {
             check_expr(&mut if_s.condition, scope, diagnostics);
-            check_block(&mut if_s.then_branch, scope, diagnostics);
+            check_block(&mut if_s.then_branch, scope, diagnostics, &HirType::Void);
             if let Some(ref mut else_b) = if_s.else_branch {
-                check_block(else_b, scope, diagnostics);
+                check_block(else_b, scope, diagnostics, &HirType::Void);
             }
         }
 
         HirExpr::Loop(l, _span) => {
-            check_block(&mut l.body, scope, diagnostics);
+            check_block(&mut l.body, scope, diagnostics, &HirType::Void);
         }
 
         HirExpr::Block(b, _span) => {
-            check_block(b, scope, diagnostics);
+            check_block(b, scope, diagnostics, &HirType::Void);
         }
     }
 }
