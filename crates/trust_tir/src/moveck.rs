@@ -9,6 +9,14 @@ use trust_hir::hir::HirType;
 use trust_parser::ast::Span;
 
 /// §设计文档 §4.2 / spec OWN-REQ-001: 移动语义检查入口
+///
+/// ```
+/// # use trust_tir::tir::*;
+/// # use trust_tir::moveck::check_moves;
+/// // check_moves returns Ok if no use-after-move errors
+/// # let program = TirProgram { file: String::new(), functions: vec![] };
+/// # assert!(check_moves(&program).is_ok());
+/// ```
 pub fn check_moves(tir: &TirProgram) -> Result<(), Vec<MoveError>> {
     let mut errors = Vec::new();
     for f in &tir.functions {
@@ -21,10 +29,10 @@ pub fn check_moves(tir: &TirProgram) -> Result<(), Vec<MoveError>> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum VarState {
     Active,
-    Moved,
+    Moved(Span),
 }
 
 fn check_function_moves(func: &TirFunction, errors: &mut Vec<MoveError>) {
@@ -53,24 +61,24 @@ fn check_op(
     errors: &mut Vec<MoveError>,
 ) {
     match op {
-        TirOp::Move(dst, src, _span) => {
+        TirOp::Move(dst, src, move_span) => {
             let si = src.0 as usize;
-            if si < state.len() && state[si] == VarState::Moved {
-                let info = var_map.lookup_tmp(src);
-                let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", src.0));
-                errors.push(MoveError {
-                    code: ErrorCode::E0382,
-                    var_name: var_name.clone(),
-                    moved_at: _span.clone(),
-                    used_at: _span.clone(),
-                    message: format!(
-                        "variable `{var_name}` moved here, used again later (E0382)"
-                    ),
-                });
-            }
-            // 标记 src 为 Moved，dst 为 Active
             if si < state.len() {
-                state[si] = VarState::Moved;
+                if let VarState::Moved(ref moved_at) = state[si] {
+                    let info = var_map.lookup_tmp(src);
+                    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", src.0));
+                    errors.push(MoveError {
+                        code: ErrorCode::E0382,
+                        var_name: var_name.clone(),
+                        moved_at: moved_at.clone(),
+                        used_at: move_span.clone(),
+                        message: format!(
+                            "variable `{var_name}` moved here, used again later (E0382)"
+                        ),
+                    });
+                }
+                // 标记 src 为 Moved，dst 为 Active
+                state[si] = VarState::Moved(move_span.clone());
             }
             let di = dst.0 as usize;
             if di < state.len() {
@@ -123,16 +131,18 @@ fn check_var_use_mut(
     span: &Span,
 ) {
     let idx = tmp.0 as usize;
-    if idx < state.len() && state[idx] == VarState::Moved {
-        let info = var_map.lookup_tmp(&tmp);
-        let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", tmp.0));
-        errors.push(MoveError {
-            code: ErrorCode::E0382,
-            var_name: var_name.clone(),
-            moved_at: span.clone(),
-            used_at: span.clone(),
-            message: format!("variable `{var_name}` used after move (E0382)"),
-        });
+    if idx < state.len() {
+        if let VarState::Moved(ref moved_at) = state[idx] {
+            let info = var_map.lookup_tmp(&tmp);
+            let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("tmp_{}", tmp.0));
+            errors.push(MoveError {
+                code: ErrorCode::E0382,
+                var_name: var_name.clone(),
+                moved_at: moved_at.clone(),
+                used_at: span.clone(),
+                message: format!("variable `{var_name}` used after move (E0382)"),
+            });
+        }
     }
 }
 

@@ -12,6 +12,8 @@ use trust_hir::hir::*;
 use trust_hir::name_res::DiagError;
 use trust_parser::ast::Span;
 
+use crate::moveck::is_copy_type;
+
 // ============================================================================
 // TIR 节点定义 — §3.1
 // ============================================================================
@@ -281,12 +283,11 @@ fn lower_function(f: &HirFunction, diags: &mut Vec<DiagError>) -> TirFunction {
 
     ctx.new_block(entry_id, f.span.clone());
     lower_block(&f.body, &mut ctx, diags);
-    // 如果入口块没有终结指令，补 Return
+    // 如果入口块没有终结指令，补 Return（空函数体或多路径未 return）
     let entry = &mut ctx.blocks[entry_id];
-    if matches!(entry.terminator, Terminator::Unreachable)
-        && entry.ops.is_empty() && ctx.blocks.len() == 1 {
-            // 空函数体 — 什么都不需要做
-        }
+    if matches!(entry.terminator, Terminator::Unreachable) {
+        entry.terminator = Terminator::Return(None);
+    }
 
     let blocks: Vec<BasicBlock> = (0..ctx.next_id)
         .map(|id| {
@@ -687,11 +688,11 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
 
             // 扫描 body 中的 Ident，查找外部变量
             let mut captured = Vec::new();
-            collect_free_vars(&body, params, &ctx.map, &mut captured, kind);
+            collect_free_vars(body, params, &ctx.map, &mut captured, kind);
 
             // 为每个捕获变量在 var_map 中注册（确保 moveck/borrowck 可见）
             for cv in &captured {
-                if let Some(existing) = ctx.map.lookup_name(&cv.name) {
+                if let Some(_existing) = ctx.map.lookup_name(&cv.name) {
                     ctx.map.insert(cv.tmp, &cv.name, ctx.blocks[ctx.cur_block].span.clone());
                 }
             }
@@ -824,19 +825,6 @@ fn collect_free_vars_expr(
         HirExpr::Loop(l, _) => collect_free_vars(&l.body, params, var_map, captured, kind),
         HirExpr::Block(b, _) => collect_free_vars(b, params, var_map, captured, kind),
         _ => {}
-    }
-}
-
-// ============================================================================
-// Copy 判定 — §3.3.2
-// ============================================================================
-
-fn is_copy_type(ty: &HirType) -> bool {
-    match ty {
-        HirType::I32 | HirType::F64 | HirType::I64 | HirType::Bool | HirType::BigInt => true,
-        HirType::Ref(_) => true,
-        HirType::String | HirType::Void | HirType::Array(_) | HirType::Named(_) | HirType::Function(..) => false,
-        HirType::Error => false,
     }
 }
 

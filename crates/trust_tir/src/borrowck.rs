@@ -11,6 +11,14 @@ use trust_hir::hir::*;
 use trust_parser::ast::Span;
 
 /// §设计文档 §4.3 / spec OWN-REQ-002: 借用检查入口
+///
+/// ```
+/// # use trust_tir::tir::*;
+/// # use trust_tir::borrowck::check_borrows;
+/// // check_borrows returns Ok if no borrow conflicts or missing annotations
+/// # let program = TirProgram { file: String::new(), functions: vec![] };
+/// # assert!(check_borrows(&program).is_ok());
+/// ```
 pub fn check_borrows(tir: &TirProgram) -> Result<(), Vec<BorrowError>> {
     let mut errors = Vec::new();
     for f in &tir.functions {
