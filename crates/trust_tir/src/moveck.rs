@@ -57,19 +57,15 @@ fn check_function_moves(func: &TirFunction, errors: &mut Vec<MoveError>) {
     }
 }
 
-fn check_op(
-    op: &TirOp,
-    state: &mut [VarState],
-    var_map: &VarMapping,
-    errors: &mut Vec<MoveError>,
-) {
+fn check_op(op: &TirOp, state: &mut [VarState], var_map: &VarMapping, errors: &mut Vec<MoveError>) {
     match op {
         TirOp::Move(dst, src, move_span) => {
             let si = src.0 as usize;
             if si < state.len() {
                 if let VarState::Moved(ref moved_at) = state[si] {
                     let info = var_map.lookup_tmp(src);
-                    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
+                    let var_name =
+                        info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
                     errors.push(MoveError {
                         code: ErrorCode::E0382,
                         var_name: var_name.clone(),
@@ -168,7 +164,11 @@ pub fn is_copy_type(ty: &HirType) -> bool {
     match ty {
         HirType::I32 | HirType::F64 | HirType::I64 | HirType::Bool | HirType::BigInt => true,
         HirType::Ref(_) => true,
-        HirType::String | HirType::Void | HirType::Array(_) | HirType::Named(_) | HirType::Function(..) => false,
+        HirType::String
+        | HirType::Void
+        | HirType::Array(_)
+        | HirType::Named(_)
+        | HirType::Function(..) => false,
         HirType::Error => false,
     }
 }

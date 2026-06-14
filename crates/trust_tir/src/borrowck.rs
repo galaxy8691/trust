@@ -37,7 +37,11 @@ enum ActiveBorrow {
     Mutable,
 }
 
-fn check_function_borrows(func: &TirFunction, all_functions: &[TirFunction], errors: &mut Vec<BorrowError>) {
+fn check_function_borrows(
+    func: &TirFunction,
+    all_functions: &[TirFunction],
+    errors: &mut Vec<BorrowError>,
+) {
     let param_modes: Vec<ParamMode> = func.params.iter().map(|p| p.mode).collect();
 
     for block in &func.blocks {
@@ -115,13 +119,17 @@ fn check_borrow_op(
             if let Some(existing) = active.get(src) {
                 if !existing.is_empty() {
                     let info = var_map.lookup_tmp(src);
-                    let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
+                    let var_name =
+                        info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
                     errors.push(BorrowError {
                         code: ErrorCode::E0506,
                         var_name,
                         first_borrow_at: existing[0].1.clone(),
                         conflict_at: span.clone(),
-                        message: format!("cannot move `{}` because it is borrowed", var_map.lookup_tmp(src).map(|(n,_)| n.clone()).unwrap_or_default()),
+                        message: format!(
+                            "cannot move `{}` because it is borrowed",
+                            var_map.lookup_tmp(src).map(|(n, _)| n.clone()).unwrap_or_default()
+                        ),
                     });
                 }
             }
@@ -139,19 +147,13 @@ fn borrow_conflict(
 ) -> BorrowError {
     let info = var_map.lookup_tmp(src);
     let var_name = info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("_var{}", src.0));
-    let code = if new_kind == "mutable" {
-        ErrorCode::E0501
-    } else {
-        ErrorCode::E0502
-    };
+    let code = if new_kind == "mutable" { ErrorCode::E0501 } else { ErrorCode::E0502 };
     BorrowError {
         code,
         var_name: var_name.clone(),
         first_borrow_at: existing.first().map(|(_, s)| s.clone()).unwrap_or_else(Span::dummy),
         conflict_at: span.clone(),
-        message: format!(
-            "cannot borrow `{var_name}` as {new_kind} because it is already borrowed"
-        ),
+        message: format!("cannot borrow `{var_name}` as {new_kind} because it is already borrowed"),
     }
 }
 

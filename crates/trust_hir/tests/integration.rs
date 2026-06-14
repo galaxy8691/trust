@@ -3,16 +3,14 @@
 //! 每个语法特性至少一个端到端测试：
 //! `.trust` 源码 → parse → lower → resolve_names → check_types → 验证
 
+use std::collections::HashSet;
 use trust_hir::hir::*;
 use trust_hir::name_res::{lower, resolve_names, DiagError};
 use trust_hir::typeck::check_types;
 use trust_parser::ast::Span;
 use trust_parser::module_graph::ModuleGraph;
-use std::collections::HashSet;
 
-fn run_full_pipeline(
-    src: &str,
-) -> (HirProgram, Vec<DiagError>, Vec<DiagError>) {
+fn run_full_pipeline(src: &str) -> (HirProgram, Vec<DiagError>, Vec<DiagError>) {
     let mut p = trust_parser::parser::Parser::new(src, "test.trust");
     let prog = p.parse_program();
 
@@ -39,10 +37,14 @@ fn integration_basic_variable() {
     assert!(type_diags.is_empty(), "unexpected type diags: {:?}", type_diags);
 
     // 验证函数存在且包含 let
-    let func = hir.items.iter().find_map(|i| match i {
-        HirItem::Function(f) if f.name == "main" => Some(f),
-        _ => None,
-    }).expect("main function should exist");
+    let func = hir
+        .items
+        .iter()
+        .find_map(|i| match i {
+            HirItem::Function(f) if f.name == "main" => Some(f),
+            _ => None,
+        })
+        .expect("main function should exist");
 
     let let_stmt = func.body.statements.first().expect("body should have statements");
     assert!(matches!(let_stmt, HirStmt::Let(_)), "expected Let stmt, got {:?}", let_stmt);
@@ -60,15 +62,22 @@ fn integration_if_expression() {
     assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
     assert!(type_diags.is_empty(), "unexpected type diags: {:?}", type_diags);
 
-    let func = hir.items.iter().find_map(|i| match i {
-        HirItem::Function(f) if f.name == "f" => Some(f),
-        _ => None,
-    }).expect("f should exist");
+    let func = hir
+        .items
+        .iter()
+        .find_map(|i| match i {
+            HirItem::Function(f) if f.name == "f" => Some(f),
+            _ => None,
+        })
+        .expect("f should exist");
 
     let let_stmt = func.body.statements.first().unwrap();
     if let HirStmt::Let(let_s) = let_stmt {
-        assert!(matches!(let_s.init.as_ref(), HirExpr::If(..)),
-            "expected HirExpr::If, got {:?}", let_s.init);
+        assert!(
+            matches!(let_s.init.as_ref(), HirExpr::If(..)),
+            "expected HirExpr::If, got {:?}",
+            let_s.init
+        );
     } else {
         panic!("expected Let stmt");
     }
@@ -86,15 +95,22 @@ fn integration_block_expression() {
     assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
     assert!(type_diags.is_empty(), "unexpected type diags: {:?}", type_diags);
 
-    let func = hir.items.iter().find_map(|i| match i {
-        HirItem::Function(f) if f.name == "f" => Some(f),
-        _ => None,
-    }).expect("f should exist");
+    let func = hir
+        .items
+        .iter()
+        .find_map(|i| match i {
+            HirItem::Function(f) if f.name == "f" => Some(f),
+            _ => None,
+        })
+        .expect("f should exist");
 
     let let_stmt = func.body.statements.first().unwrap();
     if let HirStmt::Let(let_s) = let_stmt {
-        assert!(matches!(let_s.init.as_ref(), HirExpr::Block(..)),
-            "expected HirExpr::Block, got {:?}", let_s.init);
+        assert!(
+            matches!(let_s.init.as_ref(), HirExpr::Block(..)),
+            "expected HirExpr::Block, got {:?}",
+            let_s.init
+        );
     }
 }
 
@@ -123,8 +139,11 @@ fn integration_type_error_mix_numbers() {
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
 
     let has_type_err = type_diags.iter().any(|d| d.message.contains("type mismatch"));
-    assert!(has_type_err, "expected type mismatch for i32 + f64, got: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(
+        has_type_err,
+        "expected type mismatch for i32 + f64, got: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // ============================================================================
@@ -136,8 +155,11 @@ fn integration_as_cast_allows_same_type() {
     // Phase 1: `as` 在类型同为 number 时是 no-op
     let src = "function f(): number { let a = 42; return a as number; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
-    assert!(type_diags.is_empty(), "unexpected type diags: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(
+        type_diags.is_empty(),
+        "unexpected type diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // ============================================================================
@@ -149,8 +171,11 @@ fn integration_as_cast_in_expression() {
     // Phase 1: a as number + b → 类型检查中 as 的结果与 b 类型兼容
     let src = "function f(): number { let a = 42; let b = 10; return a as number + b; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
-    assert!(type_diags.is_empty(), "unexpected type diags: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(
+        type_diags.is_empty(),
+        "unexpected type diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // ============================================================================
@@ -163,8 +188,11 @@ fn integration_function_call() {
                function main(): number { return add(1, 2); }";
     let (_hir, name_diags, type_diags) = run_full_pipeline(src);
     assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
-    assert!(type_diags.is_empty(), "unexpected type diags: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(
+        type_diags.is_empty(),
+        "unexpected type diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // Regression: function call type checking preserves param_types (Issue 2)
@@ -174,7 +202,9 @@ fn regression_function_call_with_wrong_type_detected() {
                function main(): number { return add(\"hello\", 2); }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
     assert!(
-        type_diags.iter().any(|d| d.message.contains("type mismatch") || d.message.contains("argument")),
+        type_diags
+            .iter()
+            .any(|d| d.message.contains("type mismatch") || d.message.contains("argument")),
         "should detect argument type mismatch. Diags: {:?}",
         type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
@@ -211,9 +241,11 @@ fn integration_sentinel_prevents_cascade() {
     // 应该有 1 个根因错误（x + 1 的类型不匹配），而非 2 个
     let type_err_count = type_diags.len();
     // y 的类型应该是 Error 哨兵，阻止 z 的二次报错
-    assert!(type_err_count <= 2,
+    assert!(
+        type_err_count <= 2,
         "expected at most 2 type errors (root cause only), got {type_err_count}: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // ============================================================================
@@ -225,10 +257,14 @@ fn integration_as_cast_bool_to_number_forbidden() {
     // bool → number is implicitly bool → I32 which is forbidden by the as matrix
     let src = "function f(): number { let b = true; return b as number; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
-    let has_forbidden = type_diags.iter().any(|d| d.message.contains("cannot cast")
-        || d.message.contains("invalid cast"));
-    assert!(has_forbidden, "expected cast error for bool as number, got: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let has_forbidden = type_diags
+        .iter()
+        .any(|d| d.message.contains("cannot cast") || d.message.contains("invalid cast"));
+    assert!(
+        has_forbidden,
+        "expected cast error for bool as number, got: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // ============================================================================
@@ -252,10 +288,13 @@ fn integration_wrong_arg_count() {
     let src = "function add(a: number, b: number): number { return a + b; }
                function main(): number { return add(1); }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
-    let has_count_err = type_diags.iter().any(|d| d.message.contains("expects")
-        && d.message.contains("arguments"));
-    assert!(has_count_err, "expected argument count error, got: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let has_count_err =
+        type_diags.iter().any(|d| d.message.contains("expects") && d.message.contains("arguments"));
+    assert!(
+        has_count_err,
+        "expected argument count error, got: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // ============================================================================
@@ -282,10 +321,14 @@ fn boundary_empty_function_body() {
     let src = "function f(): void {}";
     let (hir, name_diags, _type_diags) = run_full_pipeline(src);
     assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
-    let func = hir.items.iter().find_map(|i| match i {
-        HirItem::Function(f) if f.name == "f" => Some(f),
-        _ => None,
-    }).expect("f should exist");
+    let func = hir
+        .items
+        .iter()
+        .find_map(|i| match i {
+            HirItem::Function(f) if f.name == "f" => Some(f),
+            _ => None,
+        })
+        .expect("f should exist");
     assert!(func.body.statements.is_empty(), "empty body should have zero statements");
 }
 
@@ -344,8 +387,11 @@ fn boundary_import_nonexistent_file() {
 fn check_binary_sub_i32_ok() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
-        BinOp::Sub, &HirType::I32, &HirType::I32,
-        Span::dummy(), &mut diags,
+        BinOp::Sub,
+        &HirType::I32,
+        &HirType::I32,
+        Span::dummy(),
+        &mut diags,
     );
     assert_eq!(r, Ok(HirType::I32));
 }
@@ -354,8 +400,11 @@ fn check_binary_sub_i32_ok() {
 fn check_binary_div_f64_ok() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
-        BinOp::Div, &HirType::F64, &HirType::F64,
-        Span::dummy(), &mut diags,
+        BinOp::Div,
+        &HirType::F64,
+        &HirType::F64,
+        Span::dummy(),
+        &mut diags,
     );
     assert_eq!(r, Ok(HirType::F64));
 }
@@ -364,8 +413,11 @@ fn check_binary_div_f64_ok() {
 fn check_binary_eq_string_returns_bool() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
-        BinOp::Eq, &HirType::String, &HirType::String,
-        Span::dummy(), &mut diags,
+        BinOp::Eq,
+        &HirType::String,
+        &HirType::String,
+        Span::dummy(),
+        &mut diags,
     );
     assert_eq!(r, Ok(HirType::Bool));
 }
@@ -374,8 +426,11 @@ fn check_binary_eq_string_returns_bool() {
 fn check_binary_lt_i64_returns_bool() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
-        BinOp::Lt, &HirType::I64, &HirType::I64,
-        Span::dummy(), &mut diags,
+        BinOp::Lt,
+        &HirType::I64,
+        &HirType::I64,
+        Span::dummy(),
+        &mut diags,
     );
     assert_eq!(r, Ok(HirType::Bool));
 }
@@ -385,8 +440,11 @@ fn check_binary_ge_bool_returns_bool() {
     // Lt/Gt/Le/Ge should reject Bool operands (cannot order booleans)
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
-        BinOp::Ge, &HirType::Bool, &HirType::Bool,
-        Span::dummy(), &mut diags,
+        BinOp::Ge,
+        &HirType::Bool,
+        &HirType::Bool,
+        Span::dummy(),
+        &mut diags,
     );
     assert!(r.is_err(), "Ge should reject Bool operands");
 }

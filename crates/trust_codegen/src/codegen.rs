@@ -155,10 +155,7 @@ impl GenCtx {
 
     /// 获取 TmpVar 的 Rust 变量名（缓存）
     fn var_name(&mut self, tmp: TmpVar) -> String {
-        self.var_names
-            .entry(tmp)
-            .or_insert_with(|| format!("_t{}", tmp.0))
-            .clone()
+        self.var_names.entry(tmp).or_insert_with(|| format!("_t{}", tmp.0)).clone()
     }
 
     /// 获取 TmpVar 的 Rust 表达式引用（带 & / &mut 前缀）
@@ -426,11 +423,9 @@ fn infer_tmp_type(tmp: &TmpVar, func: &TirFunction) -> String {
             match op {
                 TirOp::Let(dst, val, _) if dst == tmp => return tir_value_type(val),
                 TirOp::Move(dst, _, _) if dst == tmp => return String::new(), // 类型由源决定
-                TirOp::Binary(dst, _, _, _, _) if dst == tmp => {
-                    return TYPE_I32.to_string()
-                }
+                TirOp::Binary(dst, _, _, _, _) if dst == tmp => return TYPE_I32.to_string(),
                 TirOp::Call(Some(dst), _, _, _) if dst == tmp => {
-                    return String::new() // 类型由函数签名决定
+                    return String::new(); // 类型由函数签名决定
                 }
                 _ => {}
             }
@@ -596,8 +591,7 @@ fn emit_block(
     match &term {
         Terminator::Goto(target) => {
             // K7 fix: ≤ 检测回边（自循环 target == block_id 也视为回边）
-            let is_back_edge = *target <= block_id
-                && ctx.loop_entries.contains(target);
+            let is_back_edge = *target <= block_id && ctx.loop_entries.contains(target);
             if is_back_edge {
                 ctx.write_line(CONTINUE_KEYWORD);
             } else {
@@ -615,52 +609,57 @@ fn emit_block(
             ctx.indent_level += 1;
             emit_block(*then_id, func, ctx, errors);
             ctx.indent_level -= 1;
-            ctx.write_line(&format!("{rbrace} {else_kw} {lbrace}", rbrace = RBRACE, else_kw = ELSE_KEYWORD, lbrace = LBRACE.trim_end()));
+            ctx.write_line(&format!(
+                "{rbrace} {else_kw} {lbrace}",
+                rbrace = RBRACE,
+                else_kw = ELSE_KEYWORD,
+                lbrace = LBRACE.trim_end()
+            ));
             ctx.indent_level += 1;
             emit_block(*else_id, func, ctx, errors);
             ctx.indent_level -= 1;
             ctx.write_line(RBRACE);
         }
-        Terminator::Return(val) => {
-            match val {
-                Some(tmp) => {
-                    let name = ctx.var_name(*tmp);
-                    ctx.write_line(&format!("{ret} {name};", ret = RETURN_KEYWORD));
-                }
-                None => {
-                    ctx.write_line(&format!("{ret};", ret = RETURN_KEYWORD));
-                }
+        Terminator::Return(val) => match val {
+            Some(tmp) => {
+                let name = ctx.var_name(*tmp);
+                ctx.write_line(&format!("{ret} {name};", ret = RETURN_KEYWORD));
             }
-        }
+            None => {
+                ctx.write_line(&format!("{ret};", ret = RETURN_KEYWORD));
+            }
+        },
         Terminator::Unreachable => {
             ctx.write_line("unreachable!();");
         }
     }
 }
 
-fn emit_op(
-    op: &TirOp,
-    func: &TirFunction,
-    ctx: &mut GenCtx,
-    _errors: &mut [CodegenError],
-) {
+fn emit_op(op: &TirOp, func: &TirFunction, ctx: &mut GenCtx, _errors: &mut [CodegenError]) {
     ctx.record_span(&get_op_span(op));
 
     match op {
         // === §3.1.4: TirOp → Rust 语句映射表 ===
-
         TirOp::Let(dst, val, _span) => {
             let dst_name = ctx.var_name(*dst);
             let rust_val = emit_value(val, func, ctx);
-            ctx.write_line(&format!("{let_kw} {dst} = {val};",
-                let_kw = LET_KEYWORD, dst = dst_name, val = rust_val));
+            ctx.write_line(&format!(
+                "{let_kw} {dst} = {val};",
+                let_kw = LET_KEYWORD,
+                dst = dst_name,
+                val = rust_val
+            ));
         }
 
         TirOp::Move(dst, src, _span) => {
             let dst_name = ctx.var_name(*dst);
             let src_name = ctx.var_name(*src);
-            ctx.write_line(&format!("{let_kw} {dst} = {src};",
-                let_kw = LET_KEYWORD, dst = dst_name, src = src_name));
+            ctx.write_line(&format!(
+                "{let_kw} {dst} = {src};",
+                let_kw = LET_KEYWORD,
+                dst = dst_name,
+                src = src_name
+            ));
         }
 
         TirOp::Borrow(dst, src, kind, _span) => {
@@ -670,8 +669,13 @@ fn emit_op(
                 BorrowKind::Shared => REF_OP,
                 BorrowKind::Mutable => MUT_REF_OP.trim_end(),
             };
-            ctx.write_line(&format!("{let_kw} {dst} = {op}{src};",
-                let_kw = LET_KEYWORD, dst = dst_name, op = op_str, src = src_name));
+            ctx.write_line(&format!(
+                "{let_kw} {dst} = {op}{src};",
+                let_kw = LET_KEYWORD,
+                dst = dst_name,
+                op = op_str,
+                src = src_name
+            ));
         }
 
         TirOp::Binary(dst, lhs, op, rhs, _span) => {
@@ -679,24 +683,32 @@ fn emit_op(
             let lhs_str = emit_value(lhs, func, ctx);
             let rhs_str = emit_value(rhs, func, ctx);
             let op_str = bin_op_str(*op);
-            ctx.write_line(&format!("{let_kw} {dst} = {lhs} {op} {rhs};",
-                let_kw = LET_KEYWORD, dst = dst_name, lhs = lhs_str, op = op_str, rhs = rhs_str));
+            ctx.write_line(&format!(
+                "{let_kw} {dst} = {lhs} {op} {rhs};",
+                let_kw = LET_KEYWORD,
+                dst = dst_name,
+                lhs = lhs_str,
+                op = op_str,
+                rhs = rhs_str
+            ));
         }
 
         TirOp::Unary(dst, op, val, _span) => {
             let dst_name = ctx.var_name(*dst);
             let val_str = emit_value(val, func, ctx);
             let op_str = unary_op_str(*op);
-            ctx.write_line(&format!("{let_kw} {dst} = {op}{val};",
-                let_kw = LET_KEYWORD, dst = dst_name, op = op_str, val = val_str));
+            ctx.write_line(&format!(
+                "{let_kw} {dst} = {op}{val};",
+                let_kw = LET_KEYWORD,
+                dst = dst_name,
+                op = op_str,
+                val = val_str
+            ));
         }
 
         TirOp::Call(dst, callee, args, _span) => {
             let callee_str = emit_call_target(callee, func, ctx);
-            let args_str: Vec<String> = args
-                .iter()
-                .map(|a| emit_call_arg(a, func, ctx))
-                .collect();
+            let args_str: Vec<String> = args.iter().map(|a| emit_call_arg(a, func, ctx)).collect();
             let call_expr = format!("{}({})", callee_str, args_str.join(", "));
 
             // A2 fix: 使用 runtime.rs 常量和函数，禁止硬编码 replace
@@ -724,8 +736,12 @@ fn emit_op(
             match dst {
                 Some(tmp) => {
                     let dst_name = ctx.var_name(*tmp);
-                    ctx.write_line(&format!("{let_kw} {dst} = {call};",
-                        let_kw = LET_KEYWORD, dst = dst_name, call = call_code));
+                    ctx.write_line(&format!(
+                        "{let_kw} {dst} = {call};",
+                        let_kw = LET_KEYWORD,
+                        dst = dst_name,
+                        call = call_code
+                    ));
                 }
                 None => {
                     ctx.write_line(&format!("{call};", call = call_code));
@@ -737,8 +753,14 @@ fn emit_op(
             let dst_name = ctx.var_name(*dst);
             let val_str = emit_value(val, func, ctx);
             let ty_str = hir_type_to_rust(ty);
-            ctx.write_line(&format!("{let_kw} {dst} = {val} {as_kw} {ty};",
-                let_kw = LET_KEYWORD, dst = dst_name, val = val_str, as_kw = AS_KEYWORD.trim(), ty = ty_str));
+            ctx.write_line(&format!(
+                "{let_kw} {dst} = {val} {as_kw} {ty};",
+                let_kw = LET_KEYWORD,
+                dst = dst_name,
+                val = val_str,
+                as_kw = AS_KEYWORD.trim(),
+                ty = ty_str
+            ));
         }
 
         TirOp::Nop(_) => {

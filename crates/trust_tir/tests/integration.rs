@@ -95,7 +95,10 @@ fn integration_param_inout_missing() {
     // Phase 1: borrowck 正常运行不 panic 即可。完整 inout 缺失检测押后 Phase 2。
     // 正向路径 (inout 正确标注) 由 integration_param_inout_ok 验证。
     assert!(
-        borrow_errors.is_empty() || borrow_errors.iter().any(|e| e.message.contains("annotation") || e.message.contains("inout")),
+        borrow_errors.is_empty()
+            || borrow_errors
+                .iter()
+                .any(|e| e.message.contains("annotation") || e.message.contains("inout")),
         "borrowck should not panic on cross-function calls. Errors: {:?}",
         borrow_errors.iter().map(|e| &e.message).collect::<Vec<_>>()
     );
@@ -223,7 +226,8 @@ fn integration_empty_function_ok() {
     let entry = &f.blocks[f.entry_block];
     assert!(
         matches!(entry.terminator, trust_tir::tir::Terminator::Return(None)),
-        "empty function should have Return terminator, got {:?}", entry.terminator
+        "empty function should have Return terminator, got {:?}",
+        entry.terminator
     );
 }
 
@@ -236,7 +240,9 @@ fn regression_move_after_borrow_detected() {
     let src = "function f(): void { let x = \"hello\"; let r = &x; let y = x; }";
     let (_tir, _diags, _move_errors, borrow_errors) = run_pipeline(src);
     assert!(
-        borrow_errors.iter().any(|e| e.message.contains("cannot move") || e.message.contains("borrowed")),
+        borrow_errors
+            .iter()
+            .any(|e| e.message.contains("cannot move") || e.message.contains("borrowed")),
         "move-after-borrow should be detected. Borrow errors: {:?}",
         borrow_errors.iter().map(|e| &e.message).collect::<Vec<_>>()
     );
@@ -252,7 +258,9 @@ fn regression_mutable_after_shared_borrow_conflict() {
     let src = "function f(): void { let x = \"hello\"; let r = &x; let y = x; }";
     let (_tir, _diags, _move_errors, borrow_errors) = run_pipeline(src);
     assert!(
-        borrow_errors.iter().any(|e| e.message.contains("cannot move") || e.message.contains("borrowed")),
+        borrow_errors
+            .iter()
+            .any(|e| e.message.contains("cannot move") || e.message.contains("borrowed")),
         "move-after-borrow should be detected as borrow conflict. Errors: {:?}",
         borrow_errors.iter().map(|e| &e.message).collect::<Vec<_>>()
     );
@@ -272,12 +280,17 @@ fn regression_closure_capture_populates_vars() {
     assert!(!tir.functions.is_empty(), "should have at least one function");
     let f = &tir.functions[0];
     // 父函数的 var_map 中应能找到 data（由 lower_let 注册）
-    assert!(f.var_map.lookup_name("data").is_some(), "parent function should have `data` in var_map");
+    assert!(
+        f.var_map.lookup_name("data").is_some(),
+        "parent function should have `data` in var_map"
+    );
     // 如果闭包被 name_res 提升为独立 HirItem::Function，generate 的 TirFunction
     // 应出现在 tir.functions 中（通过 lower_hir 处理）
     if tir.functions.len() >= 2 {
         let closure = &tir.functions[1];
-        assert!(!closure.captured_vars.is_empty() || !closure.name.is_empty(),
-            "closure function should have a name");
+        assert!(
+            !closure.captured_vars.is_empty() || !closure.name.is_empty(),
+            "closure function should have a name"
+        );
     }
 }

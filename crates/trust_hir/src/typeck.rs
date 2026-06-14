@@ -33,8 +33,10 @@ pub fn check_types(
             HirItem::Const(c) => {
                 check_expr(&mut c.init, &hir.scope, diagnostics, &HirType::Void);
                 let init_ty = expr_type(&c.init);
-                if c.ty != HirType::Error && init_ty != HirType::Error
-                    && !types_compatible(&c.ty, &init_ty) {
+                if c.ty != HirType::Error
+                    && init_ty != HirType::Error
+                    && !types_compatible(&c.ty, &init_ty)
+                {
                     diagnostics.push(DiagError::new(
                         format!("const type mismatch: expected `{}`, found `{}`", c.ty, init_ty),
                         c.span.clone(),
@@ -44,8 +46,10 @@ pub fn check_types(
             HirItem::Shared(s) => {
                 check_expr(&mut s.init, &hir.scope, diagnostics, &HirType::Void);
                 let init_ty = expr_type(&s.init);
-                if s.ty != HirType::Error && init_ty != HirType::Error
-                    && !types_compatible(&s.ty, &init_ty) {
+                if s.ty != HirType::Error
+                    && init_ty != HirType::Error
+                    && !types_compatible(&s.ty, &init_ty)
+                {
                     diagnostics.push(DiagError::new(
                         format!("shared type mismatch: expected `{}`, found `{}`", s.ty, init_ty),
                         s.span.clone(),
@@ -69,13 +73,23 @@ fn check_function(func: &mut HirFunction, diagnostics: &mut Vec<DiagError>) {
     check_block(&mut func.body, &fn_scope, diagnostics, &ret_ty);
 }
 
-fn check_block(block: &mut HirBlock, scope: &Scope, diagnostics: &mut Vec<DiagError>, fn_return_type: &HirType) {
+fn check_block(
+    block: &mut HirBlock,
+    scope: &Scope,
+    diagnostics: &mut Vec<DiagError>,
+    fn_return_type: &HirType,
+) {
     for stmt in &mut block.statements {
         check_stmt(stmt, scope, diagnostics, fn_return_type);
     }
 }
 
-fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError>, fn_return_type: &HirType) {
+fn check_stmt(
+    stmt: &mut HirStmt,
+    scope: &Scope,
+    diagnostics: &mut Vec<DiagError>,
+    fn_return_type: &HirType,
+) {
     match stmt {
         HirStmt::Let(let_s) => {
             check_expr(&mut let_s.init, scope, diagnostics, fn_return_type);
@@ -169,8 +183,10 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
             if let Some(ref mut v) = r.value {
                 check_expr(v, scope, diagnostics, fn_return_type);
                 let val_ty = expr_type(v);
-                if *fn_return_type != HirType::Error && val_ty != HirType::Error
-                    && !types_compatible(fn_return_type, &val_ty) {
+                if *fn_return_type != HirType::Error
+                    && val_ty != HirType::Error
+                    && !types_compatible(fn_return_type, &val_ty)
+                {
                     diagnostics.push(DiagError::new(
                         format!(
                             "return type mismatch: expected `{}`, found `{}`",
@@ -198,7 +214,12 @@ fn check_stmt(stmt: &mut HirStmt, scope: &Scope, diagnostics: &mut Vec<DiagError
 // 表达式类型检查
 // ============================================================================
 
-fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError>, fn_return_type: &HirType) {
+fn check_expr(
+    expr: &mut HirExpr,
+    scope: &Scope,
+    diagnostics: &mut Vec<DiagError>,
+    fn_return_type: &HirType,
+) {
     match expr {
         // 字面量——类型已固定
         HirExpr::IntLiteral(..) => {}
@@ -309,11 +330,7 @@ fn check_expr(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError
             for p in params.iter() {
                 fn_scope.insert(
                     &p.name,
-                    HirBinding::LocalVar {
-                        ty: p.ty.clone(),
-                        mutable: false,
-                        span: p.span.clone(),
-                    },
+                    HirBinding::LocalVar { ty: p.ty.clone(), mutable: false, span: p.span.clone() },
                 );
             }
             check_block(body, &fn_scope, diagnostics, fn_return_type);
@@ -438,7 +455,8 @@ pub fn check_binary_op(
             // 禁止 Bool 排序比较
             if *lhs == HirType::Bool {
                 diagnostics.push(DiagError::new(
-                    "cannot compare booleans with ordering operators (use `==` or `!=`)".to_string(),
+                    "cannot compare booleans with ordering operators (use `==` or `!=`)"
+                        .to_string(),
                     span,
                 ));
                 return Err(());
@@ -460,10 +478,7 @@ pub fn check_binary_op(
 
         // ?? 运算符 — Phase 1 排除，不应到达此处
         BinOp::QuestionQuestion => {
-            diagnostics.push(DiagError::new(
-                "`??` not supported in Phase 1".into(),
-                span,
-            ));
+            diagnostics.push(DiagError::new("`??` not supported in Phase 1".into(), span));
             Err(())
         }
     }
@@ -487,19 +502,15 @@ fn check_as_cast(
         // I32 ↔ F64
         (HirType::I32, HirType::F64) => true,
         (HirType::F64, HirType::I32) => {
-            diagnostics.push(DiagError::new(
-                "truncation: `f64 as i32` may lose precision".into(),
-                span,
-            ));
+            diagnostics
+                .push(DiagError::new("truncation: `f64 as i32` may lose precision".into(), span));
             true // 允许但 warning
         }
         // I32 ↔ I64
         (HirType::I32, HirType::I64) => true,
         (HirType::I64, HirType::I32) => {
-            diagnostics.push(DiagError::new(
-                "truncation: `i64 as i32` may lose precision".into(),
-                span,
-            ));
+            diagnostics
+                .push(DiagError::new("truncation: `i64 as i32` may lose precision".into(), span));
             true
         }
         // I64 ↔ F64
@@ -510,37 +521,25 @@ fn check_as_cast(
         (HirType::Bool, HirType::I32)
         | (HirType::Bool, HirType::F64)
         | (HirType::Bool, HirType::I64) => {
-            diagnostics.push(DiagError::new(
-                format!("cannot cast `bool` to `{target}`"),
-                span,
-            ));
+            diagnostics.push(DiagError::new(format!("cannot cast `bool` to `{target}`"), span));
             false
         }
 
         // 数字 → Bool 禁止
         (HirType::I32 | HirType::F64 | HirType::I64, HirType::Bool) => {
-            diagnostics.push(DiagError::new(
-                format!("cannot cast `{src}` to `bool`"),
-                span,
-            ));
+            diagnostics.push(DiagError::new(format!("cannot cast `{src}` to `bool`"), span));
             false
         }
 
         // String → 数字禁止
         (HirType::String, HirType::I32 | HirType::F64 | HirType::I64 | HirType::Bool) => {
-            diagnostics.push(DiagError::new(
-                format!("cannot cast `string` to `{target}`"),
-                span,
-            ));
+            diagnostics.push(DiagError::new(format!("cannot cast `string` to `{target}`"), span));
             false
         }
 
         // 跨族转换禁止
         _ => {
-            diagnostics.push(DiagError::new(
-                format!("invalid cast: `{src}` to `{target}`"),
-                span,
-            ));
+            diagnostics.push(DiagError::new(format!("invalid cast: `{src}` to `{target}`"), span));
             false
         }
     }
@@ -562,11 +561,7 @@ pub fn check_call(
         // 1. 实参数量检查
         if args.len() != param_types.len() {
             diagnostics.push(DiagError::new(
-                format!(
-                    "function expects {} arguments, got {}",
-                    param_types.len(),
-                    args.len()
-                ),
+                format!("function expects {} arguments, got {}", param_types.len(), args.len()),
                 span,
             ));
             return Err(());
@@ -595,10 +590,8 @@ pub fn check_call(
         // 3. 返回类型
         Ok(*ret_type.clone())
     } else {
-        diagnostics.push(DiagError::new(
-            format!("cannot call non-function type `{func_type}`"),
-            span,
-        ));
+        diagnostics
+            .push(DiagError::new(format!("cannot call non-function type `{func_type}`"), span));
         Err(())
     }
 }
@@ -618,7 +611,9 @@ fn expr_type(expr: &HirExpr) -> HirType {
             HirBinding::LocalVar { ty, .. } => ty.clone(),
             HirBinding::ModuleConst { ty, .. } => ty.clone(),
             HirBinding::ModuleShared { ty, .. } => ty.clone(),
-            HirBinding::Function { param_types, return_type, .. } => HirType::Function(param_types.clone(), Box::new(return_type.clone())),
+            HirBinding::Function { param_types, return_type, .. } => {
+                HirType::Function(param_types.clone(), Box::new(return_type.clone()))
+            }
             HirBinding::Import { ty, .. } => ty.clone(),
             HirBinding::Unresolved { .. } => HirType::Error,
         },
@@ -632,7 +627,7 @@ fn expr_type(expr: &HirExpr) -> HirType {
         HirExpr::ArrowFn(params, ret, ..) => {
             let param_types: Vec<HirType> = params.iter().map(|p| p.ty.clone()).collect();
             HirType::Function(param_types, Box::new(ret.clone()))
-        },
+        }
         HirExpr::Reference(inner, _) => HirType::Ref(Box::new(expr_type(inner))),
         HirExpr::TemplateLiteral(..) => HirType::String,
         HirExpr::AssertUnwrap(..) | HirExpr::TryPropagate(..) => HirType::Error,
@@ -708,9 +703,7 @@ fn collect_break_info(block: &HirBlock, types: &mut Vec<HirType>, has_bare: &mut
 
 fn infer_if_type(if_s: &HirIf) -> HirType {
     let then_ty = infer_block_type(&if_s.then_branch);
-    let else_ty = if_s.else_branch.as_ref()
-        .map(infer_block_type)
-        .unwrap_or(HirType::Void);
+    let else_ty = if_s.else_branch.as_ref().map(infer_block_type).unwrap_or(HirType::Void);
     if then_ty == else_ty {
         then_ty
     } else {
@@ -747,13 +740,8 @@ mod tests {
     #[test]
     fn check_binary_i32_plus_f64_error() {
         let mut diags = vec![];
-        let r = check_binary_op(
-            BinOp::Add,
-            &HirType::I32,
-            &HirType::F64,
-            Span::dummy(),
-            &mut diags,
-        );
+        let r =
+            check_binary_op(BinOp::Add, &HirType::I32, &HirType::F64, Span::dummy(), &mut diags);
         assert!(r.is_err(), "i32 + f64 should fail");
         assert!(
             diags.iter().any(|d| d.message.contains("type mismatch")),
@@ -798,13 +786,8 @@ mod tests {
     #[test]
     fn check_binary_i32_plus_i32_ok() {
         let mut diags = vec![];
-        let r = check_binary_op(
-            BinOp::Add,
-            &HirType::I32,
-            &HirType::I32,
-            Span::dummy(),
-            &mut diags,
-        );
+        let r =
+            check_binary_op(BinOp::Add, &HirType::I32, &HirType::I32, Span::dummy(), &mut diags);
         assert_eq!(r, Ok(HirType::I32));
         assert!(diags.is_empty());
     }
@@ -813,13 +796,8 @@ mod tests {
     #[test]
     fn check_binary_f64_plus_f64_ok() {
         let mut diags = vec![];
-        let r = check_binary_op(
-            BinOp::Add,
-            &HirType::F64,
-            &HirType::F64,
-            Span::dummy(),
-            &mut diags,
-        );
+        let r =
+            check_binary_op(BinOp::Add, &HirType::F64, &HirType::F64, Span::dummy(), &mut diags);
         assert_eq!(r, Ok(HirType::F64));
     }
 
@@ -827,13 +805,7 @@ mod tests {
     #[test]
     fn check_binary_eq_i32_returns_bool() {
         let mut diags = vec![];
-        let r = check_binary_op(
-            BinOp::Eq,
-            &HirType::I32,
-            &HirType::I32,
-            Span::dummy(),
-            &mut diags,
-        );
+        let r = check_binary_op(BinOp::Eq, &HirType::I32, &HirType::I32, Span::dummy(), &mut diags);
         assert_eq!(r, Ok(HirType::Bool));
     }
 
@@ -841,13 +813,8 @@ mod tests {
     #[test]
     fn check_binary_and_bool_returns_bool() {
         let mut diags = vec![];
-        let r = check_binary_op(
-            BinOp::And,
-            &HirType::Bool,
-            &HirType::Bool,
-            Span::dummy(),
-            &mut diags,
-        );
+        let r =
+            check_binary_op(BinOp::And, &HirType::Bool, &HirType::Bool, Span::dummy(), &mut diags);
         assert_eq!(r, Ok(HirType::Bool));
     }
 
@@ -855,13 +822,8 @@ mod tests {
     #[test]
     fn check_binary_and_i32_error() {
         let mut diags = vec![];
-        let r = check_binary_op(
-            BinOp::And,
-            &HirType::I32,
-            &HirType::I32,
-            Span::dummy(),
-            &mut diags,
-        );
+        let r =
+            check_binary_op(BinOp::And, &HirType::I32, &HirType::I32, Span::dummy(), &mut diags);
         assert!(r.is_err());
     }
 
@@ -914,13 +876,8 @@ mod tests {
         // 当 lhs 是 Error 时，check_binary_op 不应该再报错
         // 这在 check_expr 中已处理：遇到 Error 操作数直接返回
         let mut diags = vec![];
-        let r = check_binary_op(
-            BinOp::Add,
-            &HirType::Error,
-            &HirType::F64,
-            Span::dummy(),
-            &mut diags,
-        );
+        let r =
+            check_binary_op(BinOp::Add, &HirType::Error, &HirType::F64, Span::dummy(), &mut diags);
         assert!(r.is_err()); // Error 哨兵仍返回 Err
     }
 }

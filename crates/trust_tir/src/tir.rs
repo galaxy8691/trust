@@ -273,10 +273,7 @@ pub fn lower_hir(hir: &HirProgram) -> Result<TirProgram, Vec<DiagError>> {
     }
 
     if diags.is_empty() {
-        Ok(TirProgram {
-            file: hir.file.clone(),
-            functions,
-        })
+        Ok(TirProgram { file: hir.file.clone(), functions })
     } else {
         Err(diags)
     }
@@ -466,7 +463,10 @@ fn lower_if_stmt(if_s: &HirIf, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
     }
 
     // else 分支
-    ctx.new_block(else_id, if_s.else_branch.as_ref().map(|b| b.span.clone()).unwrap_or(Span::dummy()));
+    ctx.new_block(
+        else_id,
+        if_s.else_branch.as_ref().map(|b| b.span.clone()).unwrap_or(Span::dummy()),
+    );
     if let Some(ref else_b) = if_s.else_branch {
         lower_block(else_b, ctx, diags);
     }
@@ -578,13 +578,25 @@ fn lower_forof_stmt(f: &HirForOf, ctx: &mut LowerCtx, _diags: &mut Vec<DiagError
     let zero_tmp = ctx.next_tmp();
     ctx.emit(TirOp::Let(zero_tmp, TirValue::IntLiteral(0), f.span.clone()));
     let cond_tmp = ctx.next_tmp();
-    ctx.emit(TirOp::Binary(cond_tmp, TirValue::Var(count_tmp), BinOp::Gt, TirValue::Var(zero_tmp), f.span.clone()));
+    ctx.emit(TirOp::Binary(
+        cond_tmp,
+        TirValue::Var(count_tmp),
+        BinOp::Gt,
+        TirValue::Var(zero_tmp),
+        f.span.clone(),
+    ));
     finish_block(ctx, Terminator::If(cond_tmp, body_id, exit_id));
 
     ctx.new_block(body_id, f.body.span.clone());
     // 递减计数 → 第二次迭代时 count=0，条件为假退出
     let dec_tmp = ctx.next_tmp();
-    ctx.emit(TirOp::Binary(dec_tmp, TirValue::Var(count_tmp), BinOp::Sub, TirValue::IntLiteral(1), f.span.clone()));
+    ctx.emit(TirOp::Binary(
+        dec_tmp,
+        TirValue::Var(count_tmp),
+        BinOp::Sub,
+        TirValue::IntLiteral(1),
+        f.span.clone(),
+    ));
     ctx.emit(TirOp::Let(count_tmp, TirValue::Var(dec_tmp), f.span.clone()));
     // 注册迭代元素（Phase 1 简化：元素即迭代器引用）
     let item_tmp = ctx.next_tmp();
@@ -634,16 +646,23 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
             ctx.new_block(then_id, if_s.then_branch.span.clone());
             let then_val = lower_block_to_value(&if_s.then_branch, ctx, diags, result_tmp);
             ctx.emit(TirOp::Let(result_tmp, then_val, if_s.span.clone()));
-            if !is_terminated(ctx) { finish_block(ctx, Terminator::Goto(join_id)); }
+            if !is_terminated(ctx) {
+                finish_block(ctx, Terminator::Goto(join_id));
+            }
 
-            ctx.new_block(else_id, if_s.else_branch.as_ref().map(|b| b.span.clone()).unwrap_or(Span::dummy()));
+            ctx.new_block(
+                else_id,
+                if_s.else_branch.as_ref().map(|b| b.span.clone()).unwrap_or(Span::dummy()),
+            );
             let else_val = if let Some(ref eb) = if_s.else_branch {
                 lower_block_to_value(eb, ctx, diags, result_tmp)
             } else {
                 TirValue::Error
             };
             ctx.emit(TirOp::Let(result_tmp, else_val, if_s.span.clone()));
-            if !is_terminated(ctx) { finish_block(ctx, Terminator::Goto(join_id)); }
+            if !is_terminated(ctx) {
+                finish_block(ctx, Terminator::Goto(join_id));
+            }
 
             ctx.new_block(join_id, if_s.span.clone());
             TirValue::Var(result_tmp)
@@ -658,7 +677,9 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
 
             ctx.new_block(body_id, l.body.span.clone());
             lower_block(&l.body, ctx, diags);
-            if !is_terminated(ctx) { finish_block(ctx, Terminator::Goto(body_id)); }
+            if !is_terminated(ctx) {
+                finish_block(ctx, Terminator::Goto(body_id));
+            }
 
             ctx.loop_stack.pop();
             ctx.new_block(exit_id, l.span.clone());
@@ -683,26 +704,25 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
         }
         HirExpr::Call(callee, args, _ty, span) => {
             let c = lower_expr_to_value(callee, ctx, diags);
-            let targs: Vec<TirArg> = args.iter().map(|a| {
-                let val = lower_expr_to_value(&a.expr, ctx, diags);
-                // §3.2.2 K2 fix: move 实参需要 emit TirOp::Move，让 moveck 检测所有权转移
-                let call_val = if a.mode == ParamMode::Move {
-                    if let TirValue::Var(src) = &val {
-                        let dst = ctx.next_tmp();
-                        ctx.emit(TirOp::Move(dst, *src, a.span.clone()));
-                        TirValue::Var(dst)
+            let targs: Vec<TirArg> = args
+                .iter()
+                .map(|a| {
+                    let val = lower_expr_to_value(&a.expr, ctx, diags);
+                    // §3.2.2 K2 fix: move 实参需要 emit TirOp::Move，让 moveck 检测所有权转移
+                    let call_val = if a.mode == ParamMode::Move {
+                        if let TirValue::Var(src) = &val {
+                            let dst = ctx.next_tmp();
+                            ctx.emit(TirOp::Move(dst, *src, a.span.clone()));
+                            TirValue::Var(dst)
+                        } else {
+                            val // 字面量等不需要 Move
+                        }
                     } else {
-                        val // 字面量等不需要 Move
-                    }
-                } else {
-                    val
-                };
-                TirArg {
-                    mode: a.mode,
-                    value: call_val,
-                    span: a.span.clone(),
-                }
-            }).collect();
+                        val
+                    };
+                    TirArg { mode: a.mode, value: call_val, span: a.span.clone() }
+                })
+                .collect();
             let result_tmp = ctx.next_tmp();
             ctx.emit(TirOp::Call(Some(result_tmp), c, targs, span.clone()));
             TirValue::Var(result_tmp)
@@ -829,7 +849,12 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
     }
 }
 
-fn lower_block_to_value(block: &HirBlock, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>, result_tmp: TmpVar) -> TirValue {
+fn lower_block_to_value(
+    block: &HirBlock,
+    ctx: &mut LowerCtx,
+    diags: &mut Vec<DiagError>,
+    result_tmp: TmpVar,
+) -> TirValue {
     for (i, stmt) in block.statements.iter().enumerate() {
         let is_last = i + 1 == block.statements.len();
         if is_last {
@@ -904,11 +929,7 @@ fn collect_free_vars_expr(
                 let already_captured = captured.iter().any(|c| c.name == *name);
                 if !already_captured {
                     if let Some(tmp) = var_map.lookup_name(name) {
-                        captured.push(CapturedVar {
-                            name: name.clone(),
-                            tmp,
-                            kind,
-                        });
+                        captured.push(CapturedVar { name: name.clone(), tmp, kind });
                     }
                 }
             }
@@ -999,12 +1020,7 @@ impl LowerCtx {
                 span: Span::dummy(),
             });
         }
-        self.blocks[id] = BasicBlock {
-            id,
-            ops: vec![],
-            terminator: Terminator::Unreachable,
-            span,
-        };
+        self.blocks[id] = BasicBlock { id, ops: vec![], terminator: Terminator::Unreachable, span };
     }
 
     fn emit(&mut self, op: TirOp) {
@@ -1056,29 +1072,33 @@ mod tests {
             params: vec![],
             return_type: HirType::I32,
             body: HirBlock {
-                statements: vec![
-                    HirStmt::Let(HirLet {
-                        name: "x".into(),
-                        mutable: false,
-                        ty: HirType::I32,
-                        init: Box::new(HirExpr::If(
-                            HirIf {
-                                condition: Box::new(HirExpr::BoolLiteral(true, Span::dummy())),
-                                then_branch: HirBlock {
-                                    statements: vec![HirStmt::Expr(HirExpr::IntLiteral(1, Span::dummy()))],
-                                    span: Span::dummy(),
-                                },
-                                else_branch: Some(HirBlock {
-                                    statements: vec![HirStmt::Expr(HirExpr::IntLiteral(0, Span::dummy()))],
-                                    span: Span::dummy(),
-                                }),
+                statements: vec![HirStmt::Let(HirLet {
+                    name: "x".into(),
+                    mutable: false,
+                    ty: HirType::I32,
+                    init: Box::new(HirExpr::If(
+                        HirIf {
+                            condition: Box::new(HirExpr::BoolLiteral(true, Span::dummy())),
+                            then_branch: HirBlock {
+                                statements: vec![HirStmt::Expr(HirExpr::IntLiteral(
+                                    1,
+                                    Span::dummy(),
+                                ))],
                                 span: Span::dummy(),
                             },
-                            Span::dummy(),
-                        )),
-                        span: Span::dummy(),
-                    }),
-                ],
+                            else_branch: Some(HirBlock {
+                                statements: vec![HirStmt::Expr(HirExpr::IntLiteral(
+                                    0,
+                                    Span::dummy(),
+                                ))],
+                                span: Span::dummy(),
+                            }),
+                            span: Span::dummy(),
+                        },
+                        Span::dummy(),
+                    )),
+                    span: Span::dummy(),
+                })],
                 span: Span::dummy(),
             },
             scope: Scope::new(),
@@ -1095,11 +1115,8 @@ mod tests {
     /// Moves a non-Copy variable
     #[test]
     fn move_non_copy_uses_move_op() {
-        let let_binding = HirBinding::LocalVar {
-            ty: HirType::String,
-            mutable: false,
-            span: Span::dummy(),
-        };
+        let let_binding =
+            HirBinding::LocalVar { ty: HirType::String, mutable: false, span: Span::dummy() };
         let let_s = HirLet {
             name: "b".into(),
             mutable: false,

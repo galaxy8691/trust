@@ -21,13 +21,7 @@ pub struct Span {
 
 impl Span {
     pub fn dummy() -> Self {
-        Span {
-            file: String::new(),
-            line_start: 0,
-            line_end: 0,
-            col_start: 0,
-            col_end: 0,
-        }
+        Span { file: String::new(), line_start: 0, line_end: 0, col_start: 0, col_end: 0 }
     }
 }
 
@@ -283,7 +277,10 @@ pub enum Expr {
     /// `loop` 是表达式
     LoopExpr(Box<LoopExpr>),
     /// `name = expr` — 不可变/可变变量的赋值表达式
-    Assign { name: String, value: Box<Expr> },
+    Assign {
+        name: String,
+        value: Box<Expr>,
+    },
 }
 
 /// 注：不保留 Expr::Paren —— 括号由 parser 在 Pratt 解析中消耗，不产生 AST 节点。
@@ -427,17 +424,15 @@ mod tests {
         assert_eq!(literals.len(), 6);
 
         // Binary / Unary
-        let _bin = Expr::Binary(Box::new(Expr::IntLiteral(1)), BinOp::Add, Box::new(Expr::IntLiteral(2)));
+        let _bin =
+            Expr::Binary(Box::new(Expr::IntLiteral(1)), BinOp::Add, Box::new(Expr::IntLiteral(2)));
         let _un = Expr::Unary(UnaryOp::Neg, Box::new(Expr::IntLiteral(1)));
 
         // Reference / AssertUnwrap / TryPropagate / AsCast
         let _ref = Expr::Reference(Box::new(Expr::Ident("x".into())));
         let _bang = Expr::AssertUnwrap(Box::new(Expr::Ident("x".into())));
         let _q = Expr::TryPropagate(Box::new(Expr::Ident("x".into())));
-        let _as = Expr::AsCast {
-            expr: Box::new(Expr::IntLiteral(1)),
-            ty: Type::NumberType,
-        };
+        let _as = Expr::AsCast { expr: Box::new(Expr::IntLiteral(1)), ty: Type::NumberType };
 
         // MemberAccess
         let _ma = Expr::MemberAccess(MemberAccess {

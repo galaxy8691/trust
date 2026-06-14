@@ -303,17 +303,11 @@ pub struct Scope {
 
 impl Scope {
     pub fn new() -> Self {
-        Scope {
-            parent: None,
-            bindings: HashMap::new(),
-        }
+        Scope { parent: None, bindings: HashMap::new() }
     }
 
     pub fn new_child(parent: Box<Scope>) -> Self {
-        Scope {
-            parent: Some(parent),
-            bindings: HashMap::new(),
-        }
+        Scope { parent: Some(parent), bindings: HashMap::new() }
     }
 
     /// 在当前作用域插入绑定
@@ -334,39 +328,17 @@ impl Scope {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirBinding {
     /// 降级阶段占位，名称解析后替换为实际绑定
-    Unresolved {
-        name: String,
-        span: Span,
-    },
+    Unresolved { name: String, span: Span },
     /// 局部变量（let）
-    LocalVar {
-        ty: HirType,
-        mutable: bool,
-        span: Span,
-    },
+    LocalVar { ty: HirType, mutable: bool, span: Span },
     /// 模块级常量（const）
-    ModuleConst {
-        ty: HirType,
-        span: Span,
-    },
+    ModuleConst { ty: HirType, span: Span },
     /// 模块级共享变量（shared）
-    ModuleShared {
-        ty: HirType,
-        span: Span,
-    },
+    ModuleShared { ty: HirType, span: Span },
     /// 函数
-    Function {
-        param_types: Vec<HirType>,
-        return_type: HirType,
-        span: Span,
-    },
+    Function { param_types: Vec<HirType>, return_type: HirType, span: Span },
     /// 导入的函数/变量（跨文件绑定）
-    Import {
-        source: String,
-        export_name: String,
-        ty: HirType,
-        span: Span,
-    },
+    Import { source: String, export_name: String, ty: HirType, span: Span },
 }
 
 /// HIR 导入声明（已解析）
@@ -547,10 +519,7 @@ mod tests {
 
     #[test]
     fn hir_type_display_array() {
-        assert_eq!(
-            format!("{}", HirType::Array(Box::new(HirType::I32))),
-            "i32[]"
-        );
+        assert_eq!(format!("{}", HirType::Array(Box::new(HirType::I32))), "i32[]");
     }
 
     #[test]
@@ -565,11 +534,7 @@ mod tests {
         let mut scope = Scope::new();
         scope.insert(
             "x",
-            HirBinding::LocalVar {
-                ty: HirType::I32,
-                mutable: false,
-                span: Span::dummy(),
-            },
+            HirBinding::LocalVar { ty: HirType::I32, mutable: false, span: Span::dummy() },
         );
         let b = scope.lookup("x").expect("x should be found");
         assert!(matches!(b, HirBinding::LocalVar { ty: HirType::I32, .. }));
@@ -578,13 +543,7 @@ mod tests {
     #[test]
     fn scope_lookup_parent_when_not_in_child() {
         let mut parent = Scope::new();
-        parent.insert(
-            "a",
-            HirBinding::ModuleConst {
-                ty: HirType::String,
-                span: Span::dummy(),
-            },
-        );
+        parent.insert("a", HirBinding::ModuleConst { ty: HirType::String, span: Span::dummy() });
         let child = Scope::new_child(Box::new(parent));
         assert!(child.lookup("a").is_some());
     }

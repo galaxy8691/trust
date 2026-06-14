@@ -24,10 +24,7 @@ impl SourceMapping {
     /// assert!(sm.trust_to_rust.is_empty());
     /// ```
     pub fn new() -> Self {
-        SourceMapping {
-            trust_to_rust: HashMap::new(),
-            rust_to_trust: HashMap::new(),
-        }
+        SourceMapping { trust_to_rust: HashMap::new(), rust_to_trust: HashMap::new() }
     }
 
     /// §7.2: 插入一条 Trust → Rust 映射

@@ -21,9 +21,8 @@ impl ModuleGraph {
     }
 
     pub fn add_module(&mut self, path: &str, imports: Vec<String>, exports: HashSet<String>) {
-        self.modules.insert(path.to_string(), ModuleInfo {
-            path: path.to_string(), imports, exports,
-        });
+        self.modules
+            .insert(path.to_string(), ModuleInfo { path: path.to_string(), imports, exports });
     }
 
     /// 拓扑排序 + 循环检测。
