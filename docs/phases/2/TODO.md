@@ -1,0 +1,419 @@
+# Phase 2 — 修正 Phase 1 对齐 v2.0 设计 TODO
+
+> **目标：** 在不重写编译管线骨架的前提下，把 Phase 1 实现修正到 v2.0 设计。
+> **分支：** `phase2-v2-align`
+> **基准设计：** `docs/Trust-设计文档.md` v2.0（唯一权威规范）
+> **期限：** 5–6 周
+> **优先级：** P0（阻塞 Phase 3+）
+> **前置：** Phase 1 ✅ 完成
+
+---
+
+## 背景
+
+Phase 1 在 v2.0 设计重构前交付，基于旧设计实现。本 Phase 的使命：
+1. **移除旧设计残留**（`loop`/`bigint`/`interface`/`impl`/`select` 等）
+2. **修正现存实现到 v2.0 语义**（`number`=f64、函数声明规则、`&mut`/闭包调用）
+3. **重核关键字表**（54→43）
+4. **规范对齐**（`spec/trust-spec.md` 随实现推进同步修正）
+5. **测试迁移**（56 集成测试在 v2.0 语义下重新通过）
+
+---
+
+## 2.1 移除已废弃的语法与类型 + 规范对齐 v2.0
+
+**产出物：** 清理后的 parser/HIR/TIR/codegen + 关键字表重核（54→43）+ spec 修正  
+**工作量：** 1.5–2 周  
+**优先级：** P0  
+**依赖：** Phase 1 完成  
+**分支：** `phase2-v2-align`
+
+### 2.1.1 关键字表重核（lexer）
+
+**涉及 crate：** `trust_parser`（`crates/trust_parser/src/lexer.rs`）
+
+- [ ] **移除 16 个关键字：**
+  - `loop` → 用 `while (true)` 替代（设计 §6.2）
+  - `bigint` → `number`=f64 足够（设计 §14）
+  - `interface` / `impl` → 纯结构类型 + Go 风格 receiver（设计 §14）
+  - `select` → 多通道竞速取消（设计 §14）
+  - `undefined` → 只有 `null`（设计 §2.2）
+  - `None` / `Some` → `Option` 不暴露给用户（设计 §14）
+  - `Ok` / `Err` → `Result` 不暴露给用户（设计 §14）
+  - `Rc` / `Arc` / `Weak` / `Box` → 用户不接触底层 Rust 类型（设计 §3.7）
+  - `dyn` → 禁止动态分发（设计 §14）
+  - `extends` → 无 `<T extends ...>` 语法（设计 §2.5）
+- [ ] **净新增 5 个关键字（以下均为"仅关键字预留"，表达式/语句实现归后续 Phase）：**
+  - `unknown` → 仅关键字预留，类型/表达式实现归 Phase 3（设计 §2.6）
+  - `try` / `catch` → 仅关键字预留，语句实现归 Phase 4（设计 §5.1）
+  - `null` → 唯一空值（设计 §2.7）。**注意：** 移除 `None_` 后需将 `null` 关键字映射到 `Expr::Null`（取代旧 `None_→Expr::Null` 路径）
+  - `panic` → 仅关键字预留，`panic!("msg")` 表达式实现归 Phase 4（设计 §5.2）
+- [ ] **确认已存在无需操作：** `type` / `match` / `throw` / `shared` / `spawn`（均已存在于当前 lexer）
+- [ ] 更新 `static KEYWORDS` 映射表（54→43），每项附带 `// 设计 §X.X` 来源注释
+- [ ] 更新 lexer 文件头注释：`//! 54 个关键字` → `//! 43 个关键字`
+- [ ] 更新 `TokenKind` 枚举——移除上述 16 个废弃变体（含 `BigIntLiteral`），新增 5 个变体
+
+### 2.1.2 移除 `loop`（端到端）
+
+**涉及 crate：** `trust_parser`、`trust_hir`、`trust_tir`、`trust_codegen`
+
+- [ ] **lexer：** 移除 `TokenKind::Loop` 变体（由 2.1.1 覆盖）
+- [ ] **parser/ast：** 删除 `Stmt::Loop` 与 `Expr::LoopExpr` AST 节点
+- [ ] **parser：** 移除 `loop { ... }` 解析路径（含 `break` 带值在 `LoopExpr` 中的处理）
+- [ ] **parser/ast：** 删除/禁用 `BreakStmt.value` 字段（`loop` 移除后 `break value` 失去合法语境）
+- [ ] **HIR：** 移除 `Loop`/`LoopExpr` 降级逻辑；`while (true)` 已在 Phase 1 支持，无需新增
+- [ ] **TIR：** 移除 `Loop` 对应的 TIR 节点与 borrowck 路径
+- [ ] **codegen：** 移除 `loop` → Rust 代码生成分支
+- [ ] **验证：** `grep -r "Loop" crates/trust_parser/src/ crates/trust_hir/src/ crates/trust_tir/src/ crates/trust_codegen/src/` 确认非注释引用已全部清理
+
+### 2.1.3 移除 `bigint`
+
+**涉及 crate：** `trust_parser`、`trust_hir`、`trust_codegen`
+
+- [ ] **lexer：** 移除 `TokenKind::BigIntType` 变体 + i64 字面量相关 token（由 2.1.1 覆盖）
+- [ ] **parser/ast：** 删除 `Type::BigInt` AST 类型节点
+- [ ] **parser：** 移除 `bigint` 类型标注与 i64 字面量解析路径
+- [ ] **HIR typeck：** 移除 `BigInt` 类型检查规则
+- [ ] **codegen：** 移除 `bigint` → Rust `i64` 映射
+- [ ] **验证：** `grep -ri "bigint" crates/` 确认仅剩注释/文档
+
+### 2.1.4 移除 `interface` / `impl` 关键字
+
+**涉及 crate：** `trust_parser`
+
+- [ ] **lexer：** 移除 `TokenKind::Interface` / `TokenKind::Impl`（由 2.1.1 覆盖）
+- [ ] **parser：** 移除 parser 中 `interface`/`impl` 关键字同步点（Phase 1 未实现语义，仅清理残留）
+- [ ] **验证：** `grep -r "interface\|impl" crates/trust_parser/src/` 确认仅剩注释
+
+### 2.1.5 移除 `select` 预留
+
+**涉及 crate：** `trust_parser`
+
+- [ ] **lexer：** 移除 `TokenKind::Select`（由 2.1.1 覆盖）
+- [ ] **parser/ast：** 删除 AST 中 `select` 转义槽
+- [ ] **验证：** `grep -ri "select" crates/trust_parser/src/` 确认仅剩注释
+
+### 2.1.6 移除其余旧设计残留关键字 + 更新辅助函数
+
+**涉及 crate：** `trust_parser`（lexer 2.1.1 已覆盖；此处确认其他 crate 无残留 + 更新辅助函数）
+
+- [ ] **更新 `TokenKind::can_end_stmt`**（`lexer.rs:174`）：移除 `None_` / `BigIntLiteral` / `Bang` 引用，替换为 `null` 等新 token
+- [ ] **更新 `Parser::can_expr_start`**（`parser.rs:609`）：移除 `None_` / `BigIntLiteral` / `Loop` / `Bang` 引用，替换为 `null` 等新 token
+- [ ] **验证残留引用：** `grep -rni "tokenkind::undefined\|None_\|Some_\|Ok_\|Err_\|Rc\|Arc\|Weak\|Box_\|Dyn\|Extends\|BigIntLiteral" crates/` 确认所有引用已清理
+- [ ] 若 HIR/codegen 中有对这些类型的特殊处理（如 `Option`/`Result` 翻译），一并移除
+
+### 2.1.7 规范对齐 v2.0（spec 修正，随实现同步推进）
+
+**产出物：** `spec/trust-spec.md` 中已废弃条目清除 + 本 Phase 特性的规范同步
+
+- [ ] **删除已废弃规范条目：**
+  - `interface` / `impl` 词法+语法+语义条目
+  - ADT（`type X = | ...`）语法+语义条目
+  - `Option` / `Result` / `?` / `!` 语义条目
+  - `select` 并发条目
+  - `loop` / `bigint` 词法+语法+语义条目
+- [ ] **同步本 Phase 2 修正的特性：**
+  - `number`=f64 类型规则（对应 2.2）
+  - `number` 整数语义（索引/循环/长度/FFI + 2^53 精度警告，对应 2.2）
+  - `number` 位运算约束（`&`/`|`/`^`/`<<`/`>>` 仅允许 `number`，对应 2.2）
+  - 块体函数强制返回标注规则（对应 2.3）
+  - 表达式体函数（`function f(...) = expr`）语法+语义（对应 2.3）
+- [ ] **废止旧审计：** 在 `docs/phases/0/0.3/audit-report.md` 顶部添加废止声明：
+  ```
+  > ⚠️ 本审计报告基于旧设计（pre-v2.0），已被 v2.0 设计取代。
+  > 请以 `docs/Trust-设计文档.md` v2.0 为唯一权威规范。
+  > v2.0 重新审计随 Phase 2+ 逐 Phase 推进。
+  ```
+- [ ] **章节冻结矩阵**（明确规范-实现的协同点）：
+  | 规范章节 | 冻结时机 | 对应实现 |
+  |---------|---------|---------|
+  | 词法规范（关键字集、字面量） | 2.1 完成前 | 2.1.1 关键字重核 |
+  | 类型系统核心（`number`/基本类型） | 2.2/2.3 启动前 | 2.2 number=f64 |
+  | 函数声明规则 | 2.3 启动前 | 2.3 |
+  | 具名类型/泛型/`unknown` | Phase 3 各子任务启动前 | Phase 3 |
+  | 错误/`null` | Phase 4 各子任务启动前 | Phase 4 |
+  | 并发/FFI | Phase 5/7 启动前 | Phase 5/7 |
+- [ ] **验证：** 设计文档 / 规范 / `design-constraints.md` 在 2.1/2.2/2.3 各完成时交叉核对一致性
+
+---
+
+## 2.2 `number` 统一为 f64
+
+**产出物：** HIR typeck 规则更新 + codegen 映射修改 + 整数语义落地 + 位运算约束  
+**工作量：** 1–1.5 周  
+**优先级：** P0  
+**依赖：** 2.1（关键字移除完成后，避免旧类型残留干扰）
+
+### 2.2.1 类型统一（HIR typeck）
+
+**涉及 crate：** `trust_hir`
+
+- [ ] 删除 i32 / f64 类型区分——`Type::Number` 统一为单一 f64 类型
+- [ ] 删除 `i32 + f64 → error` 类型不匹配规则
+- [ ] `number` 之间运算（`+`/`-`/`*`/`/`/`%`/`**`）自由通过，不报类型错误
+- [ ] 字面量类型推断：`404` → `number`(f64)（当前推断为 i32，需修正）
+- [ ] 验证：`cargo test -p trust_hir` 中与 number 类型相关的测试用例更新通过
+
+### 2.2.2 codegen 映射
+
+**涉及 crate：** `trust_codegen`
+
+- [ ] `Type::Number` → Rust `f64`（替换现有 i32 映射）
+- [ ] 字面量生成 f64 后缀：整数字面量 `404` → `404.0_f64`，浮点字面量 `3.14` → `3.14_f64`
+- [ ] 二元运算生成：`a + b` 保持 `a + b`（f64 原生运算，无需转换）
+- [ ] 更新所有 codegen 快照（`.snap` 文件中的 `i32` → `f64`）
+- [ ] 验证：`cargo test -p trust_codegen` 快照测试更新通过
+
+### 2.2.3 `as` 收敛
+
+**涉及 crate：** `trust_parser`、`trust_hir`
+
+- [ ] `number` 之间移除 `as` 转换需求（设计 §2.2："`number` 之间可以自由运算，不需要 `as` 转换"）
+- [ ] 移除 parser 中 `as number` / `as f64` / `as i32` 的数字转换解析路径
+- [ ] `as` 仅保留用于非 `number` 的必要转换（如 `unknown`→具体类型）
+- [ ] 验证：`cargo test -p trust_parser` 中 as 相关测试用例更新通过
+
+### 2.2.4 整数语义
+
+**涉及 crate：** `trust_hir`、`trust_codegen`
+
+- [ ] **数组索引：** `arr[n]` → codegen 生成 `arr[n as usize]`（自动插入 `as usize` 转换）
+- [ ] **循环计数：** `for (let i = 0; i < N; i++)` — 迭代变量 `i` 类型为 `number`(f64)，`i++` 等价 `i += 1.0`
+- [ ] **长度/容量：** `.length` 返回 `number`(f64)，内部存储为 `usize`，编译器自动装箱/拆箱
+- [ ] **FFI 整数（Phase 2 仅建立默认映射）：** `number` → Rust `f64` 默认映射。具体 FFI 整数转换机制（如何获知 Rust 侧是 `i32` 还是 `u64`）待 Phase 7 的 `extern "rust"` 类型注解——Phase 2 不实现跨 FFI 边界的整数类型推导
+- [ ] **超 2^53 精度警告：** 字面量 `> 2^53` 或 `< -(2^53)`，或数组索引为非整数/超范围时，发出 `Warning` 级别诊断（`Severity::Warning`），可附 `Help` 子诊断说明精度风险
+- [ ] 验证：编写端到端测试用例覆盖数组索引/循环计数/长度 3 场景（在 2.5 中集成；FFI 场景延后 Phase 7）
+
+### 2.2.5 位运算（新增 token/AST/parser/typeck/codegen 完整路径）
+
+**涉及 crate：** `trust_parser`、`trust_hir`、`trust_codegen`
+
+> **背景：** 设计 §2.2 要求位运算 `&`/`|`/`^`/`<<`/`>>` 仅允许 `number`。当前 `&` 仅用于 `Expr::Reference`（`TokenKind::Amp`），`|` 退化为 `Ident`，`^`/`<<`/`>>` 无对应 token。需新增完整路径。
+
+- [ ] **lexer token 新增：**
+  - `|` → 从当前退化为 `Ident` 改为识别为 `TokenKind::Pipe`
+  - `&` → 在 parser 中按上下文区分 `TokenKind::Amp`（前缀 `&x` = Reference）与 `TokenKind::BitAnd`（中缀 `a & b`）
+  - `^` → 新增 `TokenKind::Caret`
+  - `<<` → 新增 `TokenKind::Shl`
+  - `>>` → 新增 `TokenKind::Shr`
+- [ ] **AST：** `BinOp` 枚举新增 `BitAnd` / `BitOr` / `BitXor` / `Shl` / `Shr` 变体
+- [ ] **parser：** 在 `parse_binary` 中新增位运算中缀解析（运算符优先级：`<<`/`>>` > `&` > `^` > `|`）
+- [ ] **HIR typeck：** 位运算操作数类型检查——仅允许 `number`
+- [ ] **codegen：** Rust `f64` 不支持位运算——生成 `f64::to_bits()`→`u64`→位运算→`f64::from_bits()` 转换链，并附加注释 `/* bitwise on f64: behavior per IEEE 754 */`
+- [ ] **验证：** `cargo test -p trust_parser` 位运算解析 + `cargo test -p trust_hir` 位运算类型检查 + 端到端测试（在 2.5 中集成）
+
+---
+
+## 2.3 函数声明规则对齐
+
+**产出物：** parser 支持表达式体函数 + typeck 块体强制返回标注 + 箭头函数返回推断  
+**工作量：** 1 周  
+**优先级：** P0  
+**依赖：** 2.1（关键字重核完成，避免语法歧义）
+
+### 2.3.1 块体函数强制返回标注
+
+**涉及 crate：** `trust_parser`、`trust_hir`（typeck）
+
+- [ ] **parser：** 解析 `function f(...) { ... }` 时，若函数签名无 `: ReturnType` → 暂不报错，传递到 HIR typeck 阶段统一处理
+- [ ] **HIR typeck：**
+  - 遍历函数声明：`function f(...) { ... }` 无返回类型标注 → **编译错误**
+  - 错误信息：`"块体函数必须显式标注返回类型。无返回值时使用 :void"`（`trust_error` 新错误码 E0XXX）
+  - `function f(...): void { ... }` → 合法，`void` 返回类型
+  - `function main(): void { ... }` → 入口函数允许 `:void`
+- [ ] 验证：添加 parser/typeck 测试——无返回标注的块体函数应报错，有 `:void` 应通过
+
+### 2.3.2 表达式体函数
+
+**涉及 crate：** `trust_parser`、`trust_hir`（typeck）
+
+> **现状：** 当前 parser 已支持 `function f(...) = expr` 语法（`snap_fn_single` 测试 `function sq(x:number)=x*x` 已通过），将 `= expr` 包装为 `ReturnStmt + Block`，语义满足设计 §4.1。**无需 AST 重构。**
+
+- [ ] **parser：** 确认表达式体函数解析路径完整，补充边界测试（嵌套表达式、模板字符串、箭头函数作为表达式体）
+- [ ] **HIR typeck：** 表达式体函数返回类型由表达式推断（设计 §4.1）；验证推断正确性
+- [ ] 示例：
+  ```js
+  function square(x: number) = x * x;               // 返回 number
+  function greet(name: string) = `Hello, ${name}`;   // 返回 string
+  ```
+- [ ] 验证：`cargo test -p trust_parser` + typeck 返回类型推断测试通过
+
+### 2.3.3 箭头函数返回类型推断
+
+**涉及 crate：** `trust_hir`（typeck）
+
+- [ ] Phase 1 已支持箭头函数解析（`(x): T => expr`），补齐返回类型推断路径
+- [ ] 箭头函数 `(x) => expr` 的返回类型由 `expr` 的类型推断（与表达式体函数一致）
+- [ ] 箭头函数 `(x): T => expr` 的返回类型以 `T` 为准（标注优先）
+- [ ] 验证：typeck 测试——箭头函数推断返回类型与标注返回类型均通过
+
+---
+
+## 2.4 承接 Phase 1 遗留项
+
+**产出物：** `&mut x` 可变引用 + 闭包调用 `r()` + JSON→serde 评估  
+**工作量：** 1 周  
+**优先级：** P0（交付标准强制要求 `&mut`/闭包调用可用，故为阻塞项）  
+**依赖：** 2.1
+
+### 2.4.1 #7 可变引用 `&mut x`
+
+**涉及 crate：** `trust_parser`、`trust_tir`
+
+- [ ] **parser：**
+  - Phase 1 已支持 `let mut`，补齐 `&mut x` 表达式解析
+  - `&mut x` → AST 节点 `Expr::RefMut(Box<Expr>)`
+  - `&x` → 已有 `Expr::Ref`，确认与设计 §3.5 一致
+- [ ] **TIR borrowck：**
+  - `&mut x` → 可变借用路径：检查 `x` 是否已存在活跃可变借用或只读借用
+  - 错误信息：已有活跃借用时输出 borrowck 错误（含修复建议——如缩小作用域或 clone）
+  - `&x` → 只读借用路径（Phase 1 可能已部分支持）
+- [ ] 验证：添加端到端测试——`&mut` 在 borrowck 正确场景通过，冲突场景报错
+
+### 2.4.2 #8 闭包调用 `r()`
+
+**涉及 crate：** `trust_hir`（name_res）、`trust_tir`
+
+- [ ] **HIR name_res：**
+  - 箭头函数绑定 → 保留为 `ArrowFn`（Phase 1 可能仅支持声明不支持调用）
+  - `let f = (x) => x + 1; f(5)` → name_res 将 `f` 解析为闭包类型，调用处生成 `Call(Ident("f"), args)`
+- [ ] **TIR：**
+  - 利用现有 `TirFunction` 结构，新增 `captures: Vec<Capture>` 字段表示闭包捕获（与现有 `TirFunction`/`TirOp`/`TirValue` 架构对齐）
+  - 捕获分析（与 §3.4 一致）：默认只读借用 + `move` 闭包
+  - 闭包调用 → 编译为闭包体的内联/函数调用
+- [ ] **为 Phase 3 打好基础：** 闭包类型推断机制与隐式泛型共享——确保 `TirFunction.captures` 设计可扩展至泛型闭包
+- [ ] 验证：添加端到端测试——闭包定义+调用通过编译并正确执行
+
+### 2.4.3 #10 JSON→serde 迁移评估
+
+**涉及 crate：** `trust_error`
+
+- [ ] **评估：** `trust_error` 的 JSON 输出（`--error-format=json`）当前是否用 `serde` 还是手写 JSON
+- [ ] **决策：**
+  - 若手写 JSON：评估引入 `serde` + `serde_json` 的成本（二进制大小增量、编译时间）
+  - 若已用 serde：确认版本与 features 合理
+- [ ] **原则：** 零依赖策略——若 serde 增量 < 5% 编译时间且二进制增量 < 200KB，可引入；否则坚持手写
+- [ ] 产出物：1 页评估文档 `docs/phases/2/2.4/serde-evaluation.md`
+
+---
+
+## 2.5 测试与夹具迁移
+
+**产出物：** 56 集成测试在 v2.0 语义下重新全部通过 + 快照更新  
+**工作量：** 0.5 周  
+**优先级：** P0  
+**依赖：** 2.1, 2.2, 2.3, 2.4（`&mut`/闭包调用的 e2e 测试依赖 2.4 完成）
+
+### 2.5.1 移除废弃特性的测试夹具
+
+- [ ] 移除/改写依赖 `loop` 的夹具（如 `loop_break.trust`）
+- [ ] 移除/改写依赖 `bigint` 的夹具（如 `bigint_literal.trust`）
+- [ ] 移除/改写依赖 `i32`-`f64` 类型区分的夹具（如混合运算报错测试）
+- [ ] 移除/改写依赖 `as` 数字转换的夹具
+- [ ] 若有 `interface`/`impl`/`select` 相关测试夹具，移除
+
+### 2.5.2 更新 v2.0 语义的快照
+
+- [ ] **codegen 测试预期输出：** 检查 `assert_compiles!` / `assert_output!` 宏中的预期 Rust 代码文本，将 `i32` → `f64`（字面量后缀、类型标注、函数签名）
+- [ ] **HIR typeck 测试：** 类型推断结果从 i32/f64 → `number`(f64)
+- [ ] **错误信息测试：** 移除 `loop`/`bigint` 相关错误信息，新增块体函数无返回标注等新错误预期
+
+### 2.5.3 端到端验证
+
+- [ ] 47 个 `.trust` 夹具全部重新编译通过
+- [ ] 56 个集成测试（46 e2e + 10 CLI）全部通过（与 `crates/trustc/tests/integration.rs` 中 `#[test]` 数量一致）
+- [ ] `cargo test --workspace` 零失败
+- [ ] 新增 v2.0 语义端到端测试：
+  - `number`=f64 运算（整数+浮点混合）
+  - 块体函数 `:void` 返回标注
+  - 表达式体函数 `function square(x) = x * x`
+  - `&mut` 可变引用（正确+冲突场景）
+  - 闭包调用（简单闭包 + move 闭包）
+
+### 2.5.4 CI 验证
+
+- [ ] `cargo clippy --workspace -- -D warnings` 通过
+- [ ] `cargo fmt --check --all` 通过
+- [ ] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空（P0）
+- [ ] `cargo test --workspace` 通过
+
+---
+
+## 2.6 Phase 1 下沉的工程项
+
+**优先级：** P1（非阻塞 Phase 3，但应在 Phase 2 收尾）  
+**依赖：** 2.1
+
+### 2.6.1 Trust.toml 解析与 Cargo.toml 桥接（原 1.7.2）
+
+**涉及 crate：** `trustc`
+
+- [ ] `Trust.toml` 配置读取（TOML 解析）
+  - `[runtime]` 节：`async = "tokio"` 等（设计 §8.1）
+  - `[dependencies]` → 最终映射到 Cargo.toml `[dependencies]`
+  - `[trust-dependencies]` → 远期（Phase 8），Phase 2 仅占位
+- [ ] 桥接生成 `Cargo.toml`：从 `Trust.toml` + 编译器内建模板生成
+- [ ] 验证：`trustc compile --project` 自动检测 `Trust.toml` 并生成/更新 `Cargo.toml`
+
+### 2.6.2 CI 性能回归监控（原 1.8.3）
+
+- [ ] CI job: `cargo bench --bench compile_bench` 运行（criterion 基准比较）
+- [ ] 基准记录在 `benches/BASELINE.md`，`±10%` 视为回归
+- [ ] 5000 行基准：准备一个 5000 行的 `.trust` 合成输入文件作为编译基准
+
+### 2.6.3 Fuzz 语料库初始化（原 1.8.4）
+
+- [ ] 从集成测试的 `.trust` 文件初始化 fuzz 语料库
+- [ ] 语料库路径：`fuzz/corpus/parse/`、`fuzz/corpus/tir_borrowck/`、`fuzz/corpus/codegen/`
+- [ ] 验证：`cargo fuzz list` 列出目标，`cargo fuzz run parse -- -max_total_time=30` 无 panic
+
+### 2.6.4 代码覆盖率门控（可选 P2）
+
+> ⚠️ 不在 ROADMAP Phase 2 范围，属新增可选任务。若时间允许则设基线；否则押后 Phase 3。
+
+**涉及 crate：** 全 workspace
+
+- [ ] 设定 Phase 2 覆盖率基线目标（承接 Phase 1 的 68.99%）：若时间允许则记录新基线到 `benches/BASELINE.md`；不设硬性门控
+  - `trust_parser`：≥ 90%（Phase 1: 89%+）
+  - `trust_error`：≥ 95%（Phase 1: 95%+）
+  - `trust_hir`：≥ 65%（Phase 1: 60.70%）
+  - `trust_tir`：≥ 55%（Phase 1: 48.65%）
+  - `trust_codegen`：≥ 50%（Phase 1: 46.15%）
+- [ ] CI job: `cargo tarpaulin --workspace --fail-under 70`（总覆盖目标）
+- [ ] 若未达标：记录差距（非阻塞），在后续 Phase 补齐
+
+---
+
+## Phase 2 交付标准
+
+- [ ] `number`=f64，整数/浮点自由运算
+- [ ] 关键字表 43 个（移除 16 + 新增 5）
+- [ ] 无 `loop` / `bigint` / `interface` / `impl` / `select` / `undefined` / `Option` / `Result` / `Box` / `dyn` 等旧设计残留
+- [ ] 块体函数强制返回类型标注（含 `:void`）
+- [ ] 表达式体函数（`function f(...) = expr`）可用
+- [ ] `&mut x` 可变引用可用（parser + borrowck）
+- [ ] 闭包调用 `r()` 可用（name_res + TIR）
+- [ ] `as` 仅保留非 number 的必要转换（设计 §2.2：number 之间不需要 `as`——number 统一后 `as number`/`as i32`/`as f64` 为恒等变换，移除避免无意义代码通过编译）
+- [ ] 位运算 token/AST/parser/typeck/codegen 完整落地（设计 §2.2）
+- [ ] 超 2^53 字面量/索引发 `Warning` 级诊断（`Severity::Warning`）
+- [ ] `spec/trust-spec.md` 中废弃条目已删除，本 Phase 特性已同步
+- [ ] 旧审计报告已标注废止
+- [ ] 56 个集成测试全部通过（v2.0 语义）；2.4 完成后 `&mut`/闭包调用增量测试通过
+- [ ] `cargo clippy --workspace -- -D warnings` 通过
+- [ ] `cargo fmt --check --all` 通过
+- [ ] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空
+- [ ] `Trust.toml` 解析与 `Cargo.toml` 桥接可用
+- [ ] CI 性能回归监控就位
+- [ ] Fuzz 语料库已初始化
+
+---
+
+> **规范冻结矩阵（本 Phase 交付时）：**
+> - ✅ 词法规范（关键字集 43 个、字面量、注释格式）—— 2.1 完成时冻结
+> - ✅ `number`=f64 类型规则 + 整数语义 + 位运算约束 —— 2.2 完成时冻结
+> - ✅ 函数声明规则（块体强制返回标注、表达式体函数、箭头函数推断）—— 2.3 完成时冻结
+> - 🔜 具名类型/纯结构类型/隐式泛型/`unknown`+`match` —— Phase 3 逐子任务冻结
+> - 🔜 错误处理/`null` 安全 —— Phase 4
+> - 🔜 并发/`async`/FFI —— Phase 5/7
+
+> **下一步：** Phase 3 — 类型系统与方法（`phase3-types` 分支）
