@@ -136,8 +136,6 @@ fn gen_borrow_shared() {
 }
 
 #[test]
-// N2 fix: 原 gen_borrow_shared (L130) 与本测试重复，删除此重复测试
-#[test]
 fn gen_binary_op() {
     let src = "function f(): void { let x = 10; let y = 20; let z = x + y; }";
     let (_tir, rust) = run_pipeline(src);

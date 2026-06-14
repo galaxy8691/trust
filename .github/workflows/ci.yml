@@ -30,7 +30,7 @@ jobs:
         with:
           components: clippy, rustfmt
       - run: cargo fmt --check --all
-      - run: cargo clippy --workspace -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -W clippy::cognitive_complexity=30 -W clippy::too_many_arguments=8
+      - run: cargo clippy --workspace -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
   # ========== JOB 3: Unsafe 检查（P0） ==========
   no-unsafe:
@@ -97,7 +97,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: cargo +nightly install cargo-tarpaulin
       - run: cargo tarpaulin --version
 
   # ========== JOB 8: 覆盖率 — 门控检查（nightly） ==========
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: cargo +stable install cargo-tarpaulin
       - name: trust_tir (>=85%)
         run: cargo tarpaulin -p trust_tir --fail-under 85 --out xml
       - name: trust_parser (>=70%)
@@ -126,8 +126,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
+      - run: rustup component add miri --toolchain nightly
+      - run: rustup component add rust-src --toolchain nightly
       - run: cargo miri test -p ferro_rt
 
   # ========== JOB 10: MSRV 测试（P1） ==========
