@@ -87,7 +87,31 @@ let user: { name: string, age: number } = { name: "Bob", age: 30 };
 
 > **`number` = f64：** 合并了旧版 i32/f64 分离。整数和浮点统一为 64 位浮点。`number` 之间可以自由运算，不需要 `as` 转换。位运算（`&`/`|`/`^`/`<<`/`>>`）仅允许 `number` 类型（不区分整数/浮点），编译器不保证位运算在浮点值上的行为——开发者需要自己确保操作数是整数。
 
-### 2.3 纯结构类型
+### 2.3 具名类型别名
+
+使用 `type` 关键字为结构类型命名。`type` 仅创建**透明别名**——`type Point = { x: number, y: number }` 等价于直接书写 `{ x: number, y: number }`。同形状即兼容（结构类型）——两个同名 `Point` 或两个形状相同的匿名结构体可以互相赋值。
+
+```js
+// 具名类型别名——方便复用和文档化
+type Point = { x: number, y: number };
+type IoError = { message: string, code: number };
+type Config = { host: string, port: number };
+
+// receiver 方法定义在具名类型上
+function Point.distance(other: Point): number {
+    return Math.sqrt((this.x - other.x) ** 2 + (this.y - other.y) ** 2);
+}
+
+let pt: Point = { x: 3, y: 4 };
+pt.distance({ x: 0, y: 0 });  // 5
+```
+
+**`type` 语法约束：**
+- `type` 右侧**仅允许对象字面量类型**（`{ ... }`）——不允许 ADT 联合语法（D11）
+- `type` 创建的是**透明别名**——不引入新的类型身份。两个 `type` 如果右侧形状相同，编译为同一 Rust 类型
+- `type` 是可选语法——可以完全不用，直接用对象字面量描述形状。`type` 的作用是复用和文档化
+
+### 2.4 纯结构类型
 
 同形状即兼容。`{ x: number, y: number }` 不管来源可互相赋值。没有 `interface` 关键字——直接用对象字面量描述形状。
 
@@ -330,9 +354,33 @@ try {
 ```
 
 **编译期保证：**
-- `throw` 的参数必须是 `Error` 类型
+- `throw` 的参数必须是 `Error` 类型或自定义错误类型（`type X = { message: string }` 自动满足 `Error` 的形状要求——即需包含 `message: string` 字段）
+- `catch` 按**结构形状**匹配（不是按类型名）。`catch (e: { message: string, code: number })` 匹配任何拥有这两个字段的错误对象。`catch (e: IoError)` 等价于 `catch (e: { message: string, code: number })`——但优先推荐显式写形状
 - `try/catch` 必须穷举所有可达的错误类型，或含兜底 `catch (e)`
 - 缺漏 → 编译错误
+
+```js
+// 自定义错误类型——仅需包含 message: string 字段即可作为 Error 抛出
+type IoError = { message: string, code: number };
+type ParseError = { message: string, line: number };
+
+function readFile(path: string): string {
+    if (!fs.exists(path)) {
+        throw { message: "not found: " + path, code: 404 };  // 匹配 IoError 形状
+    }
+    return fs.read(path);
+}
+
+// catch 按结构形状匹配
+try {
+    let content = readFile("data.txt");
+    process(content);
+} catch (e: { message: string, code: number }) {
+    console.log("IO error: " + e.message + " (code: " + e.code + ")");
+} catch (e: { message: string, line: number }) {
+    console.log("parse error at line " + e.line);
+}
+```
 
 **`try` 块的所有权状态：** `try` 块内 move 的变量在 `catch` 块中不可用（已被消费）。如果需要 `catch` 块访问变量，在 `try` 前 clone 或使用只读借用传入。
 
@@ -746,8 +794,12 @@ function square(x: number) = x * x;                    // 单表达式简写
 let double = (x: number): number => x * 2;             // 箭头函数
 function log(msg: string): void { console.log(msg); }
 
+// === 类型别名 ===
+type Point = { x: number, y: number };
+type IoError = { message: string, code: number };
+
 // === 方法 (Go 风格 receiver) ===
-function Point.distance(other: { x: number }): number { return this.x - other.x; }
+function Point.distance(other: Point): number { return this.x - other.x; }
 
 // === 所有权 ===
 let a = [1, 2, 3];
@@ -847,6 +899,8 @@ Trust 编译器的 TIR 层在分析阶段拥有完整的变量所有权图。计
 import { spawn, Channel, shared } from "std::sync";
 import { HttpServer, Request, Response } from "std::net";
 import { readToString } from "std::fs";
+
+type Config = { port: number, static_dir: string };
 
 // 请求计数器（原子操作，无锁）
 shared request_count = 0;
