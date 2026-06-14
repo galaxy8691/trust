@@ -810,3 +810,121 @@ extern "rust" { fn some_crate_fn(x: number): number; }
 ---
 
 > **下一步：** 编译器适配。现有 parser/HIR/TIR/codegen 需要按本文档修改——移除 interface/Result/Option/ADT/impl/select/loop/bigint 相关代码，新增 receiver 方法解析、隐式泛型、unknown+match、try-catch 穷举检查、null 安全收窄。
+
+---
+
+## 18. AI 友好性
+
+Trust 从语言设计的第一天起就将 AI 编码工具（LLM 代码生成、Copilot 风格补全、自动重构）作为一等公民考量。
+
+### 18.1 语法设计对 LLM 友好
+
+Trust 的语法贴近 JS——这是对 LLM 最友好的设计决策之一。LLM 在 JS 代码上的训练数据远多于 Rust，因此生成 Trust 代码的"语法正确率"天然更高：
+
+- `function`、`switch/case`、箭头函数——这些符号与 LLM 的训练分布高度吻合
+- `inout`、`shared`、`withLock` 等 Trust 特有关键字是**无歧义的标记**——LLM 可以明确学习"这里是所有权边界"
+- Trust 的 `try-catch` + `null` 模式比 Rust 的 `Result`/`Option` + `match` 链更接近 LLM 的训练数据形状
+
+> **已知风险：** LLM 会"自信地"生成 JS 风格的错误代码——如 `let b = a; a.push(1)`。Trust 通过结构化错误输出（§12）让 AI 工具快速发现并修复这类语义错误。
+
+### 18.2 结构化错误输出
+
+Trust 的 `--error-format=json` 为 AI 工具提供了精确的修复锚点（文件、行号、错误代码、建议修复），使 AI 编码助手可以实现"编译失败 → 解析 JSON 错误 → 生成修复 → 重新编译"的自动闭环。
+
+### 18.3 确定性编译模型：编译通过 = 无内存错误
+
+AI 生成的 Trust 代码只需审查**业务逻辑正确性**——编译通过即证明无内存安全 bug、无数据竞争。这大幅降低了 AI 生成代码的审查成本。
+
+### 18.4 AI 专用所有权分析 API（计划 v0.2+）
+
+Trust 编译器的 TIR 层在分析阶段拥有完整的变量所有权图。计划提供 `--analyze-ownership` 模式，以结构化格式输出指定位置的完整借用状态，供 AI 工具进行精确修复。
+
+---
+
+## 19. 完整程序示例：HTTP 服务
+
+```js
+import { spawn, Channel, shared } from "std::sync";
+import { HttpServer, Request, Response } from "std::net";
+import { readToString } from "std::fs";
+
+// 请求计数器（原子操作，无锁）
+shared request_count = 0;
+
+// 路由处理
+async function handleRequest(req: Request): { status: number, body: string } {
+    // 原子递增计数器
+    request_count.withLock(c => { c += 1; });
+
+    // 路由匹配
+    let path = req.url.path;
+    if (path == "/health") {
+        let count = request_count.withLock(c => c);
+        return { status: 200, body: `{"status":"ok","requests":${count}}` };
+    }
+
+    if (path.startsWith("/static/")) {
+        let file_path = `./public/${path.slice(8)}`;
+        try {
+            let content = readToString(file_path);
+            return { status: 200, body: content };
+        } catch (e: IoError) {
+            return { status: 404, body: "not found" };
+        }
+    }
+
+    return { status: 404, body: "not found" };
+}
+
+// 入口
+function main(): void {
+    let config = loadConfig() ?? { port: 3000, static_dir: "./public" };
+    let server = HttpServer.bind(`127.0.0.1:${config.port}`);
+
+    console.log(`listening on port ${config.port}`);
+
+    // 每个连接 spawn 一个异步任务
+    spawn(move async () => {
+        while (true) {
+            try {
+                let conn = await server.accept();
+                spawn(move async () => {
+                    let res = await handleRequest(conn.req);
+                    conn.respond(res);
+                });
+            } catch (e: ServerClosed) {
+                break;
+            }
+        }
+    });
+
+    // 保持主线程存活
+    // 生产环境可用 Channel 实现优雅关闭
+}
+```
+
+---
+
+## 20. 被明确拒绝的特性及理由（完整版）
+
+以下特性经过了严格的设计评审后被**永久拒绝**。记录在此是为了防止未来的设计讨论反复回到已被论证不可行的方案上。
+
+| 拒绝的特性 | 理由 |
+|-----------|------|
+| `interface` / `implements` | JS 没有。Trust 用纯结构类型替代 |
+| `Result<T,E>` / `Option<T>` | 换成 `throw`/`try-catch` + `null` |
+| `?` 操作符（`Result` 传播） | 换成 `try-catch` |
+| ADT（`type X = \| ...`） | `unknown` + `match` 覆盖了相同场景（编译期穷举 → 运行时类型匹配） |
+| `impl` 块 | Go 风格 receiver 更简洁，语义等价 |
+| `Box<dyn Trait>` / `Dynamic` 枚举 | 禁止动态分发。`unknown` + `match`（单态化）替代 |
+| `select` 多通道竞速 | 精简并发设计。未来需要时可通过标准库扩展 |
+| `bigint` | `number`=f64 足够覆盖大多数场景 |
+| `loop` | `for`/`while` 足够。`while (true)` 可替代无限循环 |
+| `defer` 延迟执行 | 所有权系统天然管理资源生命周期。`withLock` 块级作用域覆盖剩余场景 |
+| `\|>` 管道操作符 | JS 没有。方法链 `.filter().map().reduce()` 已覆盖相同场景 |
+| 过程宏（proc-macro） | 破坏"看到的代码就是被编译的代码"的可分析性。替代方案：`trust generate` 子命令 |
+| `// @trust: pure` 等无验证意图注释 | 编译器不强制检查 → 开发者可标注 `pure` 却在函数内执行 I/O → "谎言注释" |
+| 完整 REPL | move 语义的一次性消耗与 REPL 的会话状态持续性在物理上矛盾。替代方案：`trust eval` |
+| 默认静默的编译器自动修复 | 开发者永远不会理解所有权。`--fix` 提供手动确认的辅助修复 |
+| `undefined` | 只有 `null`。减少空值类型数量，降低认知负荷 |
+| `any` | `unknown` 替代——但 `unknown` 必须被 `match` 类型确认后才能使用，比 `any` 更安全 |
