@@ -204,7 +204,7 @@ match (data) {
 
 **编译器实现：**
 - **编译期：** 目标类型来自标注（装载）或 `case` 模式（match）——所以 `unknown` 表达式不能裸用，没有标注/模式就无法确定要校验成什么类型。每个 `case` 分支按其确定类型生成单态化代码，无虚表、无动态分发。
-- **运行期：** `unknown` 内部是一个可检视的动态载荷（编译器生成的带类型标签的动态载荷——每个值携带 tag + payload；对象/数组变体的 payload 包含类型描述符（字段名→类型映射表），供运行时形状校验使用。不是 `Box<dyn Any>` 的虚表分发）。装载和 `match` 都编译为"对该载荷做形状校验，命中则转换为对应的具体类型"。这**不是** `Box<dyn Any>` 的动态分发——用户代码拿到的始终是具体类型。
+- **运行期：** `unknown` 内部是一个带类型标签的动态载荷（TaggedUnion：tag + payload）。类型描述符格式：对象变体为 `{field_name: TypeTag}` 映射表（递归嵌套），数组变体为 `[element_type_tag]`。装载和 `match` 编译为描述符比较 + 字段逐个校验。在校验阶段需要运行时遍历类型描述符，等价于一次动态类型检查——文档坦诚这一运行时代价源于结构类型下的形状校验需求。用户代码拿到校验后的值时已是编译期确定的具体类型，后续操作无虚表开销。
 - 装载校验失败 → `throw`；`match` 全不匹配且无 `case _` → `panic`。
 
 `switch` 用于普通值匹配：`switch (x) { case 1: ...; case "hello": ... }`。
@@ -315,12 +315,18 @@ let current = counter.withLock(c => c); // c 是 &number（只读引用）
 ```
 
 - `withLock` 提供闭包内的独占访问，锁自动获取和释放
-- 对于 `number` 等支持原子操作的类型，编译器优化为原子指令
+- 对于 `number` 等支持原子操作的类型，编译器在原子平台上优化为 `fetch_add`/`fetch_sub` 等原子指令（无锁）。优化是透明的：Trust 语义始终看到 `&mut number` 闭包参数，代码行为与是否优化无关。原子优化仅影响性能——不改变可观察语义
 - **死锁风险：** 编译器不声称能检测所有嵌套死锁。建议避免嵌套 `withLock`
 
 ### 3.7 用户不接触底层 Rust 类型
 
 `Box`/`Rc`/`Arc`/`Weak` 由编译器自动管理。`shared` 自动包裹为 `Arc<Mutex<T>>`，递归类型自动 `Box`，引用计数自动增减。用户代码中不出现这些 Rust 概念。
+
+**递归类型与自动 Box（K7 fix）：** 编译器在 TIR 类型分析阶段检测递归类型——当类型的 `size_of` 不可计算时（包含自身的直接或间接引用），在递归字段上自动插入 `Box`。Box 是 Rust 层的实现细节，不影响 Trust 层的结构等价性。互递归（A 含 B，B 含 A）同样检测：字段图中存在环时，在任一环边上插入 Box。匿名结构体允许递归（编译器自动提升为内部具名类型后 Box）。
+- **触发时机：** 编译器检测到类型定义直接或间接引用自身时，对造成递归的字段自动插入 `Box`。只有打破"无限大小"所必需的字段被 Box，非递归字段保持原状。
+- **插入位置：** Box 包在递归字段上。`type Node = { value: number, next: Node | null }` 生成 `struct Node { value: f64, next: Option<Box<Node>> }`——`| null` 映射为 `Option`，递归指针用 `Box` 打破无限尺寸。
+- **构造自动装箱：** 字面量赋值给递归字段时，编译器自动插入 `Box::new(...)`。`let n: Node = { value: 1, next: null }` 与 `{ value: 1, next: childNode }` 都无需写 Box——装箱由 codegen 透明完成。
+- **同形状判定基于 Trust 层形状**（字段名 + Trust 类型），**不**基于 Rust 层是否 Box。因此"是否递归 / 是否被 Box"不影响结构兼容判定——`{ value, next }` 字面量始终可赋值给 `Node`，"同形状但 Rust 类型不同"的问题在用户层不可见。
 
 ### 3.8 生命周期自动推导
 
@@ -362,17 +368,22 @@ function log(msg: string): void {
 直接在类型上定义方法：
 
 ```js
-function Point.distance(other: { x: number, y: number }): number {
+function Point.distance(other: Point): number {
     return Math.sqrt((this.x - other.x) ** 2 + (this.y - other.y) ** 2);
 }
 
-let pt = { x: 3, y: 4 };
-pt.distance({ x: 0, y: 0 });  // 5
+let pt: Point = { x: 3, y: 4 };
+pt.distance({ x: 0, y: 0 });  // 5——实参 { x, y } 自动转换为 Point
 ```
 
 `this` 在 receiver 方法体内自动可用，默认只读借用。需要修改时声明 `inout this`，需要消耗时声明 `move this`。
 
-方法解析：同形状类型共享方法——如果 B 与 A 同形状且 A 有 `.foo()`，B 也可以调用 `.foo()`。如果在不同模块定义了同名方法，导入路径决定使用哪个。
+**方法解析（与 §2.3 名义模型一致）：**
+- receiver 方法绑定到**具名类型**——编译为该类型对应 Rust struct 的 `impl` 块。方法属于这个名字，**不属于"形状"**。**不能为外部 crate 的类型定义 receiver 方法**（Rust orphan rule——方法只能与 `type` 在同一 crate 定义）。匿名结构体调用方法时，编译器查找当前 crate 及直接依赖中形状匹配的具名类型（精确字段匹配优先），候选不唯一→编译报错
+- 两个同形状的具名类型（如 `Point` 和 `Vec2` 都是 `{ x, y }`）**各自拥有独立方法，互不共享**。
+- 匿名结构体调用方法时（`{ x, y }.distance(...)`），编译器查找"形状匹配且定义了该方法"的具名类型，自动插入 `From`/`Into` 转换后调用。
+- **歧义规则：** 若存在多个同形状具名类型都定义了同名方法，匿名结构体调用该方法 → **编译报错**，要求显式标注类型消歧（`let pt: Point = { x, y }; pt.distance(...)`）。
+- 跨模块的同名方法由导入路径决定使用哪个。
 
 ---
 
@@ -478,18 +489,18 @@ try {
 // 生成的 Rust 代码（简化示意）
 match readFile("data.txt") {
     Ok(content) => process(content),
-    Err(e) if e.code != undefined => println!("IO error: {}", e.message),
-    Err(e) if e.line != undefined => println!("parse error at line {}", e.line),
+    Err(e) if e.code != null => println!("IO error: {}", e.message),
+    Err(e) if e.line != null => println!("parse error at line {}", e.line),
 }
 ```
 
 **推断算法边界：**
 - **函数内：** 编译器收集本函数所有 `throw` 语句的错误形状 + 本函数调用的其他 Trust 函数的错误类型（通过其 `Result<T, E>` 签名中的 `E`），合并为当前函数的错误枚举
 - **FFI 边界：** `extern "rust"` 函数的错误类型无法自动推断——需在 `extern` 声明中显式标注错误形状：`fn external_fn(x: number): number throws { message: string }`
-- **递归/互调：** 编译器固定点迭代直到错误枚举收敛。最大迭代深度 32（与泛型深度限制一致），超限报错要求显式标注：`function foo(): number throws { message: string, code: number }`。`throws` 语法：返回值类型后跟 `throws` + 对象字面量类型。泛型函数：`function foo<T>(x: T): T throws { message: string }`。高阶函数：`function map(fn: (n: number): number throws { message: string }): number[]`
+- **递归/互调：** 编译器固定点迭代直到错误枚举收敛。最大迭代深度 32，超限 → 编译错误并提示显式标注 `throws`。显式 `throws` 覆盖自动推断：标注后仅该形状被收集，未标注的 throw → 编译错误。泛型函数中 E 不随类型参数化——同一函数的所有单态化实例共享同一错误枚举。高阶函数/闭包的 E 从调用处传入的闭包签名中收集
 - **性能：** 推断仅增加 O(n) 编译开销（n = 函数调用图大小），不引入运行时开销
 
-> **为什么用 `Result` 内部翻译而非 `panic!`+`catch_unwind`：** `catch_unwind` 不保证捕获所有 panic（`Abort` 等不可捕获），且无法实现穷举检查。`Result` 是 Rust 原生的可恢复错误机制，与 Trust 的编译期安全承诺一致。`throw`/`try-catch` 是语法糖——用户看到的是 JS 风格的 throw/catch，编译器内部生成的是 `Result<T, E>` + `match`，包括错误枚举的自动合成。
+> **为什么用 `Result` 内部翻译而非 `panic!`+`catch_unwind`：** `catch_unwind` 不保证捕获所有 panic（`Abort` 等不可捕获），且无法实现穷举检查。`Result` 是 Rust 原生的可恢复错误机制，与 Trust 的编译期安全承诺一致。`throw`/`try-catch` 是语法糖——用户看到的是 JS 风格的 throw/catch，编译器内部生成的是 `Result<T, E>` + `match`，包括错误枚举的自动合成。**`Result<T,E>` 和 `Option<T>` 仅作为编译器内部实现类型使用，不暴露给 Trust 用户代码。**
 
 ### 5.2 `panic!` 不可恢复错误
 
@@ -680,11 +691,11 @@ extern "rust" {
 | Rust 函数签名 | Trust extern 声明 | 语义 |
 |-------------|------------------|------|
 | `fn f(x: T) -> U` | `fn f(x: T): U` | 参数 move 进 Rust 侧（Trust 侧失效），返回值 move 给调用者 |
-| `fn f(x: &T) -> &U` | 不直接支持 | 用 `shared` 或 `Channel` 在 Trust 侧管理 |
+| `fn f(x: &T) -> &U` | 不直接支持 | 将数据包裹为 `shared T`，在 Trust 侧用 `withLock` 获取引用后通过 FFI 传递指针。`string` 映射 `&str`（只读借用），owned `string` 映射 `String`（move） |
 | `fn f(x: i32) -> u64` | `fn f(x: number): number` | number 自动转换（Trust f64 ↔ Rust 整数） |
 | `fn f() -> Result<T, E>` | `fn f(): T throws { message: string }` | 标注错误形状，映射到 Result |
 
-`extern` 块内使用 `fn` 关键字（而非 `function`），提醒读者"此处映射的是 Rust 函数"。
+`extern` 块内使用 `fn` 关键字（而非 `function`）。`extern` 声明中的泛型 `<T>` 不含 trait bound——编译器生成最宽泛的 `T: ?Sized` 约束，正确性由开发者保证。可变形参 `...args` 映射为 Rust 的零长度数组或宏，仅在绑定到已知签名的具体函数时可用。`string` 参数默认映射为 `&str`（只读借用），返回值 `string` 映射为 `String`（owned，move 给调用者）。
 
 ### 10.1 与外部生态交互
 
@@ -827,6 +838,7 @@ $ echo 'let arr = [1,2,3]; arr.map(x => x * 2)' | trust eval -
 
 | 模块 | 内容 | 优先级 |
 |------|------|--------|
+| `std::error` | `Error("msg")` 便捷构造器（返回 `{ message: string }`） | v0.1 |
 | `std::console` | `console.log` | v0.1 |
 | `std::collections` | 动态数组、Map、Set | v0.1 |
 | `std::string` | JS 风格字符串 API（`split`/`slice`/`replace`/`trim`/`toUpperCase`） | v0.1 |
