@@ -87,6 +87,33 @@ macro_rules! assert_output {
 #[test] fn e2e_param_inout()     { assert_compiles!("param_inout.trust"); }
 #[test] fn e2e_type_annotation() { assert_compiles!("type_annotation.trust"); }
 
+// === 覆盖率增强: 错误路径 + 复杂场景 ===
+#[test] fn e2e_multi_function()  { assert_output!("multi_function.trust", "multi fn ok"); }
+#[test] fn e2e_nested_if()      { assert_output!("nested_if.trust", "nested ok"); }
+
+// 错误路径测试（期望编译失败——验证错误处理路径被覆盖）
+#[test]
+fn e2e_err_type_mismatch() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_type_mismatch.trust", "-o", "/tmp/trust_err_type"]).unwrap();
+    // 类型不匹配应报错
+    assert!(!out.status.success(), "expected compilation failure for type mismatch");
+}
+#[test]
+fn e2e_err_undefined_var() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_undefined_var.trust", "-o", "/tmp/trust_err_undef"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for undefined variable");
+}
+#[test]
+fn e2e_err_param_count() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_param_count.trust", "-o", "/tmp/trust_err_param"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for param count mismatch");
+}
+#[test]
+fn e2e_err_move_use() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_move_use.trust", "-o", "/tmp/trust_err_move"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for use-after-move");
+}
+
 // ============================================================================
 // CLI 参数解析测试
 // ============================================================================

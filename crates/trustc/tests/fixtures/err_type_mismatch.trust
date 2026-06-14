@@ -1,0 +1,4 @@
+// 覆盖率测试: 类型不匹配错误 (E0308)
+function main(): void {
+    let x: number = "hello";
+}
