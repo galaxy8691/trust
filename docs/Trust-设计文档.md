@@ -384,6 +384,61 @@ try {
 
 **`try` 块的所有权状态：** `try` 块内 move 的变量在 `catch` 块中不可用（已被消费）。如果需要 `catch` 块访问变量，在 `try` 前 clone 或使用只读借用传入。
 
+#### 5.1.1 内部翻译策略：`throw`/`try-catch` → `Result<T, E>`
+
+Rust 无异常机制，`throw`/`try-catch` 在 codegen 阶段翻译为 `Result<T, E>` + `match`：
+
+```js
+// Trust 源码
+function readFile(path: string): string {
+    if (!fs.exists(path)) {
+        throw { message: "not found", code: 404 };
+    }
+    return fs.read(path);
+}
+```
+
+```rust
+// 生成的 Rust 代码（简化示意）
+fn readFile(path: &str) -> Result<String, ReadFileError> {
+    if !fs::exists(path) {
+        return Err(ReadFileError::NotFound { message: "not found".into(), code: 404 });
+    }
+    Ok(fs::read_to_string(path))
+}
+```
+
+**错误类型推断：** 编译器从函数体中收集所有 `throw` 语句抛出的结构形状，自动合成 `Result<T, E>` 中的错误枚举 `E`。调用方通过 `catch (e: {...})` 按结构形状匹配——编译器生成对应的 `match` 分支。
+
+```js
+// 编译器推断 E = { message: string, code: number } | { message: string, line: number }
+try {
+    let content = readFile("data.txt");
+    process(content);
+} catch (e: { message: string, code: number }) {  // 匹配 IO 错误
+    console.log("IO error: " + e.message);
+} catch (e: { message: string, line: number }) {  // 匹配解析错误
+    console.log("parse error at line " + e.line);
+}
+```
+
+```rust
+// 生成的 Rust 代码（简化示意）
+match readFile("data.txt") {
+    Ok(content) => process(content),
+    Err(e @ ReadFileError::NotFound { .. }) => println!("IO error: {}", e.message),
+    Err(e @ ReadFileError::Parse { .. }) => println!("parse error at line {}", e.line),
+}
+```
+
+**推断算法边界：**
+- **函数内：** 编译器收集本函数所有 `throw` 语句的错误形状 + 本函数调用的其他 Trust 函数的错误类型（通过其 `Result<T, E>` 签名中的 `E`），合并为当前函数的错误枚举
+- **FFI 边界：** `extern "rust"` 函数的错误类型无法自动推断——需在 `extern` 声明中显式标注错误形状：`fn external_fn(x: number): number throws { message: string }`
+- **递归/互调：** 编译器固定点迭代直到错误枚举收敛。最大迭代深度 32（与泛型深度限制一致），超限报错要求显式标注
+- **性能：** 推断仅增加 O(n) 编译开销（n = 函数调用图大小），不引入运行时开销
+
+> **为什么用 `Result` 内部翻译而非 `panic!`+`catch_unwind`：** `catch_unwind` 不保证捕获所有 panic（`Abort` 等不可捕获），且无法实现穷举检查。`Result` 是 Rust 原生的可恢复错误机制，与 Trust 的编译期安全承诺一致。`throw`/`try-catch` 是语法糖——用户看到的是 JS 风格的 throw/catch，编译器内部生成的是 `Result<T, E>` + `match`，包括错误枚举的自动合成。
+
 ### 5.2 `panic!` 不可恢复错误
 
 ```js
