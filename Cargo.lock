@@ -11,6 +11,8 @@ name = "trust_codegen"
 version = "0.1.0"
 dependencies = [
  "trust_error",
+ "trust_hir",
+ "trust_parser",
  "trust_tir",
 ]
 
@@ -36,6 +38,7 @@ version = "0.1.0"
 dependencies = [
  "trust_error",
  "trust_hir",
+ "trust_parser",
 ]
 
 [[package]]
