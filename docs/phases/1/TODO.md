@@ -360,13 +360,13 @@
 
 ### 1.8.1 端到端测试
 
-- [x] 每个语法特性至少一个端到端测试（27 个 `.trust` 夹具，37 个测试全部通过）
+- [x] 每个语法特性至少一个端到端测试（47 个 `.trust` 夹具，56 个测试全部通过）
 - [x] 测试运行器：编译 `.trust` → rustc 编译 → 执行并验证输出（`assert_output!` / `assert_compiles!` 宏）
 - [x] 测试命名遵循 `{subject}_{condition}_{expected}` 模式（constraints §5.2）
 
 ### 1.8.2 端到端验证（替换原"自举测试"）
 
-- [x] 编译器能将包含 `console.log` 的 `.trust` 文件编译为可执行 Rust 二进制并运行（27/27 夹具全部通过）
+- [x] 编译器能将包含 `console.log` 的 `.trust` 文件编译为可执行 Rust 二进制并运行（47/47 夹具全部通过）
 - [x] 交叉编译验证：生成的 Rust 代码可通过 `rustc` 独立编译（`FERRO_RT_LIB` 环境变量注入路径）
 - [ ] 真正自举（Trust 编译器用 Trust 重写）— 押后 Phase 7
 
@@ -390,7 +390,7 @@
 
 ## Phase 1 交付标准
 
-- [x] 编译以下程序并执行输出 `"Hello, Trust!"`（37 个集成测试全部通过，含 hello.trust）
+- [x] 编译以下程序并执行输出 `"Hello, Trust!"`（56 个集成测试全部通过，含 hello.trust）
 
 ```ts
 function main() {
@@ -404,7 +404,7 @@ function main() {
 - [x] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空（P0）
 - [x] `cargo tarpaulin --workspace` — 总覆盖 68.93% (2573/3733)。trust_parser 89%+, trust_error 95%+, trust_codegen 72% ✅, trust_hir 57%, trust_tir 56%, trustc 0% (binary)
 - [x] `cargo miri test -p ferro_rt` 通过（0 tests, 0 failures; 无 undefined behavior）
-- [x] 集成测试：27 个语法特性有端到端测试（>20 要求）
+- [x] 集成测试：47 个语法特性有端到端测试（>20 要求）
 - [x] `docs/ROADMAP.md` Phase 1 全部子项标记完成
 
 ---
