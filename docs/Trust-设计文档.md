@@ -94,7 +94,7 @@ let user: { name: string, age: number } = { name: "Bob", age: 30 };
 > | 数组索引 | `arr[n]` | `arr[n as usize]` | 自动转；若 n 超出安全整数范围（>2^53 或非整数），编译警告 |
 > | 循环计数 | `for (let i=0; i<N; i++)` | 迭代器为 `i: f64`，比较用 `i < N` | `i++` 等价 `i += 1.0` |
 > | 长度/容量 | `arr.length` / `Channel<T>(64)` | 返回/期望 `number`(f64)，内部存储为 `usize` | 装箱/拆箱编译器自动处理 |
-> | FFI 整数 | `extern fn f(x: number): number` 对接 `fn f(x: i32) -> u64` | 生成 `f(x as i32) as f64` | 见 §10 整数映射表 |
+> | FFI 整数 | `extern fn f(x: number): number` 对接 `fn f(x: i32) -> u64` | 生成 `f(x as i32) as f64` | 见 §10 `extern` 块所有权规则 |
 > 
 > **精度边界：** 超过 2^53 的整数可能丢失精度（IEEE 754 双精度限制）。编译器在检测到超出安全整数范围的 `number` 字面量或数组索引时发出 `help` 级别警告。需要精确 64 位整数的场景应使用 FFI 调用 Rust 端的 `i64`/`u64` 函数。
 
@@ -204,7 +204,7 @@ match (data) {
 
 **编译器实现：**
 - **编译期：** 目标类型来自标注（装载）或 `case` 模式（match）——所以 `unknown` 表达式不能裸用，没有标注/模式就无法确定要校验成什么类型。每个 `case` 分支按其确定类型生成单态化代码，无虚表、无动态分发。
-- **运行期：** `unknown` 内部是一个可检视的动态载荷（编译器生成的封闭 `Value` 枚举：null/bool/number/string/数组/对象）。装载和 `match` 都编译为"对该载荷做形状校验，命中则转换为对应的具体类型"。这**不是** `Box<dyn Any>` 的动态分发——用户代码拿到的始终是具体类型。
+- **运行期：** `unknown` 内部是一个可检视的动态载荷（编译器生成的带类型标签的动态载荷——每个值携带 tag + payload；对象/数组变体的 payload 包含类型描述符（字段名→类型映射表），供运行时形状校验使用。不是 `Box<dyn Any>` 的虚表分发）。装载和 `match` 都编译为"对该载荷做形状校验，命中则转换为对应的具体类型"。这**不是** `Box<dyn Any>` 的动态分发——用户代码拿到的始终是具体类型。
 - 装载校验失败 → `throw`；`match` 全不匹配且无 `case _` → `panic`。
 
 `switch` 用于普通值匹配：`switch (x) { case 1: ...; case "hello": ... }`。
@@ -310,8 +310,8 @@ let r2 = &data;    // ✅ 多个只读引用 OK
 ```js
 shared counter = 0;
 
-counter.withLock(c => { c += 1; });
-let current = counter.withLock(c => c);
+counter.withLock(c => { c += 1; });   // c 是 &mut number（可变引用，非副本）
+let current = counter.withLock(c => c); // c 是 &number（只读引用）
 ```
 
 - `withLock` 提供闭包内的独占访问，锁自动获取和释放
@@ -454,7 +454,7 @@ function readFile(path: string): string {
 // 生成的 Rust 代码（简化示意）
 fn readFile(path: &str) -> Result<String, ReadFileError> {
     if !fs::exists(path) {
-        return Err(ReadFileErrorValues::NotFound { message: "not found".into(), code: 404 });
+        return Err(ReadFileError { message: "not found".into(), code: 404 });
     }
     Ok(fs::read_to_string(path))
 }
@@ -478,8 +478,8 @@ try {
 // 生成的 Rust 代码（简化示意）
 match readFile("data.txt") {
     Ok(content) => process(content),
-    Err(e @ ReadFileError::NotFound { .. }) => println!("IO error: {}", e.message),
-    Err(e @ ReadFileError::Parse { .. }) => println!("parse error at line {}", e.line),
+    Err(e) if e.code != undefined => println!("IO error: {}", e.message),
+    Err(e) if e.line != undefined => println!("parse error at line {}", e.line),
 }
 ```
 
@@ -676,7 +676,15 @@ extern "rust" {
 }
 ```
 
-`extern` 块内使用 `fn` 关键字（而非 `function`），提醒读者"此处映射的是 Rust 函数"。声明不经过 Trust 所有权检查——正确性是开发者的责任。
+**`extern` 块所有权规则（K4 fix）：**
+| Rust 函数签名 | Trust extern 声明 | 语义 |
+|-------------|------------------|------|
+| `fn f(x: T) -> U` | `fn f(x: T): U` | 参数 move 进 Rust 侧（Trust 侧失效），返回值 move 给调用者 |
+| `fn f(x: &T) -> &U` | 不直接支持 | 用 `shared` 或 `Channel` 在 Trust 侧管理 |
+| `fn f(x: i32) -> u64` | `fn f(x: number): number` | number 自动转换（Trust f64 ↔ Rust 整数） |
+| `fn f() -> Result<T, E>` | `fn f(): T throws { message: string }` | 标注错误形状，映射到 Result |
+
+`extern` 块内使用 `fn` 关键字（而非 `function`），提醒读者"此处映射的是 Rust 函数"。
 
 ### 10.1 与外部生态交互
 
