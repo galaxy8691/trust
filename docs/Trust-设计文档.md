@@ -86,6 +86,8 @@ let user: { name: string, age: number } = { name: "Bob", age: 30 };
 | `unknown` | 动态类型，必须被标注变量接住才能使用 | `let data: unknown = fetch(...)` |
 
 > **`number` = f64：** 合并了旧版 i32/f64 分离。整数和浮点统一为 64 位浮点。`number` 之间可以自由运算，不需要 `as` 转换。位运算（`&`/`|`/`^`/`<<`/`>>`）仅允许 `number` 类型（不区分整数/浮点），编译器不保证位运算在浮点值上的行为——开发者需要自己确保操作数是整数。
+> 
+> **整数语义场景：** `for (let i = 0; i < 10; i++)` 中的迭代变量 `i` 和数组索引（`arr[n]` 中的 `n`）自动当做整数处理——编译器在 codegen 时生成 `n as usize`，不要求显式转换。循环计数器和数组索引是 Trust 中唯一保留隐式整数语义的场景。
 
 ### 2.3 具名类型别名
 
@@ -512,6 +514,16 @@ spawn(move async () => {
 `spawn` 要求闭包为 `move` 且捕获变量满足 `Send`。类型是否可跨线程发送由编译器自动分析。
 
 ### 7.2 `Channel<T>`
+
+`Channel<T>(capacity?: number)` 返回 `(Sender<T>, Receiver<T>)` 元组。`Sender` 可 Clone（多个发送方），`Receiver` 不 Clone（唯一接收方）。默认有界容量 64。
+
+`ChannelClosed` 是标准库预定义错误类型（`std::sync` 模块导出）：
+
+```js
+type ChannelClosed = { message: string };
+// 当发送端全部 drop 时，receive() throw 此错误
+// 当接收端 drop 时，send() throw 此错误
+```
 
 ```js
 let (tx, rx) = Channel<string>(64);  // (Sender, Receiver)
