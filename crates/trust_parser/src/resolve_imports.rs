@@ -8,7 +8,9 @@ pub fn resolve_import_path(import_path: &str, current_file: &str) -> Option<Stri
     } else if import_path.starts_with('/') {
         // 绝对路径（相对项目根）
         let mut p = import_path.to_string();
-        if !p.ends_with(".trust") { p.push_str(".trust"); }
+        if !p.ends_with(".trust") {
+            p.push_str(".trust");
+        }
         Some(p)
     } else if import_path.starts_with("./") || import_path.starts_with("../") {
         let current_dir = std::path::Path::new(current_file).parent()?;
@@ -16,7 +18,9 @@ pub fn resolve_import_path(import_path: &str, current_file: &str) -> Option<Stri
         let clean_path = import_path.strip_prefix("./").unwrap_or(import_path);
         let resolved = current_dir.join(clean_path);
         let mut p = resolved.to_string_lossy().to_string();
-        if !p.ends_with(".trust") { p.push_str(".trust"); }
+        if !p.ends_with(".trust") {
+            p.push_str(".trust");
+        }
         Some(p)
     } else {
         None

@@ -66,21 +66,23 @@ fn verify_compiles(rust_code: &str) -> bool {
 
     let output = Command::new("rustc")
         .args([
-            "--edition", "2021",
-            "--crate-type", "bin",
-            "-L", ferro_rt_lib.to_str().unwrap(),
-            "--extern", &format!("ferro_rt={}/libferro_rt.rlib", ferro_rt_lib.display()),
-            "-o", temp_dir.join("test_output").to_str().unwrap(),
+            "--edition",
+            "2021",
+            "--crate-type",
+            "bin",
+            "-L",
+            ferro_rt_lib.to_str().unwrap(),
+            "--extern",
+            &format!("ferro_rt={}/libferro_rt.rlib", ferro_rt_lib.display()),
+            "-o",
+            temp_dir.join("test_output").to_str().unwrap(),
             rs_file.to_str().unwrap(),
         ])
         .output()
         .expect("run rustc");
 
     if !output.status.success() {
-        eprintln!(
-            "rustc failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        eprintln!("rustc failed:\n{}", String::from_utf8_lossy(&output.stderr));
     }
     output.status.success()
 }
@@ -135,7 +137,6 @@ fn gen_borrow_shared() {
 
 #[test]
 // N2 fix: 原 gen_borrow_shared (L130) 与本测试重复，删除此重复测试
-
 #[test]
 fn gen_binary_op() {
     let src = "function f(): void { let x = 10; let y = 20; let z = x + y; }";

@@ -6,7 +6,8 @@ use std::time::Instant;
 fn main() {
     // 定位 workspace 根目录
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().and_then(|p| p.parent())
+        .parent()
+        .and_then(|p| p.parent())
         .unwrap_or(std::path::Path::new("."));
     let trustc_bin = workspace_root.join("target/release/trustc");
     let input_file = workspace_root.join("benches/inputs/hello.trust");

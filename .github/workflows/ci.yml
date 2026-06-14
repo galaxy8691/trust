@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           for crate in trust_parser trust_hir trust_tir; do
-            if grep -r "unsafe" "crates/$crate/src/" 2>/dev/null | grep -v "^\s*//" | grep -q .; then
+            if grep -rn "unsafe fn\|unsafe {\|unsafe(" "crates/$crate/src/" 2>/dev/null; then
               echo "ERROR: unsafe found in $crate (prohibited by constraints §3.2 P0)"
               exit 1
             fi

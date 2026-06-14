@@ -38,32 +38,28 @@ fn lower_exports(exports: &[ast::ExportDecl], diagnostics: &mut Vec<DiagError>) 
     for exp in exports {
         let (name, binding) = match exp.item.as_ref() {
             ast::Stmt::Function(f) => {
-                let param_types: Vec<HirType> = f.params.iter()
+                let param_types: Vec<HirType> = f
+                    .params
+                    .iter()
                     .map(|p| p.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error))
                     .collect();
-                let return_type = f.return_type.as_ref()
-                    .map(HirType::from_ast_type)
-                    .unwrap_or(HirType::Void);
-                (f.name.clone(), HirBinding::Function {
-                    param_types,
-                    return_type,
-                    span: f.span.clone(),
-                })
+                let return_type =
+                    f.return_type.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Void);
+                (
+                    f.name.clone(),
+                    HirBinding::Function { param_types, return_type, span: f.span.clone() },
+                )
             }
             ast::Stmt::Let(l) => {
                 let ty = l.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
-                (l.name.clone(), HirBinding::LocalVar {
-                    ty,
-                    mutable: l.mutable,
-                    span: l.span.clone(),
-                })
+                (
+                    l.name.clone(),
+                    HirBinding::LocalVar { ty, mutable: l.mutable, span: l.span.clone() },
+                )
             }
             ast::Stmt::Const(c) => {
                 let ty = c.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
-                (c.name.clone(), HirBinding::ModuleConst {
-                    ty,
-                    span: c.span.clone(),
-                })
+                (c.name.clone(), HirBinding::ModuleConst { ty, span: c.span.clone() })
             }
             _ => {
                 diagnostics.push(DiagError::new(
@@ -90,11 +86,7 @@ fn lower_stmt(stmt: &ast::Stmt, diagnostics: &mut Vec<DiagError>) -> Option<HirI
             Some(HirItem::Function(hf))
         }
         ast::Stmt::Const(c) => {
-            let ty = c
-                .ty
-                .as_ref()
-                .map(HirType::from_ast_type)
-                .unwrap_or(HirType::Error);
+            let ty = c.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
             let init = lower_expr(&c.init, diagnostics);
             Some(HirItem::Const(HirConst {
                 name: c.name.clone(),
@@ -104,11 +96,7 @@ fn lower_stmt(stmt: &ast::Stmt, diagnostics: &mut Vec<DiagError>) -> Option<HirI
             }))
         }
         ast::Stmt::Shared(s) => {
-            let ty = s
-                .ty
-                .as_ref()
-                .map(HirType::from_ast_type)
-                .unwrap_or(HirType::Error);
+            let ty = s.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
             let init = lower_expr(&s.init, diagnostics);
             Some(HirItem::Shared(HirShared {
                 name: s.name.clone(),
@@ -143,20 +131,12 @@ fn lower_function(f: &ast::FunctionDecl, diagnostics: &mut Vec<DiagError>) -> Hi
         .map(|p| HirParam {
             name: p.name.clone(),
             mode: HirType::param_mode_from_ast(&p.mode),
-            ty: p
-                .ty
-                .as_ref()
-                .map(HirType::from_ast_type)
-                .unwrap_or(HirType::Error),
+            ty: p.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error),
             span: p.span.clone(),
         })
         .collect();
 
-    let return_type = f
-        .return_type
-        .as_ref()
-        .map(HirType::from_ast_type)
-        .unwrap_or(HirType::Void);
+    let return_type = f.return_type.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Void);
 
     let body = lower_block(&f.body, diagnostics);
 
@@ -186,20 +166,17 @@ fn lower_block(block: &ast::Block, diagnostics: &mut Vec<DiagError>) -> HirBlock
         .iter()
         .filter_map(|s| lower_hir_stmt(s, &immut_names, diagnostics))
         .collect();
-    HirBlock {
-        statements: stmts,
-        span: block.span.clone(),
-    }
+    HirBlock { statements: stmts, span: block.span.clone() }
 }
 
-fn lower_hir_stmt(stmt: &ast::Stmt, immut_names: &std::collections::HashSet<String>, diagnostics: &mut Vec<DiagError>) -> Option<HirStmt> {
+fn lower_hir_stmt(
+    stmt: &ast::Stmt,
+    immut_names: &std::collections::HashSet<String>,
+    diagnostics: &mut Vec<DiagError>,
+) -> Option<HirStmt> {
     match stmt {
         ast::Stmt::Let(l) => {
-            let ty = l
-                .ty
-                .as_ref()
-                .map(HirType::from_ast_type)
-                .unwrap_or(HirType::Error);
+            let ty = l.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
             let init = lower_expr(&l.init, diagnostics);
             Some(HirStmt::Let(HirLet {
                 name: l.name.clone(),
@@ -210,11 +187,7 @@ fn lower_hir_stmt(stmt: &ast::Stmt, immut_names: &std::collections::HashSet<Stri
             }))
         }
         ast::Stmt::Const(c) => {
-            let ty = c
-                .ty
-                .as_ref()
-                .map(HirType::from_ast_type)
-                .unwrap_or(HirType::Error);
+            let ty = c.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
             let init = lower_expr(&c.init, diagnostics);
             Some(HirStmt::Const(HirConst {
                 name: c.name.clone(),
@@ -224,11 +197,7 @@ fn lower_hir_stmt(stmt: &ast::Stmt, immut_names: &std::collections::HashSet<Stri
             }))
         }
         ast::Stmt::Shared(s) => {
-            let ty = s
-                .ty
-                .as_ref()
-                .map(HirType::from_ast_type)
-                .unwrap_or(HirType::Error);
+            let ty = s.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error);
             let init = lower_expr(&s.init, diagnostics);
             Some(HirStmt::Shared(HirShared {
                 name: s.name.clone(),
@@ -240,10 +209,7 @@ fn lower_hir_stmt(stmt: &ast::Stmt, immut_names: &std::collections::HashSet<Stri
         ast::Stmt::If(if_expr) => {
             let cond = lower_expr(&if_expr.condition, diagnostics);
             let then_block = lower_block(&if_expr.then_branch, diagnostics);
-            let else_block = if_expr
-                .else_branch
-                .as_ref()
-                .map(|b| lower_block(b, diagnostics));
+            let else_block = if_expr.else_branch.as_ref().map(|b| lower_block(b, diagnostics));
             Some(HirStmt::If(HirIf {
                 condition: Box::new(cond),
                 then_branch: then_block,
@@ -288,31 +254,17 @@ fn lower_hir_stmt(stmt: &ast::Stmt, immut_names: &std::collections::HashSet<Stri
         }
         ast::Stmt::Loop(l) => {
             let body = lower_block(&l.body, diagnostics);
-            Some(HirStmt::Loop(HirLoop {
-                body,
-                span: l.span.clone(),
-            }))
+            Some(HirStmt::Loop(HirLoop { body, span: l.span.clone() }))
         }
         ast::Stmt::Return(r) => {
             let value = r.value.as_ref().map(|v| Box::new(lower_expr(v, diagnostics)));
-            Some(HirStmt::Return(HirReturn {
-                value,
-                span: r.span.clone(),
-            }))
+            Some(HirStmt::Return(HirReturn { value, span: r.span.clone() }))
         }
         ast::Stmt::Break(b) => {
-            let value = b
-                .value
-                .as_ref()
-                .map(|v| Box::new(lower_expr(v, diagnostics)));
-            Some(HirStmt::Break(HirBreak {
-                value,
-                span: b.span.clone(),
-            }))
+            let value = b.value.as_ref().map(|v| Box::new(lower_expr(v, diagnostics)));
+            Some(HirStmt::Break(HirBreak { value, span: b.span.clone() }))
         }
-        ast::Stmt::Continue(c) => Some(HirStmt::Continue(HirContinue {
-            span: c.span.clone(),
-        })),
+        ast::Stmt::Continue(c) => Some(HirStmt::Continue(HirContinue { span: c.span.clone() })),
         ast::Stmt::Expr(e) => {
             // §OWN-REQ: 不可变赋值检测
             if let ast::Expr::Assign { name, value } = e.expr.as_ref() {
@@ -367,10 +319,7 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
 
         ast::Expr::Ident(name) => HirExpr::Ident(
             name.clone(),
-            HirBinding::Unresolved {
-                name: name.clone(),
-                span: Span::dummy(),
-            },
+            HirBinding::Unresolved { name: name.clone(), span: Span::dummy() },
             Span::dummy(),
         ),
 
@@ -432,11 +381,7 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
                 .map(|p| HirParam {
                     name: p.name.clone(),
                     mode: HirType::param_mode_from_ast(&p.mode),
-                    ty: p
-                        .ty
-                        .as_ref()
-                        .map(HirType::from_ast_type)
-                        .unwrap_or(HirType::Error),
+                    ty: p.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error),
                     span: p.span.clone(),
                 })
                 .collect();
@@ -510,10 +455,7 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
         ast::Expr::IfExpr(if_expr) => {
             let cond = lower_expr(&if_expr.condition, diagnostics);
             let then_block = lower_block(&if_expr.then_branch, diagnostics);
-            let else_block = if_expr
-                .else_branch
-                .as_ref()
-                .map(|b| lower_block(b, diagnostics));
+            let else_block = if_expr.else_branch.as_ref().map(|b| lower_block(b, diagnostics));
             HirExpr::If(
                 HirIf {
                     condition: Box::new(cond),
@@ -528,13 +470,7 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
         // §3.1.4 降级策略: LoopExpr → HirExpr::Loop
         ast::Expr::LoopExpr(loop_expr) => {
             let body = lower_block(&loop_expr.body, diagnostics);
-            HirExpr::Loop(
-                HirLoop {
-                    body,
-                    span: loop_expr.span.clone(),
-                },
-                loop_expr.span.clone(),
-            )
+            HirExpr::Loop(HirLoop { body, span: loop_expr.span.clone() }, loop_expr.span.clone())
         }
 
         // §3.1.4 降级策略: MemberAccess{ Ident("console"), "log" } → Ident
@@ -611,19 +547,13 @@ pub fn resolve_names(
             HirItem::Const(c) => {
                 module_scope.insert(
                     &c.name,
-                    HirBinding::ModuleConst {
-                        ty: c.ty.clone(),
-                        span: c.span.clone(),
-                    },
+                    HirBinding::ModuleConst { ty: c.ty.clone(), span: c.span.clone() },
                 );
             }
             HirItem::Shared(s) => {
                 module_scope.insert(
                     &s.name,
-                    HirBinding::ModuleShared {
-                        ty: s.ty.clone(),
-                        span: s.span.clone(),
-                    },
+                    HirBinding::ModuleShared { ty: s.ty.clone(), span: s.span.clone() },
                 );
             }
             HirItem::Stub(_) => {}
@@ -677,9 +607,7 @@ fn lower_imports(
 
     for imp in ast_imports {
         // 解析路径
-        let source_path = trust_parser::resolve_imports::resolve_import_path(
-            &imp.path, &hir.file,
-        );
+        let source_path = trust_parser::resolve_imports::resolve_import_path(&imp.path, &hir.file);
 
         let mut bindings: Vec<(String, HirBinding)> = Vec::new();
 
@@ -716,21 +644,31 @@ fn lower_imports(
                         // 从 AST 导出项提取实际类型（非 HirType::Named）
                         let actual_ty = match export.item.as_ref() {
                             ast::Stmt::Function(f) => {
-                                let param_types: Vec<HirType> = f.params.iter()
-                                    .map(|p| p.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error))
+                                let param_types: Vec<HirType> = f
+                                    .params
+                                    .iter()
+                                    .map(|p| {
+                                        p.ty.as_ref()
+                                            .map(HirType::from_ast_type)
+                                            .unwrap_or(HirType::Error)
+                                    })
                                     .collect();
-                                let ret = f.return_type.as_ref()
+                                let ret = f
+                                    .return_type
+                                    .as_ref()
                                     .map(HirType::from_ast_type)
                                     .unwrap_or(HirType::Void);
                                 HirType::Function(param_types, Box::new(ret))
                             }
                             ast::Stmt::Const(c) => {
-                                c.ty.as_ref().map(HirType::from_ast_type)
-                                    .unwrap_or_else(|| HirType::from_ast_type(&trust_parser::ast::Type::NumberType))
+                                c.ty.as_ref().map(HirType::from_ast_type).unwrap_or_else(|| {
+                                    HirType::from_ast_type(&trust_parser::ast::Type::NumberType)
+                                })
                             }
                             ast::Stmt::Let(l) => {
-                                l.ty.as_ref().map(HirType::from_ast_type)
-                                    .unwrap_or_else(|| HirType::from_ast_type(&trust_parser::ast::Type::NumberType))
+                                l.ty.as_ref().map(HirType::from_ast_type).unwrap_or_else(|| {
+                                    HirType::from_ast_type(&trust_parser::ast::Type::NumberType)
+                                })
                             }
                             _ => HirType::Error,
                         };
@@ -852,10 +790,7 @@ fn resolve_block_names(
                 }
                 block_scope.insert(
                     &c.name,
-                    HirBinding::ModuleConst {
-                        ty: c.ty.clone(),
-                        span: c.span.clone(),
-                    },
+                    HirBinding::ModuleConst { ty: c.ty.clone(), span: c.span.clone() },
                 );
             }
             HirStmt::Shared(s) => {
@@ -865,10 +800,7 @@ fn resolve_block_names(
                 }
                 block_scope.insert(
                     &s.name,
-                    HirBinding::ModuleShared {
-                        ty: s.ty.clone(),
-                        span: s.span.clone(),
-                    },
+                    HirBinding::ModuleShared { ty: s.ty.clone(), span: s.span.clone() },
                 );
             }
             HirStmt::If(if_s) => {
@@ -936,11 +868,7 @@ fn resolve_block_names(
     // Note: block_scope is dropped here — no variable leaks to parent.
 }
 
-fn resolve_expr_names(
-    expr: &mut HirExpr,
-    scope: &Scope,
-    diagnostics: &mut Vec<DiagError>,
-) {
+fn resolve_expr_names(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<DiagError>) {
     match expr {
         HirExpr::Ident(name, binding, _span) => {
             if matches!(binding, HirBinding::Unresolved { .. }) {
@@ -974,11 +902,7 @@ fn resolve_expr_names(
             for p in params.iter() {
                 fn_scope.insert(
                     &p.name,
-                    HirBinding::LocalVar {
-                        ty: p.ty.clone(),
-                        mutable: false,
-                        span: p.span.clone(),
-                    },
+                    HirBinding::LocalVar { ty: p.ty.clone(), mutable: false, span: p.span.clone() },
                 );
             }
             resolve_block_names(body, &fn_scope, diagnostics);
@@ -1029,7 +953,6 @@ fn resolve_expr_names(
     }
 }
 
-
 fn infer_type_from_expr(expr: &HirExpr) -> HirType {
     match expr {
         HirExpr::IntLiteral(..) => HirType::I32,
@@ -1071,11 +994,7 @@ impl DiagError {
 
 impl std::fmt::Display for DiagError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}:{}: {}",
-            self.span.file, self.span.line_start, self.message
-        )
+        write!(f, "{}:{}: {}", self.span.file, self.span.line_start, self.message)
     }
 }
 

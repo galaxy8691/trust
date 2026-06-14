@@ -33,12 +33,7 @@ pub fn emit_console_import() -> String {
 /// assert!(call.contains("\"hello\""));
 /// ```
 pub fn emit_console_log(msg: &str) -> String {
-    format!(
-        "{log}({quote}{msg}{quote})",
-        log = FERRO_RT_CONSOLE_LOG,
-        quote = "\"",
-        msg = msg,
-    )
+    format!("{log}({quote}{msg}{quote})", log = FERRO_RT_CONSOLE_LOG, quote = "\"", msg = msg,)
 }
 
 /// §7.3: 生成 console.log 调用 — 表达式参数（通过 format! 转换）
