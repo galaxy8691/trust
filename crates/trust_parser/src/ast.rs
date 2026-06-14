@@ -282,6 +282,8 @@ pub enum Expr {
     IfExpr(Box<IfExpr>),
     /// `loop` 是表达式
     LoopExpr(Box<LoopExpr>),
+    /// `name = expr` — 不可变/可变变量的赋值表达式
+    Assign { name: String, value: Box<Expr> },
 }
 
 /// 注：不保留 Expr::Paren —— 括号由 parser 在 Pratt 解析中消耗，不产生 AST 节点。

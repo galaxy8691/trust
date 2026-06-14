@@ -158,6 +158,8 @@ pub struct VarMapping {
     pub tmp_to_source: HashMap<TmpVar, (String, Span)>,
     /// 源码变量名 → TmpVar
     pub source_to_tmp: HashMap<String, TmpVar>,
+    /// 以 `let mut` 声明的变量名（用于 moveck 不可变赋值检测）
+    pub mutable_names: std::collections::HashSet<String>,
 }
 
 impl VarMapping {
@@ -165,12 +167,23 @@ impl VarMapping {
         VarMapping {
             tmp_to_source: HashMap::new(),
             source_to_tmp: HashMap::new(),
+            mutable_names: std::collections::HashSet::new(),
         }
     }
 
     pub fn insert(&mut self, tmp: TmpVar, name: &str, span: Span) {
         self.tmp_to_source.insert(tmp, (name.to_string(), span));
         self.source_to_tmp.insert(name.to_string(), tmp);
+    }
+
+    /// 标记变量为 `let mut` 声明
+    pub fn mark_mutable(&mut self, name: &str) {
+        self.mutable_names.insert(name.to_string());
+    }
+
+    /// 检查变量是否以 `let mut` 声明
+    pub fn is_mutable(&self, name: &str) -> bool {
+        self.mutable_names.contains(name)
     }
 
     pub fn lookup_tmp(&self, tmp: &TmpVar) -> Option<&(String, Span)> {
@@ -385,6 +398,10 @@ fn lower_stmt(stmt: &HirStmt, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
 }
 
 fn lower_let(let_s: &HirLet, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
+    // §OWN-REQ: 不可变赋值检测——非 `let mut` 变量不允许重新赋值
+    if let_s.mutable {
+        ctx.map.mark_mutable(&let_s.name);
+    }
     let init_tmp: Option<TmpVar> = match let_s.init.as_ref() {
         // Move vs Let 判定（§3.2.2 表格）
         HirExpr::Ident(name, binding, _span) => {
@@ -395,6 +412,14 @@ fn lower_let(let_s: &HirLet, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
                 };
                 if is_copy_type(ty) {
                     if let Some(existing) = ctx.map.lookup_name(name) {
+                        // 检查不可变变量赋值（let 非 mut → 不允许重新赋值）
+                        if !ctx.map.is_mutable(name) {
+                            diags.push(DiagError::new(
+                                format!("cannot assign to immutable variable `{name}`; declare it with `let mut`"),
+                                let_s.span.clone(),
+                            ));
+                            return;
+                        }
                         let tmp = ctx.next_tmp();
                         ctx.emit(TirOp::Let(tmp, TirValue::Var(existing), let_s.span.clone()));
                         Some(tmp)
@@ -403,6 +428,13 @@ fn lower_let(let_s: &HirLet, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
                         None
                     }
                 } else if let Some(existing) = ctx.map.lookup_name(name) {
+                    if !ctx.map.is_mutable(name) {
+                        diags.push(DiagError::new(
+                            format!("cannot assign to immutable variable `{name}`; declare it with `let mut`"),
+                            let_s.span.clone(),
+                        ));
+                        return;
+                    }
                     let new_tmp = ctx.next_tmp();
                     ctx.emit(TirOp::Move(new_tmp, existing, let_s.span.clone()));
                     Some(new_tmp)

@@ -171,10 +171,20 @@ fn lower_function(f: &ast::FunctionDecl, diagnostics: &mut Vec<DiagError>) -> Hi
 }
 
 fn lower_block(block: &ast::Block, diagnostics: &mut Vec<DiagError>) -> HirBlock {
+    // 首遍扫描：收集本块中 `let`（非 mut）变量名
+    let immut_names: std::collections::HashSet<String> = block
+        .statements
+        .iter()
+        .filter_map(|s| match s {
+            ast::Stmt::Let(l) if !l.mutable => Some(l.name.clone()),
+            _ => None,
+        })
+        .collect();
+
     let stmts: Vec<HirStmt> = block
         .statements
         .iter()
-        .filter_map(|s| lower_hir_stmt(s, diagnostics))
+        .filter_map(|s| lower_hir_stmt(s, &immut_names, diagnostics))
         .collect();
     HirBlock {
         statements: stmts,
@@ -182,7 +192,7 @@ fn lower_block(block: &ast::Block, diagnostics: &mut Vec<DiagError>) -> HirBlock
     }
 }
 
-fn lower_hir_stmt(stmt: &ast::Stmt, diagnostics: &mut Vec<DiagError>) -> Option<HirStmt> {
+fn lower_hir_stmt(stmt: &ast::Stmt, immut_names: &std::collections::HashSet<String>, diagnostics: &mut Vec<DiagError>) -> Option<HirStmt> {
     match stmt {
         ast::Stmt::Let(l) => {
             let ty = l
@@ -242,7 +252,8 @@ fn lower_hir_stmt(stmt: &ast::Stmt, diagnostics: &mut Vec<DiagError>) -> Option<
             }))
         }
         ast::Stmt::For(f) => {
-            let init = lower_hir_stmt(&f.init, diagnostics)
+            let empty_set = std::collections::HashSet::new();
+            let init = lower_hir_stmt(&f.init, &empty_set, diagnostics)
                 .map(Box::new)
                 .unwrap_or_else(|| Box::new(HirStmt::Error));
             let condition = lower_expr(&f.condition, diagnostics);
@@ -303,6 +314,26 @@ fn lower_hir_stmt(stmt: &ast::Stmt, diagnostics: &mut Vec<DiagError>) -> Option<
             span: c.span.clone(),
         })),
         ast::Stmt::Expr(e) => {
+            // §OWN-REQ: 不可变赋值检测
+            if let ast::Expr::Assign { name, value } = e.expr.as_ref() {
+                if immut_names.contains(name) {
+                    diagnostics.push(DiagError::new(
+                        format!("cannot assign to immutable variable `{name}`; declare it with `let mut`"),
+                        e.span.clone(),
+                    ));
+                    return Some(HirStmt::Error);
+                }
+                // let mut 变量 — 降级为 Let
+                let init = lower_expr(value, diagnostics);
+                let ty = infer_type_from_expr(&init);
+                return Some(HirStmt::Let(HirLet {
+                    name: name.clone(),
+                    mutable: true,
+                    ty,
+                    init: Box::new(init),
+                    span: e.span.clone(),
+                }));
+            }
             let expr = lower_expr(&e.expr, diagnostics);
             Some(HirStmt::Expr(expr))
         }
@@ -530,6 +561,12 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
                 ma.span.clone(),
             ));
             HirExpr::Error(ma.span.clone())
+        }
+
+        ast::Expr::Assign { name: _, value } => {
+            // 赋值表达式在 lower_stmt 的 Expr 分支中处理
+            // 此处仅保底回退
+            lower_expr(value, diagnostics)
         }
     }
 }

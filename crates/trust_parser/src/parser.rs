@@ -392,9 +392,18 @@ impl Parser {
                 let rhs = self.parse_binary(rbp)?;
                 lhs = Expr::Binary(Box::new(lhs), binop, Box::new(rhs));
             } else {
-                // assignment (right-associative)
+                // assignment (right-associative): `name = expr`
                 let rhs = self.parse_binary(rbp)?;
-                lhs = rhs;
+                match &lhs {
+                    Expr::Ident(name) => {
+                        lhs = Expr::Assign { name: name.clone(), value: Box::new(rhs) };
+                    }
+                    _ => {
+                        // 非 ident 的左值 → Phase 1 不支持成员赋值
+                        self.error("only simple variable assignment (name = expr) is supported");
+                        lhs = rhs; // 回退：丢弃赋值语义
+                    }
+                }
             }
         }
         Some(lhs)
