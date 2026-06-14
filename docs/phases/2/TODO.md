@@ -61,17 +61,17 @@ Phase 1 在 v2.0 设计重构前交付，基于旧设计实现。本 Phase 的�
 - [ ] **parser/ast：** 删除 `Stmt::Loop` 与 `Expr::LoopExpr` AST 节点
 - [ ] **parser：** 移除 `loop { ... }` 解析路径（含 `break` 带值在 `LoopExpr` 中的处理）
 - [ ] **parser/ast：** 删除/禁用 `BreakStmt.value` 字段（`loop` 移除后 `break value` 失去合法语境）
-- [ ] **HIR：** 移除 `Loop`/`LoopExpr` 降级逻辑；`while (true)` 已在 Phase 1 支持，无需新增
+- [ ] **HIR：** 移除 `HirLoop` / `HirStmt::Loop` / `HirExpr::Loop` 及 `LoopExpr` 降级逻辑；删除 `infer_loop_type`；`while (true)` 已在 Phase 1 支持，无需新增
 - [ ] **TIR：** 移除 `Loop` 对应的 TIR 节点与 borrowck 路径
 - [ ] **codegen：** 移除 `loop` → Rust 代码生成分支
 - [ ] **验证：** `grep -r "Loop" crates/trust_parser/src/ crates/trust_hir/src/ crates/trust_tir/src/ crates/trust_codegen/src/` 确认非注释引用已全部清理
 
 ### 2.1.3 移除 `bigint`
 
-**涉及 crate：** `trust_parser`、`trust_hir`、`trust_codegen`
+**涉及 crate：** `trust_parser`、`trust_hir`、`trust_tir`、`trust_codegen`
 
 - [ ] **lexer：** 移除 `TokenKind::BigIntType` 变体 + i64 字面量相关 token（由 2.1.1 覆盖）
-- [ ] **parser/ast：** 删除 `Type::BigInt` AST 类型节点
+- [ ] **parser/ast：** 删除 `Type::BigIntType` 与 `Expr::BigIntLiteral` AST 节点
 - [ ] **parser：** 移除 `bigint` 类型标注与 i64 字面量解析路径
 - [ ] **HIR typeck：** 移除 `BigInt` 类型检查规则
 - [ ] **codegen：** 移除 `bigint` → Rust `i64` 映射
@@ -93,14 +93,16 @@ Phase 1 在 v2.0 设计重构前交付，基于旧设计实现。本 Phase 的�
 - [ ] **parser/ast：** 删除 AST 中 `select` 转义槽
 - [ ] **验证：** `grep -ri "select" crates/trust_parser/src/` 确认仅剩注释
 
-### 2.1.6 移除其余旧设计残留关键字 + 更新辅助函数
+### 2.1.6 移除其余旧设计残留关键字 + 更新辅助函数 + 旧后缀运算符
 
-**涉及 crate：** `trust_parser`（lexer 2.1.1 已覆盖；此处确认其他 crate 无残留 + 更新辅助函数）
+**涉及 crate：** `trust_parser`、`trust_hir`、`trust_tir`、`trust_codegen`、`trust_error`（若有）
 
-- [ ] **更新 `TokenKind::can_end_stmt`**（`lexer.rs:174`）：移除 `None_` / `BigIntLiteral` / `Bang` 引用，替换为 `null` 等新 token
-- [ ] **更新 `Parser::can_expr_start`**（`parser.rs:609`）：移除 `None_` / `BigIntLiteral` / `Loop` / `Bang` 引用，替换为 `null` 等新 token
-- [ ] **验证残留引用：** `grep -rni "tokenkind::undefined\|None_\|Some_\|Ok_\|Err_\|Rc\|Arc\|Weak\|Box_\|Dyn\|Extends\|BigIntLiteral" crates/` 确认所有引用已清理
-- [ ] 若 HIR/codegen 中有对这些类型的特殊处理（如 `Option`/`Result` 翻译），一并移除
+- [ ] **更新 `TokenKind::can_end_stmt`**（`lexer.rs`）：移除 `None_` / `BigIntLiteral` 引用，替换为 `null` 等新 token（**保留 `Bang`**——仅前缀逻辑非 `!x`）
+- [ ] **更新 `Parser::can_expr_start`**（`parser.rs`）：移除 `None_` / `BigIntLiteral` / `Loop` 引用，替换为 `null` 等新 token（**保留 `Bang`**）
+- [ ] **移除旧后缀运算符：** 删除 `Expr::AssertUnwrap` / `Expr::TryPropagate` 及 parser 后缀 `expr!` / `expr?` 分支（**保留** `?.` / `??` 与前缀 `!x`）
+- [ ] **HIR/TIR/Codegen：** 删除 `HirExpr::AssertUnwrap` / `HirExpr::TryPropagate` 降级路径
+- [ ] **验证残留引用：** `grep -rni "tokenkind::undefined\|None_\|Some_\|Ok_\|Err_\|Rc\|Arc\|Weak\|Box_\|Dyn\|Extends\|BigIntLiteral\|AssertUnwrap\|TryPropagate" crates/` 确认所有引用已清理（注释除外）
+- [ ] 若 HIR/codegen 中有对用户暴露的 `Option`/`Result` 类型翻译，一并移除
 
 ### 2.1.7 规范对齐 v2.0（spec 修正，随实现同步推进）
 
