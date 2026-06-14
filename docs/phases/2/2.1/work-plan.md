@@ -298,13 +298,14 @@
 
 ## Step 6：规范对齐 v2.0 — 0.75 天
 
-### 6.1 删除 spec 废弃条目
+### 6.1 删除 trust-spec 废弃条目
 
 **文件：** `spec/trust-spec.md`
 
-- [ ] 删除/标注废弃：`interface`/`impl` 词法+语法+语义、ADT、`Option`/`Result`/`?`/`!`、`select`、`loop`/`bigint`
+- [ ] 删除/标注废弃：`interface`/`impl` 词法+语法+语义、ADT、旧后缀 `expr?`/`expr!`/用户面 `Option`/`Result`、`select`、`loop`/`bigint`
+- [ ] 重写 LEX-REQ-001 关键字表（43 个）与字面量说明（5 种）
 
-### 6.2 前瞻同步新增规范（写入 spec，实现归 2.2/2.3）
+### 6.2 前瞻同步新增规范（写入 trust-spec，实现归 2.2/2.3）
 
 **文件：** `spec/trust-spec.md`
 
@@ -322,11 +323,22 @@
 
 ### 6.4 建立章节冻结矩阵
 
-**文件：** 记录在本计划文件末尾或 spec 前言
+**文件：** 记录在本计划文件末尾或 spec 前言（含标准库模块大纲行）
 
-### 6.5 交叉核对（MS-2.1-9）
+### 6.5 stdlib.md 骨架对齐（MS-2.1-9）
 
-- [ ] 对 `Trust-设计文档.md` v2.0 / `spec/trust-spec.md` / `design-constraints.md` 交叉核对
+**文件：** `spec/stdlib.md`
+
+- [ ] 删除/废止 `std::result` 与用户面 `Option`/`Result` API
+- [ ] 更新模块依赖图，对齐设计 §13
+- [ ] 清除 pre-v2.0 设计决策（`!` 仅限 Option、`??` 用于 Result 等）
+- [ ] 仍含 `Result<T,E>` 的 API 加过渡注记（Phase 4 改 `throws`）
+- [ ] 新增 `std::error`、`std::console` 骨架占位
+- [ ] `grep -ri 'Option::\|Result::\|std::result' spec/stdlib.md` 验证
+
+### 6.6 交叉核对（MS-2.1-10）
+
+- [ ] 对 `Trust-设计文档.md` v2.0 / `spec/trust-spec.md` / `spec/stdlib.md` / `design-constraints.md` 交叉核对
 - [ ] 记录结论到 `known-failures.md`
 
 ---
@@ -369,11 +381,12 @@
 - [ ] MS-2.1-3：`can_end_stmt` / `can_expr_start` 验证
 - [ ] MS-2.1-4：`BreakStmt.value` 验证
 - [ ] MS-2.1-5：`null` 映射 + 测试
-- [ ] MS-2.1-6：spec 废弃条目删除
+- [ ] MS-2.1-6：trust-spec 废弃条目删除 + LEX-REQ-001
 - [ ] MS-2.1-7：旧审计废止声明
 - [ ] MS-2.1-8：章节冻结矩阵
-- [ ] MS-2.1-9：交叉核对记录
-- [ ] MS-2.1-10：`cargo build --workspace` + `known-failures.md`
+- [ ] MS-2.1-9：stdlib.md 骨架对齐
+- [ ] MS-2.1-10：四文档交叉核对记录
+- [ ] MS-2.1-11：编译通过 + known-failures 清单
 
 ### 7.6 CI 验证（与 spec 一致）
 
@@ -405,7 +418,7 @@
 | lexer 删变体后 parser 大面积编译失败 | 🔴 必然 | Step 1 完成 | 按 Step 1→7 顺序修复，清单记录到 build-errors-step1.txt |
 | `!`/`?` 混淆（前后缀） | 🟡 留意 | Step 5.2 | 保留前缀 Bang+QuestionDot/QuestionQuestion，仅删后缀 AssertUnwrap/TryPropagate |
 | 测试禁用后覆盖率下降超 5% | 🟢 低 | Step 7.4 | 2.5 恢复测试时补齐 |
-| spec 修改范围大导致遗漏 | 🟡 留意 | Step 6 | MS-2.1-9 交叉核对兜底 |
+| spec/stdlib 修改范围大导致遗漏 | 🟡 留意 | Step 6 | MS-2.1-10 四文档交叉核对兜底 |
 
 ---
 

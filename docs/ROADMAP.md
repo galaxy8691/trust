@@ -37,6 +37,8 @@
 - 模块间的依赖图
 - 与 Rust 标准库的映射关系
 
+> **v2.0 对齐：** Phase 0 基于旧设计（含 `std::result` / 用户面 `Option`/`Result`）。v2.0 对齐在 Phase 2 增量推进——2.1 移除用户面 `Option`/`Result` 并更新模块大纲（设计 §13），Phase 4 补 `std::error` 与 `throws` 签名，Phase 5+ 补并发相关模块。
+
 ### 0.3 设计文档与规范的一致性审计
 
 **工作量：** 3 天  
@@ -44,7 +46,7 @@
 **依赖：** 0.1, 0.2  
 **状态：** ✅ 完成（基于**旧设计**；审计报告：`docs/phases/0/0.3/audit-report.md`）
 
-> **规范对齐 v2.0：** Phase 0 已完成并提交，不再回退。`spec/trust-spec.md` 与 v2.0 设计的重新对齐改在 **Phase 2.1** 中随实现修正同步进行（见下）。
+> **规范对齐 v2.0：** Phase 0 已完成并提交，不再回退。`spec/trust-spec.md` 与 `spec/stdlib.md` 的 v2.0 重新对齐在 **Phase 2** 中随实现增量推进（见 Phase 2 §规范与标准库对齐策略），首步在 **2.1** 完成词法/废弃语法清理与 stdlib 骨架修正。
 
 ---
 
@@ -74,6 +76,8 @@ function main() {
 > **分支：** `phase2-v2-align`
 >
 > **本 Phase 合计：** 约 5-6 周（2.1~2.5 之和）
+>
+> **规范工作：** 除编译器实现修正外，本 Phase 同步推进 `spec/trust-spec.md`（语言规范）与 `spec/stdlib.md`（标准库规范）的 v2.0 增量对齐——删旧、前瞻写入、随 Phase 3+ 补齐新特性条目（非一次性整篇重写）。详见 `docs/phases/2/TODO.md` §规范与标准库对齐策略。
 
 ### 2.1 移除已废弃的语法与类型 + 规范对齐 v2.0
 
@@ -91,13 +95,22 @@ function main() {
 | 关键字表重核（54 → 43） | parser lexer | **移除 16 个**：`loop`/`bigint`/`interface`/`impl`/`select`/`undefined`/`None`/`Some`/`Ok`/`Err`/`Rc`/`Arc`/`Weak`/`Box`/`dyn`/`extends`；**新增 5 个**：`unknown`/`try`/`catch`/`null`/`panic`（`type`/`match`/`throw`/`shared`/`spawn` 等已存在，无需新增） |
 
 **规范对齐 v2.0（原 0.4，下沉至此，不回退 Phase 0）：**
-- `spec/trust-spec.md` 删除已废弃条目：`interface`/`impl`/ADT/`Option`/`Result`/`?`/`select`/`loop`/`bigint`
-- 同步本 Phase 2 修正的特性：`number`=f64 整数语义、块体函数强制返回标注、表达式体函数
-- 同步 §2.2 新增的位运算 `number` 约束
-- v2.0 新特性（具名类型别名、receiver、隐式泛型、`unknown`+`match`、`throw`/`try-catch`、`null` 安全）的规范条目**随 Phase 3+ 各自实现时补齐**——规范作为活文档逐 Phase 推进，不在此一次写全
-- 每完成一项修正即更新设计文档 / 规范 / `design-constraints.md` 三者一致性
-- **废止旧审计**：在 `docs/phases/0/0.3/audit-report.md` 顶部标注"基于旧设计、已被 v2.0 取代"，避免被误用为 v2.0 权威审计结论
-- **章节冻结矩阵**（明确"与实现同步"的协同点）：词法规范在 2.1 完成前冻结 → 类型系统核心在 2.2/2.3 前冻结 → 具名类型/泛型/`unknown` 随 Phase 3 冻结 → 错误/`null` 随 Phase 4 → 并发/FFI 可延至 Phase 5/7
+
+**`spec/trust-spec.md`（语言规范）：**
+- 删除已废弃条目：`interface`/`impl`/ADT/旧后缀 `expr?`/`expr!`/用户面 `Option`/`Result`/`select`/`loop`/`bigint`
+- 重写 LEX-REQ-001 关键字表（43 个）与字面量说明（5 种）
+- 前瞻写入 2.2/2.3 条目：`number`=f64 整数语义、块体函数强制返回标注、表达式体函数、位运算 `number` 约束
+- Phase 3+ 新特性（receiver、`unknown`+`match`、`throw`/`try-catch` 等）**随各自 Phase 实现时补齐**
+
+**`spec/stdlib.md`（标准库规范）：**
+- 删除/废止 `std::result` 与用户面 `Option`/`Result` API
+- 更新模块依赖图，对齐设计 §13 模块大纲（新增 `std::error`、`std::console` 骨架占位）
+- 仍含 `Result<T,E>` 的 API 标注过渡注记（完整 `throws` 签名归 Phase 4）
+
+**共通：**
+- 每完成一项修正即更新设计文档 / `trust-spec` / `stdlib` / `design-constraints.md` 四者一致性
+- **废止旧审计**：在 `docs/phases/0/0.3/audit-report.md` 顶部标注"基于旧设计、已被 v2.0 取代"
+- **章节冻结矩阵**：词法规范在 2.1 完成前冻结 → 类型系统核心在 2.2/2.3 前冻结 → 标准库模块大纲 2.1 骨架后逐 Phase 冻结 → 具名类型/泛型/`unknown` 随 Phase 3 → 错误/`null` 随 Phase 4 → 并发/FFI 可延至 Phase 5/7
 
 ### 2.2 `number` 统一为 f64
 
@@ -422,9 +435,9 @@ function main() {
 
 | 里程碑 | 交付标准 | 状态 |
 |--------|---------|------|
-| **v0.0 — 规范冻结** | `spec/trust-spec.md` 完成、设计/规范/constraints 三者一致（旧设计已审计；v2.0 对齐随 Phase 2+ 推进） | ✅ 完成（旧设计） |
+| **v0.0 — 规范冻结** | `spec/trust-spec.md` + `spec/stdlib.md` 完成、设计/规范/constraints 一致（旧设计已审计；v2.0 对齐随 Phase 2+ 推进） | ✅ 完成（旧设计） |
 | **v0.1 — 最小编译器** | 编译变量/函数/控制流 → Rust → 可执行二进制 | ✅ 完成（旧设计） |
-| **v0.1.1 — 对齐 v2.0** | Phase 1 修正到 v2.0：`number`=f64、移除 `loop`/`bigint`/`interface`/`impl`/`select`、块体强制返回标注、`&mut`/闭包调用 | Phase 2 |
+| **v0.1.1 — 对齐 v2.0** | Phase 1 修正到 v2.0 + `trust-spec`/`stdlib` 增量对齐：`number`=f64、移除旧语法残留、块体强制返回标注、`&mut`/闭包调用 | Phase 2 |
 | **v0.1.2 — 类型系统与方法** | 具名类型别名、纯结构类型、receiver 方法、隐式泛型、`unknown`+`match` | Phase 3 |
 | **v0.1.3 — 错误处理与空安全** | `throw`/`try-catch`（→ `Result` + 穷举推断）、`null` 安全（`?.`/`??`） | Phase 4 |
 | **v0.2 — 并发与异步** | `ferro_rt` + `spawn`/`Channel`/`shared`/`withLock`/`join` + `async`/`await`（无 `select`） | Phase 5 |
@@ -433,4 +446,4 @@ function main() {
 
 ---
 
-> **下一步：** Phase 2.1 —— 移除 `loop`/`bigint`/`interface`/`impl`/`select` 残留、重核关键字表，并同步将 `spec/trust-spec.md` 对齐 v2.0（`phase2-v2-align` 分支）。
+> **下一步：** Phase 2.1 —— 移除旧语法残留、重核关键字表 43，并增量对齐 `spec/trust-spec.md` 与 `spec/stdlib.md`（`phase2-v2-align` 分支）。

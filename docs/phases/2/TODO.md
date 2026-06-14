@@ -15,14 +15,26 @@ Phase 1 在 v2.0 设计重构前交付，基于旧设计实现。本 Phase 的�
 1. **移除旧设计残留**（`loop`/`bigint`/`interface`/`impl`/`select` 等）
 2. **修正现存实现到 v2.0 语义**（`number`=f64、函数声明规则、`&mut`/闭包调用）
 3. **重核关键字表**（54→43）
-4. **规范对齐**（`spec/trust-spec.md` 随实现推进同步修正）
-5. **测试迁移**（56 集成测试在 v2.0 语义下重新通过）
+4. **语言规范对齐**（`spec/trust-spec.md` 随实现增量修正，非一次性整篇重写）
+5. **标准库规范对齐**（`spec/stdlib.md` 随实现增量修正，与语言规范同步推进）
+6. **测试迁移**（56 集成测试在 v2.0 语义下重新通过）
+
+### 规范与标准库对齐策略（v2.0）
+
+Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**并已审计。v2.0 对齐采用**活文档**策略——随各子里程碑删旧、写新，不在 Phase 2 内一次性整篇重写。
+
+| 文档 | 2.1 | 2.2 | 2.3 | Phase 3+ |
+|------|-----|-----|-----|----------|
+| `spec/trust-spec.md` | 删废弃条目；关键字表 43；废止旧审计；章节冻结矩阵 | `number`=f64、整数语义、位运算 | 函数声明规则 | receiver、具名类型、`unknown`+`match` 等随实现补齐 |
+| `spec/stdlib.md` | 移除 `std::result` 用户面 API；更新模块依赖图；清除 Option/Result 暴露 | `number` 相关 API 参数/返回值 | — | `std::error`（Phase 4）、`throws` 签名（Phase 4）、并发模块（Phase 5+） |
+
+**交叉核对：** 2.1 / 2.2 / 2.3 各完成时，核对 `Trust-设计文档.md` v2.0、`spec/trust-spec.md`、`spec/stdlib.md`、`docs/design-constraints.md` 四者一致性。
 
 ---
 
 ## 2.1 移除已废弃的语法与类型 + 规范对齐 v2.0
 
-**产出物：** 清理后的 parser/HIR/TIR/codegen + 关键字表重核（54→43）+ spec 修正  
+**产出物：** 清理后的 parser/HIR/TIR/codegen + 关键字表重核（54→43）+ `trust-spec` / `stdlib` 初步对齐  
 **工作量：** 1.5–2 周  
 **优先级：** P0  
 **依赖：** Phase 1 完成  
@@ -104,38 +116,52 @@ Phase 1 在 v2.0 设计重构前交付，基于旧设计实现。本 Phase 的�
 - [ ] **验证残留引用：** `grep -rni "tokenkind::undefined\|None_\|Some_\|Ok_\|Err_\|Rc\|Arc\|Weak\|Box_\|Dyn\|Extends\|BigIntLiteral\|AssertUnwrap\|TryPropagate" crates/` 确认所有引用已清理（注释除外）
 - [ ] 若 HIR/codegen 中有对用户暴露的 `Option`/`Result` 类型翻译，一并移除
 
-### 2.1.7 规范对齐 v2.0（spec 修正，随实现同步推进）
+### 2.1.7 语言规范对齐 v2.0（`trust-spec.md`，随实现增量推进）
 
-**产出物：** `spec/trust-spec.md` 中已废弃条目清除 + 本 Phase 特性的规范同步
+**产出物：** `spec/trust-spec.md` 中已废弃条目清除 + 前瞻规范条目 + 章节冻结矩阵
 
 - [ ] **删除已废弃规范条目：**
   - `interface` / `impl` 词法+语法+语义条目
   - ADT（`type X = | ...`）语法+语义条目
-  - `Option` / `Result` / `?` / `!` 语义条目
+  - 旧 `Option` / `Result` 用户暴露语义、**后缀** `expr?`（Result 传播）、**后缀** `expr!`（Option 断言）条目
   - `select` 并发条目
   - `loop` / `bigint` 词法+语法+语义条目
-- [ ] **同步本 Phase 2 修正的特性：**
+- [ ] **重写 LEX-REQ-001 关键字表**为 43 个（与 lexer 一致），更新字面量说明（5 种，无 `bigint`/`Nn`）
+- [ ] **前瞻同步**（写入 spec，实现归 2.2/2.3，不要求 2.1 实现）：
   - `number`=f64 类型规则（对应 2.2）
   - `number` 整数语义（索引/循环/长度/FFI + 2^53 精度警告，对应 2.2）
   - `number` 位运算约束（`&`/`|`/`^`/`<<`/`>>` 仅允许 `number`，对应 2.2）
   - 块体函数强制返回标注规则（对应 2.3）
   - 表达式体函数（`function f(...) = expr`）语法+语义（对应 2.3）
+- [ ] **不在 2.1 写入：** 具名类型、receiver、隐式泛型、`unknown`+`match`、`throw`/`try-catch` 穷举、完整 `null` 安全——归 Phase 3+（见上表）
 - [ ] **废止旧审计：** 在 `docs/phases/0/0.3/audit-report.md` 顶部添加废止声明：
   ```
   > ⚠️ 本审计报告基于旧设计（pre-v2.0），已被 v2.0 设计取代。
   > 请以 `docs/Trust-设计文档.md` v2.0 为唯一权威规范。
   > v2.0 重新审计随 Phase 2+ 逐 Phase 推进。
   ```
-- [ ] **章节冻结矩阵**（明确规范-实现的协同点）：
+- [ ] **章节冻结矩阵**（记入 spec 前言或 `2.1-spec.md`）：
   | 规范章节 | 冻结时机 | 对应实现 |
   |---------|---------|---------|
   | 词法规范（关键字集、字面量） | 2.1 完成前 | 2.1.1 关键字重核 |
   | 类型系统核心（`number`/基本类型） | 2.2/2.3 启动前 | 2.2 number=f64 |
   | 函数声明规则 | 2.3 启动前 | 2.3 |
+  | 标准库模块大纲 | 2.1 骨架对齐后逐 Phase 冻结 | 2.1.8 + Phase 4/5/6 |
   | 具名类型/泛型/`unknown` | Phase 3 各子任务启动前 | Phase 3 |
   | 错误/`null` | Phase 4 各子任务启动前 | Phase 4 |
   | 并发/FFI | Phase 5/7 启动前 | Phase 5/7 |
-- [ ] **验证：** 设计文档 / 规范 / `design-constraints.md` 在 2.1/2.2/2.3 各完成时交叉核对一致性
+- [ ] **验证：** 2.1 完成时四文档交叉核对（设计文档 / `trust-spec` / `stdlib` / `design-constraints`）
+
+### 2.1.8 标准库规范对齐 v2.0（`stdlib.md`，2.1 骨架修正）
+
+**产出物：** `spec/stdlib.md` 移除旧设计用户面 API，模块大纲对齐设计 §13 骨架
+
+- [ ] **删除/废止 `std::result` 模块**（`Option`/`Result` 不暴露给用户；`Some`/`None`/`Ok`/`Err` 构造器从 stdlib 移除）
+- [ ] **更新模块依赖图**：去除以 `result` 为根的依赖；对齐设计 §13 模块列表（`error`、`console`、`collections`、`string`、`sync`、`async`、`fs`、`time` 等）
+- [ ] **清除 stdlib 设计决策中的旧语义**：删除「`!` 仅限 Option」「`??` 用于 Result」等 pre-v2.0 表述
+- [ ] **API 签名过渡标注**：仍含 `Result<T,E>` / `Option<T>` 的函数（如 `fs.readToString`）标注 `> ⚠️ v2.0 待改 — Phase 4 改为 `throws` 或 `T | null``，不在 2.1 一次性改完全部 API
+- [ ] **新增骨架模块占位**（仅模块标题 + 对齐设计 §13 的一句话说明，API 随 Phase 4+ 补齐）：`std::error`、`std::console`
+- [ ] **验证：** `grep -ri 'Option::\|Result::\|std::result' spec/stdlib.md` 仅剩废弃标注或过渡标注；模块列表与设计 §13 一致
 
 ---
 
@@ -398,7 +424,9 @@ Phase 1 在 v2.0 设计重构前交付，基于旧设计实现。本 Phase 的�
 - [ ] `as` 仅保留非 number 的必要转换（设计 §2.2：number 之间不需要 `as`——number 统一后 `as number`/`as i32`/`as f64` 为恒等变换，移除避免无意义代码通过编译）
 - [ ] 位运算 token/AST/parser/typeck/codegen 完整落地（设计 §2.2）
 - [ ] 超 2^53 字面量/索引发 `Warning` 级诊断（`Severity::Warning`）
-- [ ] `spec/trust-spec.md` 中废弃条目已删除，本 Phase 特性已同步
+- [ ] `spec/trust-spec.md`：废弃条目已删除，LEX-REQ-001 已更新为 43 关键字，2.2/2.3 前瞻条目已写入
+- [ ] `spec/stdlib.md`：无用户面 `Option`/`Result`/`std::result`；模块大纲对齐设计 §13；`Result<T,E>` API 已标过渡注记
+- [ ] 设计文档 / `trust-spec` / `stdlib` / `design-constraints` 四文档交叉核对已记录（2.1/2.2/2.3 各完成时）
 - [ ] 旧审计报告已标注废止
 - [ ] 56 个集成测试全部通过（v2.0 语义）；2.4 完成后 `&mut`/闭包调用增量测试通过
 - [ ] `cargo clippy --workspace -- -D warnings` 通过
@@ -412,6 +440,7 @@ Phase 1 在 v2.0 设计重构前交付，基于旧设计实现。本 Phase 的�
 
 > **规范冻结矩阵（本 Phase 交付时）：**
 > - ✅ 词法规范（关键字集 43 个、字面量、注释格式）—— 2.1 完成时冻结
+> - ✅ 标准库模块大纲（无用户面 Option/Result）—— 2.1 骨架对齐后逐 Phase 冻结
 > - ✅ `number`=f64 类型规则 + 整数语义 + 位运算约束 —— 2.2 完成时冻结
 > - ✅ 函数声明规则（块体强制返回标注、表达式体函数、箭头函数推断）—— 2.3 完成时冻结
 > - 🔜 具名类型/纯结构类型/隐式泛型/`unknown`+`match` —— Phase 3 逐子任务冻结
