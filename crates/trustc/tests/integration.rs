@@ -157,6 +157,14 @@ fn e2e_err_call_arg_type() {
     assert!(!out.status.success(), "expected compilation failure for call argument type mismatch");
 }
 
+// 不可变赋值检测
+#[test] fn e2e_mut_assign() { assert_output!("mut_assign.trust", "mut assign ok"); }
+#[test]
+fn e2e_err_immut_assign() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_immut_assign.trust", "-o", "/tmp/trust_err_im"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for immutable assignment");
+}
+
 // ============================================================================
 // CLI 参数解析测试
 // ============================================================================
