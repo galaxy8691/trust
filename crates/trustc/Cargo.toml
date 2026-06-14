@@ -12,6 +12,7 @@ trust_hir = { path = "../trust_hir" }
 trust_tir = { path = "../trust_tir" }
 trust_codegen = { path = "../trust_codegen" }
 trust_error = { path = "../trust_error" }
+ferro_rt = { path = "../ferro_rt" }
 
 [[bench]]
 name = "compile_bench"

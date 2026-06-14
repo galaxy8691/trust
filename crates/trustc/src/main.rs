@@ -311,6 +311,20 @@ fn wrap_eval_expr(expr: &str) -> String {
 // §3.2.5: rustc 编译 + 二进制执行
 // ============================================================================
 
+/// 在 target 目录下搜索 ferro_rt 的 rlib 文件（可能带 hash 后缀）
+fn find_ferro_rt_rlib(ferro_rt_dir: &str) -> Option<String> {
+    let deps = format!("{}/deps", ferro_rt_dir);
+    if let Ok(entries) = std::fs::read_dir(&deps) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("libferro_rt") && name.ends_with(".rlib") {
+                return Some(format!("{}/{}", deps, name));
+            }
+        }
+    }
+    None
+}
+
 fn compile_with_rustc(
     rust_code: &str,
     output: &str,
@@ -320,6 +334,9 @@ fn compile_with_rustc(
     std::fs::write(&temp_rs, rust_code).map_err(|e| format!("write {}: {}", temp_rs, e))?;
 
     let ferro_rt_dir = std::env::var("FERRO_RT_LIB").unwrap_or_else(|_| "target/debug".to_string());
+    // 搜索 ferro_rt rlib（可能有 hash 后缀），传精确路径给 rustc
+    let ferro_rt_rlib = find_ferro_rt_rlib(&ferro_rt_dir)
+        .unwrap_or_else(|| format!("{}/deps/libferro_rt.rlib", ferro_rt_dir));
 
     let status = process::Command::new("rustc")
         .args([
@@ -328,7 +345,7 @@ fn compile_with_rustc(
             "-L",
             &ferro_rt_dir,
             "--extern",
-            &format!("ferro_rt={}/libferro_rt.rlib", ferro_rt_dir),
+            &format!("ferro_rt={}", ferro_rt_rlib),
             "-o",
             output,
             &temp_rs,

@@ -1,0 +1,7 @@
+// 覆盖率: 多参数函数
+function sum(a: number, b: number, c: number): number {
+    return a + b + c;
+}
+function main(): void {
+    console.log("ok");
+}

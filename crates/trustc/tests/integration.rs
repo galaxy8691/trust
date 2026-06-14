@@ -114,6 +114,25 @@ fn e2e_err_move_use() {
     assert!(!out.status.success(), "expected compilation failure for use-after-move");
 }
 
+// 覆盖率增强: 更多错误路径 + 变体
+#[test] fn e2e_if_else_both() { assert_output!("if_else_both.trust", "positive"); }
+#[test] fn e2e_shadow_var()   { assert_output!("shadow_var.trust", "ok"); }
+#[test]
+fn e2e_err_return_type() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_return_type.trust", "-o", "/tmp/trust_err_ret"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for return type mismatch");
+}
+#[test]
+fn e2e_err_binary_type() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_binary_type.trust", "-o", "/tmp/trust_err_bin"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for binary type mismatch");
+}
+#[test]
+fn e2e_err_duplicate_var() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_duplicate_var.trust", "-o", "/tmp/trust_err_dup"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for duplicate variable");
+}
+
 // ============================================================================
 // CLI 参数解析测试
 // ============================================================================

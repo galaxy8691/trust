@@ -1,0 +1,7 @@
+// 覆盖率: 返回类型不匹配
+function bad_return(): number {
+    return "hello";
+}
+function main(): void {
+    console.log("ok");
+}
