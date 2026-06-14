@@ -45,6 +45,7 @@ dependencies = [
 name = "trustc"
 version = "0.1.0"
 dependencies = [
+ "ferro_rt",
  "trust_codegen",
  "trust_error",
  "trust_hir",
