@@ -39,7 +39,6 @@ pub enum Stmt {
     For(ForStmt),
     ForOf(ForOfStmt),
     While(WhileStmt),
-    Loop(LoopExpr),
     Return(ReturnStmt),
     Break(BreakStmt),
     Continue(ContinueStmt),
@@ -119,12 +118,6 @@ pub struct IfExpr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LoopExpr {
-    pub body: Block,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
     pub init: Box<Stmt>,
     pub condition: Box<Expr>,
@@ -156,7 +149,8 @@ pub struct ReturnStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BreakStmt {
-    /// 仅在 loop 中合法带值
+    /// ⚠️ v2.0: loop 已移除，break value 不再支持
+    #[deprecated(note = "break with value is not supported since v2.0 (loop removed)")]
     pub value: Option<Box<Expr>>,
     pub span: Span,
 }
@@ -216,13 +210,12 @@ pub struct CallArg {
 // ============================================================================
 
 /// 映射: "number"→NumberType, "string"→StringType, "boolean"→BooleanType,
-///        "bigint"→BigIntType,  "void"→VoidType
+///        "void"→VoidType
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     NumberType,
     StringType,
     BooleanType,
-    BigIntType,
     VoidType,
     /// 名义类型标识符（Phase 1 预留，Phase 2 启用）
     Named(String),
@@ -242,7 +235,6 @@ pub enum Type {
 pub enum Expr {
     IntLiteral(i32),
     FloatLiteral(f64),
-    BigIntLiteral(i64),
     StrLiteral(String),
     BoolLiteral(bool),
     Null,
@@ -261,10 +253,8 @@ pub enum Expr {
     ArrowFn(ArrowFn),
     /// `&expr`
     Reference(Box<Expr>),
-    /// `expr!`
-    AssertUnwrap(Box<Expr>),
-    /// `expr?`
-    TryPropagate(Box<Expr>),
+    // v2.0: AssertUnwrap(expr!) and TryPropagate(expr?) removed
+    // (replaced by null safety §2.7 and try-catch §5.1 respectively)
     /// `expr as Type`
     AsCast {
         expr: Box<Expr>,
@@ -274,8 +264,6 @@ pub enum Expr {
     TemplateLiteral(Vec<TemplatePart>),
     /// `if` 是表达式
     IfExpr(Box<IfExpr>),
-    /// `loop` 是表达式
-    LoopExpr(Box<LoopExpr>),
     /// `name = expr` — 不可变/可变变量的赋值表达式
     Assign {
         name: String,
@@ -416,22 +404,19 @@ mod tests {
         let literals = vec![
             Expr::IntLiteral(1),
             Expr::FloatLiteral(2.0),
-            Expr::BigIntLiteral(3),
             Expr::StrLiteral("hello".into()),
             Expr::BoolLiteral(true),
             Expr::Null,
         ];
-        assert_eq!(literals.len(), 6);
+        assert_eq!(literals.len(), 5); // v2.0: BigIntLiteral removed
 
         // Binary / Unary
         let _bin =
             Expr::Binary(Box::new(Expr::IntLiteral(1)), BinOp::Add, Box::new(Expr::IntLiteral(2)));
         let _un = Expr::Unary(UnaryOp::Neg, Box::new(Expr::IntLiteral(1)));
 
-        // Reference / AssertUnwrap / TryPropagate / AsCast
+        // Reference / AsCast
         let _ref = Expr::Reference(Box::new(Expr::Ident("x".into())));
-        let _bang = Expr::AssertUnwrap(Box::new(Expr::Ident("x".into())));
-        let _q = Expr::TryPropagate(Box::new(Expr::Ident("x".into())));
         let _as = Expr::AsCast { expr: Box::new(Expr::IntLiteral(1)), ty: Type::NumberType };
 
         // MemberAccess

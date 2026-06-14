@@ -83,7 +83,6 @@ pub enum HirStmt {
     For(HirFor),
     ForOf(HirForOf),
     While(HirWhile),
-    Loop(HirLoop),
     Return(HirReturn),
     Break(HirBreak),
     Continue(HirContinue),
@@ -158,12 +157,6 @@ pub struct HirWhile {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct HirLoop {
-    pub body: HirBlock,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct HirReturn {
     pub value: Option<Box<HirExpr>>,
     pub span: Span,
@@ -199,8 +192,6 @@ pub enum HirExpr {
     IntLiteral(i32, Span),
     /// 浮点字面量 f64
     FloatLiteral(f64, Span),
-    /// BigInt 字面量 i64
-    BigIntLiteral(i64, Span),
     /// 字符串字面量 String
     StringLiteral(String, Span),
     /// 布尔字面量 bool
@@ -221,14 +212,9 @@ pub enum HirExpr {
     AsCast(Box<HirExpr>, HirType, Span),
     /// `&` 显式引用
     Reference(Box<HirExpr>, Span),
-    /// `!` 断言 unwrap — Phase 1 仅 AST 解析，HIR 透传（押后 Phase 3）
-    AssertUnwrap(Box<HirExpr>, Span),
-    /// `?` Try 传播 — Phase 1 仅 AST 解析，HIR 透传（押后 Phase 3）
-    TryPropagate(Box<HirExpr>, Span),
+    // v2.0: AssertUnwrap and TryPropagate removed (replaced by null safety §2.7 / try-catch §5.1)
     /// `if` 表达式 — `let x = if (c) { 1 } else { 0 }` 降级产物（AC-SEM-002）
     If(HirIf, Span),
-    /// `loop` 表达式 — `let x = loop { break 1; }` 降级产物
-    Loop(HirLoop, Span),
     /// 块表达式 — `let x = { let y = 1; y }` 降级产物
     Block(HirBlock, Span),
     /// 哨兵：类型错误
@@ -266,16 +252,12 @@ pub enum HirType {
     I32,
     /// number 字面量 3.14 → f64
     F64,
-    /// bigint 字面量 → i64
-    I64,
     /// string 类型
     String,
     /// boolean 类型
     Bool,
     /// void（函数无返回值）
     Void,
-    /// bigint 类型标注（显式写 bigint，区别于 i64 字面量推断）
-    BigInt,
     /// 数组类型 `number[]` → Array(I32)
     Array(Box<HirType>),
     /// 命名类型引用（import 解析后的符号）
@@ -406,7 +388,6 @@ impl HirType {
             trust_parser::ast::Type::NumberType => HirType::I32, // 默认 I32
             trust_parser::ast::Type::StringType => HirType::String,
             trust_parser::ast::Type::BooleanType => HirType::Bool,
-            trust_parser::ast::Type::BigIntType => HirType::BigInt,
             trust_parser::ast::Type::VoidType => HirType::Void,
             trust_parser::ast::Type::Named(s) => HirType::Named(s.clone()),
             trust_parser::ast::Type::Array(t) => HirType::Array(Box::new(Self::from_ast_type(t))),
@@ -452,7 +433,7 @@ impl HirType {
 
     pub fn as_rust_type(&self) -> &'static str {
         match self {
-            HirType::I32 | HirType::F64 | HirType::I64 | HirType::BigInt => "number",
+            HirType::I32 | HirType::F64 => "number",
             HirType::String => "string",
             HirType::Bool => "boolean",
             HirType::Void => "void",
@@ -470,11 +451,9 @@ impl std::fmt::Display for HirType {
         match self {
             HirType::I32 => write!(f, "i32"),
             HirType::F64 => write!(f, "f64"),
-            HirType::I64 => write!(f, "i64"),
             HirType::String => write!(f, "string"),
             HirType::Bool => write!(f, "boolean"),
             HirType::Void => write!(f, "void"),
-            HirType::BigInt => write!(f, "bigint"),
             HirType::Array(t) => write!(f, "{}[]", t),
             HirType::Named(s) => write!(f, "{s}"),
             HirType::Function(params, ret) => {

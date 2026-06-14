@@ -22,7 +22,6 @@ pub const MUT_KEYWORD: &str = "mut";
 pub const RETURN_KEYWORD: &str = "return";
 pub const IF_KEYWORD: &str = "if";
 pub const ELSE_KEYWORD: &str = "else";
-pub const LOOP_KEYWORD: &str = "loop";
 pub const WHILE_KEYWORD: &str = "while";
 pub const FOR_KEYWORD: &str = "for";
 pub const BREAK_KEYWORD: &str = "break";
@@ -50,7 +49,6 @@ pub const FALSE_LITERAL: &str = "false";
 // Rust 类型名（禁止硬编码）
 pub const TYPE_I32: &str = "i32";
 pub const TYPE_F64: &str = "f64";
-pub const TYPE_I64: &str = "i64";
 pub const TYPE_BOOL: &str = "bool";
 pub const TYPE_STRING: &str = "String";
 pub const TYPE_VEC: &str = "Vec";
@@ -183,11 +181,9 @@ pub fn hir_type_to_rust(ty: &HirType) -> &'static str {
     match ty {
         HirType::I32 => TYPE_I32,
         HirType::F64 => TYPE_F64,
-        HirType::I64 => TYPE_I64,
         HirType::String => TYPE_STRING,
         HirType::Bool => TYPE_BOOL,
         HirType::Void => TYPE_UNIT,
-        HirType::BigInt => TYPE_I64,
         HirType::Error => TYPE_UNIT,
         HirType::Ref(inner) => hir_type_to_rust(inner),
         HirType::Array(inner) => hir_type_to_rust(inner),
@@ -438,7 +434,6 @@ fn tir_value_type(val: &TirValue) -> String {
     match val {
         TirValue::IntLiteral(_) => TYPE_I32.to_string(),
         TirValue::FloatLiteral(_) => TYPE_F64.to_string(),
-        TirValue::BigIntLiteral(_) => TYPE_I64.to_string(),
         TirValue::StringLiteral(_) => TYPE_STRING.to_string(),
         TirValue::BoolLiteral(_) => TYPE_BOOL.to_string(),
         TirValue::Var(_) | TirValue::Function(_) | TirValue::Error => String::new(),
@@ -785,7 +780,6 @@ fn emit_value(val: &TirValue, _func: &TirFunction, ctx: &mut GenCtx) -> String {
                 v.to_string()
             }
         }
-        TirValue::BigIntLiteral(v) => v.to_string(),
         TirValue::StringLiteral(s) => {
             // C6 fix: 转义特殊字符
             let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");

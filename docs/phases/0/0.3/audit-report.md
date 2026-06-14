@@ -1,5 +1,9 @@
 # Phase 0.3 三方一致性审计报告
 
+> ⚠️ 本审计报告基于旧设计（pre-v2.0），已被 v2.0 设计取代。
+> 请以 `docs/Trust-设计文档.md` v2.0 为唯一权威规范。
+> v2.0 重新审计随 Phase 2+ 逐 Phase 推进。
+>
 > 审计日期：Phase 0 第 4 周  
 > 审计规格：`docs/phases/0/0.3/0.3-spec.md` v1.0  
 > 审计范围：A（`docs/Trust-设计文档.md`）× B（`spec/trust-spec.md`）× C（`docs/design-constraints.md`）

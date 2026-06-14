@@ -176,9 +176,7 @@ fn check_stmt(
             check_expr(&mut w.condition, scope, diagnostics, fn_return_type);
             check_block(&mut w.body, scope, diagnostics, fn_return_type);
         }
-        HirStmt::Loop(l) => {
-            check_block(&mut l.body, scope, diagnostics, fn_return_type);
-        }
+        // v2.0: Loop removed
         HirStmt::Return(r) => {
             if let Some(ref mut v) = r.value {
                 check_expr(v, scope, diagnostics, fn_return_type);
@@ -224,7 +222,6 @@ fn check_expr(
         // 字面量——类型已固定
         HirExpr::IntLiteral(..) => {}
         HirExpr::FloatLiteral(..) => {}
-        HirExpr::BigIntLiteral(..) => {}
         HirExpr::StringLiteral(..) => {}
         HirExpr::BoolLiteral(..) => {}
         HirExpr::Error(..) => {}
@@ -264,7 +261,7 @@ fn check_expr(
             check_expr(inner, scope, diagnostics, fn_return_type);
             let inner_ty = expr_type(inner);
             *ty = match (op, &inner_ty) {
-                (UnaryOp::Neg, HirType::I32 | HirType::F64 | HirType::I64) => inner_ty.clone(),
+                (UnaryOp::Neg, HirType::I32 | HirType::F64) => inner_ty.clone(),
                 (UnaryOp::Neg, HirType::Error) => HirType::Error,
                 (UnaryOp::Neg, _) => {
                     diagnostics.push(DiagError::new(
@@ -357,14 +354,6 @@ fn check_expr(
             check_expr(inner, scope, diagnostics, fn_return_type);
         }
 
-        HirExpr::AssertUnwrap(inner, _span) => {
-            check_expr(inner, scope, diagnostics, fn_return_type);
-        }
-
-        HirExpr::TryPropagate(inner, _span) => {
-            check_expr(inner, scope, diagnostics, fn_return_type);
-        }
-
         HirExpr::TemplateLiteral(parts, _span) => {
             for part in parts {
                 if let HirTemplatePartKind::Expr(ref mut e) = part.kind {
@@ -382,10 +371,7 @@ fn check_expr(
             }
         }
 
-        HirExpr::Loop(l, _span) => {
-            check_block(&mut l.body, scope, diagnostics, fn_return_type);
-        }
-
+        // v2.0: Loop removed
         HirExpr::Block(b, _span) => {
             check_block(b, scope, diagnostics, fn_return_type);
         }
@@ -421,7 +407,7 @@ pub fn check_binary_op(
                 return Err(());
             }
             match lhs {
-                HirType::I32 | HirType::F64 | HirType::I64 => Ok(lhs.clone()),
+                HirType::I32 | HirType::F64 => Ok(lhs.clone()),
                 _ => {
                     diagnostics.push(DiagError::new(
                         format!("arithmetic not supported for type `{lhs}`"),
@@ -506,33 +492,20 @@ fn check_as_cast(
                 .push(DiagError::new("truncation: `f64 as i32` may lose precision".into(), span));
             true // 允许但 warning
         }
-        // I32 ↔ I64
-        (HirType::I32, HirType::I64) => true,
-        (HirType::I64, HirType::I32) => {
-            diagnostics
-                .push(DiagError::new("truncation: `i64 as i32` may lose precision".into(), span));
-            true
-        }
-        // I64 ↔ F64
-        (HirType::I64, HirType::F64) => true,
-        (HirType::F64, HirType::I64) => true,
-
         // Bool → 数字禁止
-        (HirType::Bool, HirType::I32)
-        | (HirType::Bool, HirType::F64)
-        | (HirType::Bool, HirType::I64) => {
+        (HirType::Bool, HirType::I32) | (HirType::Bool, HirType::F64) => {
             diagnostics.push(DiagError::new(format!("cannot cast `bool` to `{target}`"), span));
             false
         }
 
         // 数字 → Bool 禁止
-        (HirType::I32 | HirType::F64 | HirType::I64, HirType::Bool) => {
+        (HirType::I32 | HirType::F64, HirType::Bool) => {
             diagnostics.push(DiagError::new(format!("cannot cast `{src}` to `bool`"), span));
             false
         }
 
         // String → 数字禁止
-        (HirType::String, HirType::I32 | HirType::F64 | HirType::I64 | HirType::Bool) => {
+        (HirType::String, HirType::I32 | HirType::F64 | HirType::Bool) => {
             diagnostics.push(DiagError::new(format!("cannot cast `string` to `{target}`"), span));
             false
         }
@@ -604,7 +577,6 @@ fn expr_type(expr: &HirExpr) -> HirType {
     match expr {
         HirExpr::IntLiteral(..) => HirType::I32,
         HirExpr::FloatLiteral(..) => HirType::F64,
-        HirExpr::BigIntLiteral(..) => HirType::I64,
         HirExpr::StringLiteral(..) => HirType::String,
         HirExpr::BoolLiteral(..) => HirType::Bool,
         HirExpr::Ident(_, binding, _) => match binding {
@@ -622,7 +594,6 @@ fn expr_type(expr: &HirExpr) -> HirType {
         HirExpr::Call(.., ty, _) => ty.clone(),
         HirExpr::AsCast(_, ty, _) => ty.clone(),
         HirExpr::If(if_s, _) => infer_if_type(if_s),
-        HirExpr::Loop(l, _) => infer_loop_type(&l.body),
         HirExpr::Block(block, _) => infer_block_type(block),
         HirExpr::ArrowFn(params, ret, ..) => {
             let param_types: Vec<HirType> = params.iter().map(|p| p.ty.clone()).collect();
@@ -630,7 +601,6 @@ fn expr_type(expr: &HirExpr) -> HirType {
         }
         HirExpr::Reference(inner, _) => HirType::Ref(Box::new(expr_type(inner))),
         HirExpr::TemplateLiteral(..) => HirType::String,
-        HirExpr::AssertUnwrap(..) | HirExpr::TryPropagate(..) => HirType::Error,
         HirExpr::Error(..) => HirType::Error,
     }
 }
@@ -648,35 +618,8 @@ fn infer_block_type(block: &HirBlock) -> HirType {
         .unwrap_or(HirType::Void)
 }
 
-fn infer_loop_type(body: &HirBlock) -> HirType {
-    let mut break_types: Vec<HirType> = Vec::new();
-    let mut has_bare_break: bool = false;
-    collect_break_info(body, &mut break_types, &mut has_bare_break);
-
-    let clean: Vec<&HirType> = break_types.iter().filter(|t| **t != HirType::Error).collect();
-
-    if has_bare_break && !clean.is_empty() {
-        // Mixed: some breaks have values, some don't → type error
-        HirType::Error
-    } else if !clean.is_empty() {
-        // All breaks have values of the same non-Error type
-        if clean.iter().all(|t| *t == clean[0]) {
-            clean[0].clone()
-        } else {
-            HirType::Error
-        }
-    } else if has_bare_break && clean.is_empty() && break_types.is_empty() {
-        // All breaks are bare (no values) → Void
-        HirType::Void
-    } else if break_types.is_empty() {
-        // No breaks at all
-        HirType::Void
-    } else {
-        // All breaks had Error types only
-        HirType::Error
-    }
-}
-
+// v2.0: collect_break_info retains for/while break analysis.
+// Break values are no longer possible (loop removed, break value deprecated).
 fn collect_break_info(block: &HirBlock, types: &mut Vec<HirType>, has_bare: &mut bool) {
     for stmt in &block.statements {
         match stmt {
@@ -695,7 +638,7 @@ fn collect_break_info(block: &HirBlock, types: &mut Vec<HirType>, has_bare: &mut
             }
             HirStmt::For(f) => collect_break_info(&f.body, types, has_bare),
             HirStmt::While(w) => collect_break_info(&w.body, types, has_bare),
-            HirStmt::Loop(l) => collect_break_info(&l.body, types, has_bare),
+            // v2.0: Loop removed
             _ => {}
         }
     }

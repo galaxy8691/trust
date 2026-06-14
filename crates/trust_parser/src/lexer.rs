@@ -1,6 +1,6 @@
 //! Trust 词法分析器 — §LEX-REQ-001~004
 //!
-//! 54 个关键字，6 种字面量格式，15 级运算符优先级。
+//! 43 个关键字，5 种字面量格式，15 级运算符优先级。
 //! `fn` — lexer 无条件识别，parser 仅在 extern 块内接受。
 
 use std::collections::HashMap;
@@ -9,60 +9,52 @@ use std::sync::LazyLock;
 static KEYWORDS: LazyLock<HashMap<&str, TokenKind>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     for (k, v) in [
+        // §2.1: 保留关键字
         ("let", TokenKind::Let),
         ("mut", TokenKind::Mut),
         ("const", TokenKind::Const),
-        ("shared", TokenKind::Shared),
+        ("shared", TokenKind::Shared), // §3.6
         ("function", TokenKind::Function),
         ("fn", TokenKind::Fn),
         ("inout", TokenKind::InOut),
         ("move", TokenKind::Move),
-        ("spawn", TokenKind::Spawn),
+        ("spawn", TokenKind::Spawn), // §7.1
         ("async", TokenKind::Async),
         ("await", TokenKind::Await),
-        ("select", TokenKind::Select),
         ("if", TokenKind::If),
         ("else", TokenKind::Else),
         ("for", TokenKind::For),
         ("of", TokenKind::Of),
         ("while", TokenKind::While),
-        ("loop", TokenKind::Loop),
         ("break", TokenKind::Break),
         ("continue", TokenKind::Continue),
         ("return", TokenKind::Return),
-        ("throw", TokenKind::Throw),
+        ("throw", TokenKind::Throw), // §5.1
         ("switch", TokenKind::Switch),
         ("case", TokenKind::Case),
         ("default", TokenKind::Default),
-        ("match", TokenKind::Match),
+        ("match", TokenKind::Match), // §2.6
         ("import", TokenKind::Import),
         ("export", TokenKind::Export),
         ("from", TokenKind::From),
         ("as", TokenKind::As),
-        ("interface", TokenKind::Interface),
-        ("type", TokenKind::Type),
-        ("impl", TokenKind::Impl),
-        ("extends", TokenKind::Extends),
+        ("type", TokenKind::Type), // §2.3
         ("this", TokenKind::This),
-        ("dyn", TokenKind::Dyn),
         ("test", TokenKind::Test),
         ("extern", TokenKind::Extern),
         ("true", TokenKind::True),
         ("false", TokenKind::False),
-        ("undefined", TokenKind::Undefined),
-        ("None", TokenKind::None_),
-        ("Some", TokenKind::Some_),
-        ("Ok", TokenKind::Ok_),
-        ("Err", TokenKind::Err_),
-        ("Rc", TokenKind::Rc),
-        ("Arc", TokenKind::Arc),
-        ("Weak", TokenKind::Weak),
-        ("Box", TokenKind::Box_),
+        // §2.2: 基本类型
         ("number", TokenKind::NumberType),
         ("string", TokenKind::StringType),
         ("boolean", TokenKind::BooleanType),
-        ("bigint", TokenKind::BigIntType),
         ("void", TokenKind::VoidType),
+        // 新增关键字（仅 lexer 预留，表达式/语句实现归后续 Phase）
+        ("unknown", TokenKind::Unknown), // §2.6 — Phase 3
+        ("try", TokenKind::Try),         // §5.1 — Phase 4
+        ("catch", TokenKind::Catch),     // §5.1 — Phase 4
+        ("null", TokenKind::Null),       // §2.7
+        ("panic", TokenKind::Panic),     // §5.2 — Phase 4
     ] {
         m.insert(k, v);
     }
@@ -71,6 +63,7 @@ static KEYWORDS: LazyLock<HashMap<&str, TokenKind>> = LazyLock::new(|| {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
+    // 保留关键字（43 个关键字/内置类型变体）
     Let,
     Mut,
     Const,
@@ -82,13 +75,11 @@ pub enum TokenKind {
     Spawn,
     Async,
     Await,
-    Select,
     If,
     Else,
     For,
     Of,
     While,
-    Loop,
     Break,
     Continue,
     Return,
@@ -101,33 +92,26 @@ pub enum TokenKind {
     Export,
     From,
     As,
-    Interface,
     Type,
-    Impl,
-    Extends,
     This,
-    Dyn,
     Test,
     Extern,
     True,
     False,
-    Undefined,
-    None_,
-    Some_,
-    Ok_,
-    Err_,
-    Rc,
-    Arc,
-    Weak,
-    Box_,
+    // 基本类型
     NumberType,
     StringType,
     BooleanType,
-    BigIntType,
     VoidType,
+    // 新增关键字（仅 lexer 预留）
+    Unknown, // §2.6 — Phase 3
+    Try,     // §5.1 — Phase 4
+    Catch,   // §5.1 — Phase 4
+    Null,    // §2.7
+    Panic,   // §5.2 — Phase 4
+    // 字面量
     IntLiteral(i32),
     FloatLiteral(f64),
-    BigIntLiteral(i64),
     StrLiteral(String),
     TemplateHead(String),
     TemplateInterpolation,
@@ -177,11 +161,10 @@ impl TokenKind {
             TokenKind::Ident(_)
                 | TokenKind::IntLiteral(_)
                 | TokenKind::FloatLiteral(_)
-                | TokenKind::BigIntLiteral(_)
                 | TokenKind::StrLiteral(_)
                 | TokenKind::True
                 | TokenKind::False
-                | TokenKind::None_
+                | TokenKind::Null
                 | TokenKind::RParen
                 | TokenKind::RBracket
                 | TokenKind::RBrace
@@ -582,11 +565,7 @@ impl Lexer {
             let s: String = self.source[start..self.pos].iter().collect();
             return self.emit(TokenKind::FloatLiteral(s.parse().unwrap_or(0.0)));
         }
-        if self.cur() == Some('n') {
-            self.advance();
-            let s: String = self.source[start..self.pos - 1].iter().collect();
-            return self.emit(TokenKind::BigIntLiteral(s.parse().unwrap_or(0)));
-        }
+        // v2.0: BigIntLiteral removed — 'n' suffix no longer supported
         let s: String = self.source[start..self.pos].iter().collect();
         self.emit(TokenKind::IntLiteral(s.parse().unwrap_or(0)))
     }
@@ -643,8 +622,8 @@ mod tests {
         assert_eq!(tokenize("3.14")[0], TokenKind::FloatLiteral(3.14));
     }
     #[test]
-    fn lex_bigint_literal_returns_bigint_token() {
-        assert_eq!(tokenize("9007199254740991n")[0], TokenKind::BigIntLiteral(9007199254740991));
+    fn lex_null_keyword() {
+        assert_eq!(tokenize("null")[0], TokenKind::Null);
     }
     #[test]
     fn lex_keyword_as_ident_is_error() {
@@ -680,8 +659,8 @@ mod tests {
         assert_eq!(tokenize("letx")[0], TokenKind::Ident("letx".into()));
     }
     #[test]
-    fn lex_keyword_count_is_54() {
-        assert_eq!(KEYWORDS.len(), 54);
+    fn lex_keyword_count_is_43() {
+        assert_eq!(KEYWORDS.len(), 43);
     }
     #[test]
     fn lex_fn_keyword_recognized() {

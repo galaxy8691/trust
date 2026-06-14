@@ -90,10 +90,7 @@ fn snap_for_of() {
 fn snap_while() {
     assert_ast_snapshot("while(x>0){x=x-1}", &["WhileStmt", "Binary"]);
 }
-#[test]
-fn snap_loop() {
-    assert_ast_snapshot("loop{if(x>3){break x*2}}", &["LoopExpr", "BreakStmt"]);
-}
+// v2.0: snap_loop removed (loop removed)
 #[test]
 fn snap_return() {
     assert_ast_snapshot("return 42", &["ReturnStmt"]);
@@ -110,17 +107,14 @@ fn snap_continue() {
 fn snap_ref() {
     assert_ast_snapshot("let r=&data", &["LetStmt", "Reference"]);
 }
-#[test]
-fn snap_bang() {
-    assert_ast_snapshot("let v=maybeValue!", &["LetStmt", "AssertUnwrap"]);
-}
-#[test]
-fn snap_try() {
-    assert_ast_snapshot("let f=open(\"a.txt\")?", &["LetStmt", "TryPropagate"]);
-}
+// v2.0: snap_bang/snap_try removed (AssertUnwrap/TryPropagate removed)
 #[test]
 fn snap_nullish() {
     assert_ast_snapshot("let n=maybeName??\"anon\"", &["QuestionQuestion"]);
+}
+#[test]
+fn snap_null_literal() {
+    assert_ast_snapshot("let n=null", &["LetStmt", "Null"]);
 }
 #[test]
 fn snap_optchain() {

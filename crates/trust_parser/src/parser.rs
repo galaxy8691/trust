@@ -66,8 +66,6 @@ impl Parser {
                 | TokenKind::Import
                 | TokenKind::Export
                 | TokenKind::Type
-                | TokenKind::Interface
-                | TokenKind::Impl
                 | TokenKind::Test
                 | TokenKind::Async
         )
@@ -141,7 +139,6 @@ impl Parser {
             TokenKind::If => self.parse_if(),
             TokenKind::For => self.parse_for(),
             TokenKind::While => self.parse_while(),
-            TokenKind::Loop => self.parse_loop(),
             TokenKind::Return => self.parse_ret(),
             TokenKind::Break => self.parse_break(),
             TokenKind::Continue => {
@@ -446,11 +443,6 @@ impl Parser {
         Some(Stmt::While(WhileStmt { condition: Box::new(cond), body, span: self.span() }))
     }
 
-    fn parse_loop(&mut self) -> Option<Stmt> {
-        self.advance();
-        Some(Stmt::Loop(LoopExpr { body: self.parse_block()?, span: self.span() }))
-    }
-
     fn parse_ret(&mut self) -> Option<Stmt> {
         self.advance();
         let v = if self.can_expr_start() { self.parse_expr() } else { None };
@@ -460,9 +452,14 @@ impl Parser {
 
     fn parse_break(&mut self) -> Option<Stmt> {
         self.advance();
-        let v = if self.can_expr_start() { self.parse_expr() } else { None };
+        // v2.0: break with value is not supported (loop removed)
+        // v2.0: break value removed (loop removed)
+        if self.can_expr_start() {
+            self.error("break with value is not supported");
+            let _ = self.parse_expr(); // consume for error recovery
+        }
         self.expect_semi();
-        Some(Stmt::Break(BreakStmt { value: v.map(Box::new), span: self.span() }))
+        Some(Stmt::Break(BreakStmt { value: None, span: self.span() }))
     }
 
     fn parse_paren_expr(&mut self) -> Option<Expr> {
@@ -568,10 +565,6 @@ impl Parser {
                 self.advance();
                 Type::BooleanType
             }
-            TokenKind::BigIntType => {
-                self.advance();
-                Type::BigIntType
-            }
             TokenKind::VoidType => {
                 self.advance();
                 Type::VoidType
@@ -611,11 +604,11 @@ impl Parser {
             &self.cur,
             TokenKind::IntLiteral(_)
                 | TokenKind::FloatLiteral(_)
-                | TokenKind::BigIntLiteral(_)
+                // v2.0: BigIntLiteral removed
                 | TokenKind::StrLiteral(_)
                 | TokenKind::True
                 | TokenKind::False
-                | TokenKind::None_
+                | TokenKind::Null
                 | TokenKind::Ident(_)
                 | TokenKind::LParen
                 | TokenKind::LBrace
@@ -623,7 +616,7 @@ impl Parser {
                 | TokenKind::Bang
                 | TokenKind::Minus
                 | TokenKind::If
-                | TokenKind::Loop
+                // TokenKind::Loop removed in v2.0
                 | TokenKind::Move
                 | TokenKind::TemplateHead(_)
                 | TokenKind::TemplateTail(_)
@@ -665,14 +658,7 @@ impl Parser {
                     lhs = Expr::AsCast { expr: Box::new(lhs), ty };
                     continue;
                 }
-                TokenKind::Bang => {
-                    self.advance();
-                    return Some(Expr::AssertUnwrap(Box::new(lhs)));
-                }
-                TokenKind::Question => {
-                    self.advance();
-                    return Some(Expr::TryPropagate(Box::new(lhs)));
-                }
+                // v2.0: AssertUnwrap(!) and TryPropagate(?) suffix operators removed
                 TokenKind::QuestionDot => {
                     self.advance();
                     let f = self.expect_ident("field")?;
@@ -792,11 +778,6 @@ impl Parser {
                 self.advance();
                 Some(Expr::FloatLiteral(v))
             }
-            TokenKind::BigIntLiteral(n) => {
-                let v = *n;
-                self.advance();
-                Some(Expr::BigIntLiteral(v))
-            }
             TokenKind::StrLiteral(s) => {
                 let v = s.clone();
                 self.advance();
@@ -810,7 +791,7 @@ impl Parser {
                 self.advance();
                 Some(Expr::BoolLiteral(false))
             }
-            TokenKind::None_ => {
+            TokenKind::Null => {
                 self.advance();
                 Some(Expr::Null)
             }
@@ -864,13 +845,7 @@ impl Parser {
                     _ => None,
                 }
             }
-            TokenKind::Loop => {
-                let s = self.parse_loop()?;
-                match s {
-                    Stmt::Loop(l) => Some(Expr::LoopExpr(Box::new(l))),
-                    _ => None,
-                }
-            }
+            // v2.0: Loop removed
             TokenKind::Move => {
                 self.advance();
                 if !matches!(self.cur, TokenKind::LParen) {
@@ -1052,10 +1027,7 @@ mod tests {
     fn syn009_if_expr() {
         assert!(matches!(s1("if(x>0){1}else{0}"), Stmt::If(_)));
     }
-    #[test]
-    fn syn010_loop_break() {
-        assert!(matches!(s1("loop{if(x>3){break x*2}}"), Stmt::Loop(_)));
-    }
+    // v2.0: syn010_loop_break removed (loop removed)
     #[test]
     fn syn011_for_c() {
         assert!(matches!(s1("for(let i=0;i<10;i=i+1){}"), Stmt::For(_)));
@@ -1117,21 +1089,7 @@ mod tests {
         }
     }
     #[test]
-    fn syn037_bang() {
-        let st = s1("let v=maybeValue!");
-        match st {
-            Stmt::Let(l) => assert!(matches!(*l.init, Expr::AssertUnwrap(_))),
-            _ => panic!(),
-        }
-    }
-    #[test]
-    fn syn038_try() {
-        let st = s1("let f=open(\"a.txt\")?");
-        match st {
-            Stmt::Let(l) => assert!(matches!(*l.init, Expr::TryPropagate(_))),
-            _ => panic!(),
-        }
-    }
+    // v2.0: syn037_bang and syn038_try removed (AssertUnwrap/TryPropagate removed)
     #[test]
     fn syn039_opt_chain() {
         let st = s1("let s=user?.addr?.street");

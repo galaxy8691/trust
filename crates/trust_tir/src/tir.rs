@@ -115,7 +115,6 @@ pub enum TirValue {
     Var(TmpVar),
     IntLiteral(i32),
     FloatLiteral(f64),
-    BigIntLiteral(i64),
     StringLiteral(String),
     BoolLiteral(bool),
     /// 函数引用（按名称调用）
@@ -363,7 +362,7 @@ fn lower_stmt(stmt: &HirStmt, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
         HirStmt::If(if_s) => lower_if_stmt(if_s, ctx, diags),
         HirStmt::For(f_s) => lower_for_stmt(f_s, ctx, diags),
         HirStmt::While(w) => lower_while_stmt(w, ctx, diags),
-        HirStmt::Loop(l) => lower_loop_stmt(l, ctx, diags),
+        // v2.0: Loop removed
         HirStmt::ForOf(_f) => lower_forof_stmt(_f, ctx, diags),
         HirStmt::Break(b) => {
             // Extract loop exit target BEFORE mutable borrows
@@ -537,22 +536,7 @@ fn lower_while_stmt(w: &HirWhile, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>
     ctx.new_block(exit_id, w.span.clone());
 }
 
-fn lower_loop_stmt(l: &HirLoop, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
-    let body_id = ctx.next_block_id();
-    let exit_id = ctx.next_block_id();
-
-    finish_block(ctx, Terminator::Goto(body_id));
-    ctx.loop_stack.push((body_id, exit_id, None)); // cond = body (loop always enters body)
-
-    ctx.new_block(body_id, l.body.span.clone());
-    lower_block(&l.body, ctx, diags);
-    if !is_terminated(ctx) {
-        finish_block(ctx, Terminator::Goto(body_id));
-    }
-
-    ctx.loop_stack.pop();
-    ctx.new_block(exit_id, l.span.clone());
-}
+// v2.0: lower_loop_stmt removed (loop removed)
 
 fn lower_forof_stmt(f: &HirForOf, ctx: &mut LowerCtx, _diags: &mut Vec<DiagError>) {
     // §3.2.1 K6 fix: for-of 降级为单次迭代 + 条件出口，避免死循环。
@@ -618,7 +602,6 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
     match expr {
         HirExpr::IntLiteral(v, _) => TirValue::IntLiteral(*v),
         HirExpr::FloatLiteral(v, _) => TirValue::FloatLiteral(*v),
-        HirExpr::BigIntLiteral(v, _) => TirValue::BigIntLiteral(*v),
         HirExpr::StringLiteral(s, _) => TirValue::StringLiteral(s.clone()),
         HirExpr::BoolLiteral(b, _) => TirValue::BoolLiteral(*b),
         HirExpr::Ident(name, binding, _) => {
@@ -667,24 +650,7 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
             ctx.new_block(join_id, if_s.span.clone());
             TirValue::Var(result_tmp)
         }
-        HirExpr::Loop(l, _span) => {
-            let exit_id = ctx.next_block_id();
-            let result_tmp = ctx.next_tmp();
-
-            let body_id = ctx.next_block_id();
-            finish_block(ctx, Terminator::Goto(body_id));
-            ctx.loop_stack.push((body_id, exit_id, Some(result_tmp)));
-
-            ctx.new_block(body_id, l.body.span.clone());
-            lower_block(&l.body, ctx, diags);
-            if !is_terminated(ctx) {
-                finish_block(ctx, Terminator::Goto(body_id));
-            }
-
-            ctx.loop_stack.pop();
-            ctx.new_block(exit_id, l.span.clone());
-            TirValue::Var(result_tmp)
-        }
+        // v2.0: Loop removed
         HirExpr::Block(b, _span) => {
             let result_tmp = ctx.next_tmp();
             lower_block_to_value(b, ctx, diags, result_tmp)
@@ -842,9 +808,7 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
             }
             TirValue::StringLiteral(s)
         }
-        HirExpr::AssertUnwrap(inner, _) | HirExpr::TryPropagate(inner, _) => {
-            lower_expr_to_value(inner, ctx, diags)
-        }
+        // v2.0: AssertUnwrap/TryPropagate removed
         HirExpr::Error(_) => TirValue::Error,
     }
 }
@@ -907,7 +871,7 @@ fn collect_free_vars(
                 collect_free_vars_expr(&w.condition, params, var_map, captured, kind);
                 collect_free_vars(&w.body, params, var_map, captured, kind);
             }
-            HirStmt::Loop(l) => collect_free_vars(&l.body, params, var_map, captured, kind),
+            // v2.0: Loop removed
             _ => {}
         }
     }
@@ -954,7 +918,7 @@ fn collect_free_vars_expr(
                 collect_free_vars(else_b, params, var_map, captured, kind);
             }
         }
-        HirExpr::Loop(l, _) => collect_free_vars(&l.body, params, var_map, captured, kind),
+        // v2.0: Loop removed
         HirExpr::Block(b, _) => collect_free_vars(b, params, var_map, captured, kind),
         _ => {}
     }

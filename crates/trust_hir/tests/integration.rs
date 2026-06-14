@@ -118,16 +118,17 @@ fn integration_block_expression() {
 // AC-SEM-002 变体: loop 表达式降级
 // ============================================================================
 
-#[test]
-fn integration_loop_expression() {
-    let src = "function f(): number {
-        let x = loop { if (true) { break 1; } };
-        return x;
-    }";
-    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
-    assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
-    assert!(type_diags.is_empty(), "unexpected type diags: {:?}", type_diags);
-}
+// v2.0: disabled (loop removed, pending 2.5 rewrite)
+// #[test]
+// fn integration_loop_expression() {
+//     let src = "function f(): number {
+//         let x = loop { if (true) { break 1; } };
+//         return x;
+//     }";
+//     let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+//     assert!(name_diags.is_empty(), "unexpected name diags: {:?}", name_diags);
+//     assert!(type_diags.is_empty(), "unexpected type diags: {:?}", type_diags);
+// }
 
 // ============================================================================
 // AC-TYP-001: i32 + f64 → 编译错误
@@ -423,12 +424,12 @@ fn check_binary_eq_string_returns_bool() {
 }
 
 #[test]
-fn check_binary_lt_i64_returns_bool() {
+fn check_binary_lt_f64_returns_bool() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
         BinOp::Lt,
-        &HirType::I64,
-        &HirType::I64,
+        &HirType::F64,
+        &HirType::F64,
         Span::dummy(),
         &mut diags,
     );

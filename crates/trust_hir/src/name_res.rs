@@ -252,17 +252,14 @@ fn lower_hir_stmt(
                 span: w.span.clone(),
             }))
         }
-        ast::Stmt::Loop(l) => {
-            let body = lower_block(&l.body, diagnostics);
-            Some(HirStmt::Loop(HirLoop { body, span: l.span.clone() }))
-        }
+        // v2.0: Loop removed
         ast::Stmt::Return(r) => {
             let value = r.value.as_ref().map(|v| Box::new(lower_expr(v, diagnostics)));
             Some(HirStmt::Return(HirReturn { value, span: r.span.clone() }))
         }
         ast::Stmt::Break(b) => {
-            let value = b.value.as_ref().map(|v| Box::new(lower_expr(v, diagnostics)));
-            Some(HirStmt::Break(HirBreak { value, span: b.span.clone() }))
+            // v2.0: break value removed (loop removed)
+            Some(HirStmt::Break(HirBreak { value: None, span: b.span.clone() }))
         }
         ast::Stmt::Continue(c) => Some(HirStmt::Continue(HirContinue { span: c.span.clone() })),
         ast::Stmt::Expr(e) => {
@@ -304,7 +301,6 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
     match expr {
         ast::Expr::IntLiteral(v) => HirExpr::IntLiteral(*v, Span::dummy()),
         ast::Expr::FloatLiteral(v) => HirExpr::FloatLiteral(*v, Span::dummy()),
-        ast::Expr::BigIntLiteral(v) => HirExpr::BigIntLiteral(*v, Span::dummy()),
         ast::Expr::StrLiteral(s) => HirExpr::StringLiteral(s.clone(), Span::dummy()),
         ast::Expr::BoolLiteral(b) => HirExpr::BoolLiteral(*b, Span::dummy()),
 
@@ -418,16 +414,6 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
             HirExpr::Reference(Box::new(i), Span::dummy())
         }
 
-        ast::Expr::AssertUnwrap(inner) => {
-            let i = lower_expr(inner, diagnostics);
-            HirExpr::AssertUnwrap(Box::new(i), Span::dummy())
-        }
-
-        ast::Expr::TryPropagate(inner) => {
-            let i = lower_expr(inner, diagnostics);
-            HirExpr::TryPropagate(Box::new(i), Span::dummy())
-        }
-
         ast::Expr::AsCast { expr, ty } => {
             let e = lower_expr(expr, diagnostics);
             let t = HirType::from_ast_type(ty);
@@ -467,11 +453,7 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
             )
         }
 
-        // §3.1.4 降级策略: LoopExpr → HirExpr::Loop
-        ast::Expr::LoopExpr(loop_expr) => {
-            let body = lower_block(&loop_expr.body, diagnostics);
-            HirExpr::Loop(HirLoop { body, span: loop_expr.span.clone() }, loop_expr.span.clone())
-        }
+        // v2.0: LoopExpr removed
 
         // §3.1.4 降级策略: MemberAccess{ Ident("console"), "log" } → Ident
         // 返回 Ident 使父 Expr::Call 处理器正常接收 args（避免双重 Call 包裹）
@@ -844,9 +826,7 @@ fn resolve_block_names(
                 resolve_expr_names(&mut w.condition, &block_scope, diagnostics);
                 resolve_block_names(&mut w.body, &block_scope, diagnostics);
             }
-            HirStmt::Loop(l) => {
-                resolve_block_names(&mut l.body, &block_scope, diagnostics);
-            }
+            // v2.0: Loop removed
             HirStmt::Return(r) => {
                 if let Some(ref mut v) = r.value {
                     resolve_expr_names(v, &block_scope, diagnostics);
@@ -916,10 +896,7 @@ fn resolve_expr_names(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<D
                 resolve_block_names(else_b, &else_scope, diagnostics);
             }
         }
-        HirExpr::Loop(l, ..) => {
-            let loop_scope = Scope::new_child(Box::new(scope.clone()));
-            resolve_block_names(&mut l.body, &loop_scope, diagnostics);
-        }
+        // v2.0: Loop removed
         HirExpr::Block(b, ..) => {
             let block_scope = Scope::new_child(Box::new(scope.clone()));
             resolve_block_names(b, &block_scope, diagnostics);
@@ -928,12 +905,6 @@ fn resolve_expr_names(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<D
             resolve_expr_names(inner, scope, diagnostics);
         }
         HirExpr::Reference(inner, ..) => {
-            resolve_expr_names(inner, scope, diagnostics);
-        }
-        HirExpr::AssertUnwrap(inner, ..) => {
-            resolve_expr_names(inner, scope, diagnostics);
-        }
-        HirExpr::TryPropagate(inner, ..) => {
             resolve_expr_names(inner, scope, diagnostics);
         }
         HirExpr::TemplateLiteral(parts, ..) => {
@@ -946,7 +917,6 @@ fn resolve_expr_names(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<D
         // 字面量无需名称解析
         HirExpr::IntLiteral(..)
         | HirExpr::FloatLiteral(..)
-        | HirExpr::BigIntLiteral(..)
         | HirExpr::StringLiteral(..)
         | HirExpr::BoolLiteral(..)
         | HirExpr::Error(..) => {}
@@ -957,7 +927,6 @@ fn infer_type_from_expr(expr: &HirExpr) -> HirType {
     match expr {
         HirExpr::IntLiteral(..) => HirType::I32,
         HirExpr::FloatLiteral(..) => HirType::F64,
-        HirExpr::BigIntLiteral(..) => HirType::I64,
         HirExpr::StringLiteral(..) => HirType::String,
         HirExpr::BoolLiteral(..) => HirType::Bool,
         HirExpr::Ident(_, binding, _) => match binding {

@@ -81,10 +81,11 @@ fn e2e_hello() {
 fn e2e_arithmetic() {
     assert_output!("arithmetic.trust", "arithmetic ok");
 }
-#[test]
-fn e2e_bigint() {
-    assert_output!("bigint.trust", "bigint ok");
-}
+// v2.0: disabled (bigint removed, pending 2.5 rewrite)
+// #[test]
+// fn e2e_bigint() {
+//     assert_output!("bigint.trust", "bigint ok");
+// }
 #[test]
 fn e2e_comparison() {
     assert_output!("comparison.trust", "comparison ok");
@@ -113,10 +114,11 @@ fn e2e_let_mut() {
 fn e2e_logical() {
     assert_output!("logical.trust", "logical ok");
 }
-#[test]
-fn e2e_loop_break() {
-    assert_output!("loop_break.trust", "escaped");
-}
+// v2.0: disabled (loop removed, pending 2.5 rewrite)
+// #[test]
+// fn e2e_loop_break() {
+//     assert_output!("loop_break.trust", "escaped");
+// }
 #[test]
 fn e2e_param_move() {
     assert_output!("param_move.trust", "move ok");
@@ -154,14 +156,15 @@ fn e2e_arrow_fn() {
 fn e2e_as_cast() {
     assert_compiles!("as_cast.trust");
 }
-#[test]
-fn e2e_break_value() {
-    assert_compiles!("break_value.trust");
-}
-#[test]
-fn e2e_continue_loop() {
-    assert_compiles!("continue_loop.trust");
-}
+// v2.0: disabled (loop removed, pending 2.5 rewrite)
+// #[test]
+// fn e2e_break_value() {
+//     assert_compiles!("break_value.trust");
+// }
+// v2.0: disabled (loop removed, pending 2.5 rewrite)
+// fn e2e_continue_loop() {
+//     assert_compiles!("continue_loop.trust");
+// }
 #[test]
 fn e2e_export_lib() {
     assert_compiles!("export_lib.trust");
