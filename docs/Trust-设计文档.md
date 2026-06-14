@@ -431,7 +431,11 @@ function readFile(path: string): string {
     if (!fs.exists(path)) {
         throw { message: "not found: " + path, code: 404 };  // 匹配 IoError 形状
     }
-    return fs.read(path);
+    let raw = fs.read(path);
+    if (!isValid(raw)) {
+        throw { message: "invalid format", line: 3 };        // 匹配 ParseError 形状
+    }
+    return raw;
 }
 
 // catch 按结构形状匹配
@@ -452,45 +456,60 @@ try {
 Rust 无异常机制，`throw`/`try-catch` 在 codegen 阶段翻译为 `Result<T, E>` + `match`：
 
 ```js
-// Trust 源码
+// Trust 源码——抛出两种不同形状的错误
 function readFile(path: string): string {
     if (!fs.exists(path)) {
-        throw { message: "not found", code: 404 };
+        throw { message: "not found", code: 404 };     // IO 错误形状
     }
-    return fs.read(path);
+    let raw = fs.read(path);
+    if (!isValid(raw)) {
+        throw { message: "invalid format", line: 3 };  // 解析错误形状
+    }
+    return raw;
 }
 ```
 
 ```rust
 // 生成的 Rust 代码（简化示意）
+// 编译器为每种 throw 形状合成一个枚举变体
+enum ReadFileError {
+    Shape0 { message: String, code: f64 },
+    Shape1 { message: String, line: f64 },
+}
+
 fn readFile(path: &str) -> Result<String, ReadFileError> {
     if !fs::exists(path) {
-        return Err(ReadFileError { message: "not found".into(), code: 404 });
+        return Err(ReadFileError::Shape0 { message: "not found".into(), code: 404.0 });
     }
-    Ok(fs::read_to_string(path))
+    let raw = fs::read_to_string(path);
+    if !is_valid(&raw) {
+        return Err(ReadFileError::Shape1 { message: "invalid format".into(), line: 3.0 });
+    }
+    Ok(raw)
 }
 ```
 
-**错误类型推断：** 编译器从函数体中收集所有 `throw` 语句抛出的结构形状，自动合成 `Result<T, E>` 中的错误枚举 `E`。调用方通过 `catch (e: {...})` 按结构形状匹配——编译器生成对应的 `match` 分支。
+**错误类型推断：** 编译器从函数体中收集所有 `throw` 语句抛出的结构形状，**每种形状对应一个变体**，自动合成 `Result<T, E>` 中的错误枚举 `E`。调用方的 `catch (e: {...})` 按结构形状匹配——编译器把每个 catch 形状映射为"**字段集合 ⊇ 该形状**的所有变体"，生成对应的 `match` 分支（多个变体满足时合成 or 模式 `Err(Shape0 { .. } | Shape2 { .. })`）。
 
 ```js
-// 编译器推断 E = { message: string, code: number } | { message: string, line: number }
+// readFile 的 E = { message, code } | { message, line }，两个 catch 各自可达
 try {
     let content = readFile("data.txt");
     process(content);
-} catch (e: { message: string, code: number }) {  // 匹配 IO 错误
+} catch (e: { message: string, code: number }) {  // 匹配 IO 错误形状
     console.log("IO error: " + e.message);
-} catch (e: { message: string, line: number }) {  // 匹配解析错误
+} catch (e: { message: string, line: number }) {   // 匹配解析错误形状
     console.log("parse error at line " + e.line);
 }
 ```
 
 ```rust
 // 生成的 Rust 代码（简化示意）
+// catch 形状 → 满足该形状的变体；声明顺序决定匹配优先级
 match readFile("data.txt") {
     Ok(content) => process(content),
-    Err(e) if e.code != null => println!("IO error: {}", e.message),
-    Err(e) if e.line != null => println!("parse error at line {}", e.line),
+    Err(ReadFileError::Shape0 { message, code }) => println!("IO error: {}", message),
+    Err(ReadFileError::Shape1 { message, line }) => println!("parse error at line {}", line),
 }
 ```
 
