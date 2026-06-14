@@ -1,0 +1,5 @@
+// 覆盖率: ! 对非布尔类型 (typeck.rs L257-263)
+function main(): void {
+    let x = 42;
+    let y = !x;
+}

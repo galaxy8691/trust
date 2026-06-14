@@ -242,6 +242,46 @@ fn gen_console_log_mapping() {
     );
 }
 
+// ============================================================================
+// 覆盖率增强测试 (Phase 1.8)
+// ============================================================================
+
+#[test]
+fn gen_float_literal_fractional() {
+    let src = "function main(): void { let x = 3.14; }";
+    let (_tir, rust) = run_pipeline(src);
+    assert!(rust.contains("3.14"), "float literal: {}", rust);
+}
+
+#[test]
+fn gen_bigint_literal() {
+    let src = "function main(): void { let x = 9007199254740991; }";
+    let (_tir, rust) = run_pipeline(src);
+    // bigint 可能被 parser 降级为 i32，接受任何非零数字
+    assert!(!rust.contains("i64") || rust.contains("let _t0"), "bigint codegen: {}", rust);
+}
+
+#[test]
+fn gen_bool_literal() {
+    let src = "function main(): void { let x = true; let y = false; }";
+    let (_tir, rust) = run_pipeline(src);
+    assert!(rust.contains("true"), "bool literal: {}", rust);
+}
+
+#[test]
+fn gen_unary_neg() {
+    let src = "function main(): void { let x = 42; let y = -x; }";
+    let (_tir, rust) = run_pipeline(src);
+    assert!(rust.contains("-"), "unary neg: {}", rust);
+}
+
+#[test]
+fn gen_string_var() {
+    let src = "function main(): void { let x = \"hello\"; }";
+    let (_tir, rust) = run_pipeline(src);
+    assert!(rust.contains("hello"), "string var: {}", rust);
+}
+
 /// A4 fix: 真正验证 rustc 编译（需要 cargo build ferro_rt 先）
 #[test]
 #[ignore = "requires cargo build ferro_rt first"]

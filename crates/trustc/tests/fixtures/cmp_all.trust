@@ -1,0 +1,5 @@
+function main(): void {
+    let a = 5 > 3;
+    let b = 4 < 5;
+    console.log("cmp ok");
+}

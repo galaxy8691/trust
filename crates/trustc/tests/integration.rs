@@ -133,6 +133,30 @@ fn e2e_err_duplicate_var() {
     assert!(!out.status.success(), "expected compilation failure for duplicate variable");
 }
 
+#[test] fn e2e_cmp_all() { assert_output!("cmp_all.trust", "cmp ok"); }
+#[test] fn e2e_cast_combo() { assert_output!("cast_combo.trust", "cast ok"); }
+
+#[test]
+fn e2e_err_const_type() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_const_type.trust", "-o", "/tmp/trust_err_const"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for const type mismatch");
+}
+#[test]
+fn e2e_err_not_nonbool() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_not_nonbool.trust", "-o", "/tmp/trust_err_not"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for ! on non-bool");
+}
+#[test]
+fn e2e_err_neg_nonnum() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_neg_nonnum.trust", "-o", "/tmp/trust_err_neg"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for - on non-numeric");
+}
+#[test]
+fn e2e_err_call_arg_type() {
+    let out = run_trustc(&["compile", "tests/fixtures/err_call_arg_type.trust", "-o", "/tmp/trust_err_callarg"]).unwrap();
+    assert!(!out.status.success(), "expected compilation failure for call argument type mismatch");
+}
+
 // ============================================================================
 // CLI 参数解析测试
 // ============================================================================

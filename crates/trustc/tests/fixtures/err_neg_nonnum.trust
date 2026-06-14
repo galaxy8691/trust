@@ -1,0 +1,5 @@
+// 覆盖率: - 对非数字类型 (typeck.rs L248-253)
+function main(): void {
+    let x = "hello";
+    let y = -x;
+}
