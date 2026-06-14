@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build -p ferro_rt
       - run: cargo test --workspace
       - run: cargo build --workspace --release
 
@@ -69,8 +70,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           errors=0
-          for file in $(grep -rl '#\[allow(clippy::unwrap_used)\|#\[allow(clippy::expect_used)' crates/ 2>/dev/null); do
-            line=$(grep -n '#\[allow(clippy::unwrap_used)\|#\[allow(clippy::expect_used)' "$file" | head -1 | cut -d: -f1)
+          for file in $(grep -rlE '#\[allow\(clippy::unwrap_used\)|#\[allow\(clippy::expect_used\)' crates/ 2>/dev/null); do
+            line=$(grep -nE '#\[allow\(clippy::unwrap_used\)|#\[allow\(clippy::expect_used\)' "$file" | head -1 | cut -d: -f1)
             start=$((line > 3 ? line - 3 : 1))
             if ! sed -n "${start},${line}p" "$file" | grep -q "// SAFETY:"; then
               echo "ERROR: $file:$line #[allow(unwrap/expect)] without // SAFETY: comment"
@@ -134,7 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.80"
+          toolchain: 1.80
       - run: cargo test --workspace
