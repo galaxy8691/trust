@@ -402,7 +402,7 @@ function main() {
 - [x] `cargo clippy --workspace -- -D warnings` 通过（trust_codegen 7 warnings 已在 1.8 修复）
 - [x] `cargo fmt --check --all` 通过
 - [x] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空（P0）
-- [x] `cargo tarpaulin` — trust_parser 86.95% ✅, trust_tir 48.42% (预存缺口), trust_hir 60.54% (预存缺口), trust_codegen 44.51% (预存缺口)
+- [x] `cargo tarpaulin --workspace` — 总覆盖 67.59% (2494/3690)。trust_parser 89%+, trust_error 95%+, trust_hir 56%, trust_tir 56%, trust_codegen 69%, trustc 0% (binary)
 - [x] `cargo miri test -p ferro_rt` 通过（0 tests, 0 failures; 无 undefined behavior）
 - [x] 集成测试：27 个语法特性有端到端测试（>20 要求）
 - [x] `docs/ROADMAP.md` Phase 1 全部子项标记完成
