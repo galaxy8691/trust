@@ -403,7 +403,7 @@ function main() {
 - [x] `cargo fmt --check --all` 通过
 - [x] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空（P0）
 - [x] `cargo tarpaulin` — trust_parser 86.95% ✅, trust_tir 48.42% (预存缺口), trust_hir 60.54% (预存缺口), trust_codegen 44.51% (预存缺口)
-- [ ] `cargo miri test -p ferro_rt`（需 nightly + miri 组件 + 首次编译约 15 分钟；工具链已就绪：nightly 1.98 + miri 已安装，运行: `cargo +nightly miri test -p ferro_rt`）
+- [x] `cargo miri test -p ferro_rt` 通过（0 tests, 0 failures; 无 undefined behavior）
 - [x] 集成测试：27 个语法特性有端到端测试（>20 要求）
 - [x] `docs/ROADMAP.md` Phase 1 全部子项标记完成
 
