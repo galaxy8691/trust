@@ -62,7 +62,7 @@
 - tarpaulin + miri CI job 配置
 - `fuzz/` 目录初始化（cargo-fuzz，parser + codegen 目标）
 - `rustfmt.toml`、`clippy.toml` 配置
-- MSRV 声明（stable Rust ≥ 1.63）
+- MSRV 声明（stable Rust ≥ 1.80）
 
 ### 1.2 `trust_parser` — 词法分析与语法分析
 

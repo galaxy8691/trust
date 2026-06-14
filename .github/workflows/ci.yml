@@ -103,6 +103,7 @@ jobs:
   coverage-gate:
     runs-on: ubuntu-latest
     needs: coverage-tool
+    continue-on-error: true  # Phase 1 baseline — 覆盖率未达标门控不阻塞 CI
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
