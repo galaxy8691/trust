@@ -401,7 +401,7 @@ try {
 ```
 
 **编译期保证：**
-- `throw` 的参数必须是**包含 `message: string` 字段的结构**。任何拥有 `message: string` 的匿名对象或具名类型（`type X = { message: string }`）都可以被 throw。`Error` 不是内置类型——只要求形状。这等于说所有错误类型都满足 `{ message: string }` 的最小公约
+- `throw` 的参数必须是**包含 `message: string` 字段的结构**。任何拥有 `message: string` 的匿名对象或具名类型都可以被 throw。`Error("msg")` 是标准库内置的便捷构造器，等价于 `{ message: "msg" }`——它返回纯结构对象，不引入特殊类型身份
 - `catch` 按**结构形状**匹配（不是按类型名）。`catch (e: { message: string, code: number })` 匹配任何拥有这两个字段的错误对象。`catch (e: IoError)` 等价于 `catch (e: { message: string, code: number })`——但优先推荐显式写形状
 - `try/catch` 必须穷举所有可达的错误类型，或含兜底 `catch (e)`
 - 缺漏 → 编译错误
@@ -486,7 +486,7 @@ match readFile("data.txt") {
 **推断算法边界：**
 - **函数内：** 编译器收集本函数所有 `throw` 语句的错误形状 + 本函数调用的其他 Trust 函数的错误类型（通过其 `Result<T, E>` 签名中的 `E`），合并为当前函数的错误枚举
 - **FFI 边界：** `extern "rust"` 函数的错误类型无法自动推断——需在 `extern` 声明中显式标注错误形状：`fn external_fn(x: number): number throws { message: string }`
-- **递归/互调：** 编译器固定点迭代直到错误枚举收敛。最大迭代深度 32（与泛型深度限制一致），超限报错要求显式标注
+- **递归/互调：** 编译器固定点迭代直到错误枚举收敛。最大迭代深度 32（与泛型深度限制一致），超限报错要求显式标注：`function foo(): number throws { message: string, code: number }`。`throws` 语法：返回值类型后跟 `throws` + 对象字面量类型。泛型函数：`function foo<T>(x: T): T throws { message: string }`。高阶函数：`function map(fn: (n: number): number throws { message: string }): number[]`
 - **性能：** 推断仅增加 O(n) 编译开销（n = 函数调用图大小），不引入运行时开销
 
 > **为什么用 `Result` 内部翻译而非 `panic!`+`catch_unwind`：** `catch_unwind` 不保证捕获所有 panic（`Abort` 等不可捕获），且无法实现穷举检查。`Result` 是 Rust 原生的可恢复错误机制，与 Trust 的编译期安全承诺一致。`throw`/`try-catch` 是语法糖——用户看到的是 JS 风格的 throw/catch，编译器内部生成的是 `Result<T, E>` + `match`，包括错误枚举的自动合成。
