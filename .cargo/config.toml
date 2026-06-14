@@ -1,0 +1,6 @@
+# Trust 编译器 — Cargo 配置
+# Phase 1 仅声明目标，Phase 2+ 正式启用交叉编译 CI
+
+[build]
+# wasm32-unknown-unknown — P2 目标（Phase 1 仅声明不实现）
+# target = "wasm32-unknown-unknown"

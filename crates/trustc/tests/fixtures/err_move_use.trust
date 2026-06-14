@@ -1,0 +1,6 @@
+// 覆盖率测试: 移动后使用 (E0382)
+function main(): void {
+    let a = 42;
+    let b = a;
+    console.log(a);
+}

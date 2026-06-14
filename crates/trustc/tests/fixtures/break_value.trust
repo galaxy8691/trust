@@ -1,0 +1,6 @@
+function main(): void {
+    let x = loop {
+        break 42;
+    };
+    console.log("ok");
+}

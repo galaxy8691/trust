@@ -316,10 +316,10 @@ test_decl    ::= attribute? "test" "async"? "function" ident "(" param_list? ")"
 **设计决策——为何不像 Rust 强制分号：** Rust 用 `;` 区分表达式（无分号=返回值）和语句（有分号=无返回值）。Trust 的 `if`/`loop`/`match` 是表达式，`for`/`while`/`switch` 是语句——这个区分在**语法层面就已确定**（EBNF 结构），不需要分号来消歧。去分号减少 TS/JS 开发者的迁移摩擦，且避免了 Rust 常见的"忘写分号导致类型不匹配"的困惑。
 
 **验收标准：**
-- AC-SYN-039: `let x = 42\nlet y = 10` → 换行分隔，两条语句正确解析
-- AC-SYN-040: `let x = { let y = 2; y }` → 块内最后表达式省略 `;` 作为返回值（`;` 在此处合法但可选）
-- AC-SYN-041: `let x = match (v) { case Some(n) => n, case None => 0 }` → `match` 分支 `,` 分隔
-- AC-SYN-042: `return 42\n}` → 换行即返回，无需 `;`
+- AC-SYN-SEP-001: `let x = 42\nlet y = 10` → 换行分隔，两条语句正确解析
+- AC-SYN-SEP-002: `let x = { let y = 2; y }` → 块内最后表达式省略 `;` 作为返回值（`;` 在此处合法但可选）
+- AC-SYN-SEP-003: `let x = match (v) { case Some(n) => n, case None => 0 }` → `match` 分支 `,` 分隔
+- AC-SYN-SEP-004: `return 42\n}` → 换行即返回，无需 `;`
 
 ### SYN-REQ-015：类型标注语法
 
@@ -597,7 +597,7 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 **验收标准：**
 - AC-OWN-015: `for (let i = 0; i < 10; i++) { console.log(i); }` → 合法（无需 `let mut`）
-- AC-OWN-016: `let i = 0; i += 1;` → 编译错误：`let` 变量不可变（非 for 循环上下文中无隐式可变例外）
+- AC-OWN-015b: `let i = 0; i += 1;` → 编译错误：`let` 变量不可变（非 for 循环上下文中无隐式可变例外）
 
 ### OWN-REQ-008：Copy 类型判定
 

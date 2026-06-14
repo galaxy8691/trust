@@ -1,0 +1,6 @@
+// 覆盖率: 二元运算类型不匹配 (i32 + string)
+function main(): void {
+    let x = 5;
+    let y = "hello";
+    let z = x + y;
+}

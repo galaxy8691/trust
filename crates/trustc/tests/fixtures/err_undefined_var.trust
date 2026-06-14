@@ -1,0 +1,4 @@
+// 覆盖率测试: 未定义变量错误 (E0425)
+function main(): void {
+    console.log(undefined_var);
+}

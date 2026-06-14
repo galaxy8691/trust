@@ -1,0 +1,11 @@
+[package]
+name = "trust_parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# trust_error — Phase 1.6 迁移 Diagnostic 后启用
+# [dev-dependencies]

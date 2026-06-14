@@ -1,0 +1,6 @@
+const PI = 3.14;
+const MSG = "hello";
+
+function main(): void {
+    console.log("const ok");
+}

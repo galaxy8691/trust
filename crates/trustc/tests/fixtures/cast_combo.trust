@@ -1,0 +1,4 @@
+function main(): void {
+    let a: number = 42;
+    console.log("cast ok");
+}

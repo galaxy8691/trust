@@ -1,0 +1,20 @@
+[package]
+name = "trustc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+trust_parser = { path = "../trust_parser" }
+trust_hir = { path = "../trust_hir" }
+trust_tir = { path = "../trust_tir" }
+trust_codegen = { path = "../trust_codegen" }
+trust_error = { path = "../trust_error" }
+ferro_rt = { path = "../ferro_rt" }
+
+[[bench]]
+name = "compile_bench"
+harness = false
+path = "../../benches/compile_bench.rs"

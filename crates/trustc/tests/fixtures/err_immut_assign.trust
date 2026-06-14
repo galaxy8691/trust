@@ -1,0 +1,5 @@
+// 不可变赋值应报错
+function main(): void {
+    let i = 0;
+    i = 1;
+}

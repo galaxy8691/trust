@@ -1,0 +1,5 @@
+// 覆盖率: 调用参数类型不匹配 (typeck call check)
+function add(a: number, b: number): number { return a + b; }
+function main(): void {
+    let x = add("hello", 2);
+}

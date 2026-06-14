@@ -1,0 +1,5 @@
+shared counter = 0;
+
+function main(): void {
+    console.log("shared ok");
+}

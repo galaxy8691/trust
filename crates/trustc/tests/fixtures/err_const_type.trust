@@ -1,0 +1,3 @@
+// 覆盖率: const 类型标注不匹配 (typeck.rs L104-117)
+const X: number = "hello";
+function main(): void {}

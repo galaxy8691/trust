@@ -1,0 +1,25 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Build artifacts
+*.wasm
+*.profraw
+*.profdata
+
+# Fuzz
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+
+# AI / CodeWhale
+.codewhale/
+
+# Temp
+tmp/

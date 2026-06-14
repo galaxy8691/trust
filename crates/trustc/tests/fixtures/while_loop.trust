@@ -1,0 +1,6 @@
+function main(): void {
+    while (true) {
+        console.log("while ok");
+        break;
+    }
+}

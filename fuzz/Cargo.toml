@@ -1,0 +1,40 @@
+[package]
+name = "trust-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.trust_parser]
+path = "../crates/trust_parser"
+
+[dependencies.trust_tir]
+path = "../crates/trust_tir"
+
+[dependencies.trust_codegen]
+path = "../crates/trust_codegen"
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tir_borrowck"
+path = "fuzz_targets/tir_borrowck.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "codegen"
+path = "fuzz_targets/codegen.rs"
+test = false
+doc = false

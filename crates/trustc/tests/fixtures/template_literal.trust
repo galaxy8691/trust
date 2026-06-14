@@ -1,0 +1,5 @@
+function main(): void {
+    let name = "World";
+    let msg = `Hello, ${name}!`;
+    console.log("template ok");
+}

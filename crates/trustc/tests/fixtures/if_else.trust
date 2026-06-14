@@ -1,0 +1,8 @@
+function main(): void {
+    let x = 5;
+    if (x > 3) {
+        console.log("if branch");
+    } else {
+        console.log("else branch");
+    }
+}
