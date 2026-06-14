@@ -21,9 +21,38 @@
 
 （编译通过后运行 `cargo test --workspace` 收集）
 
-## 交叉核对记录（MS-2.1-9）
+## 交叉核对记录（MS-2.1-10）
 
-（待 Step 6 完成时填写）
+> 核对日期：2026-06-14 · 范围：`Trust-设计文档.md` v2.0 × `spec/trust-spec.md` × `spec/stdlib.md` × `design-constraints.md`
+
+### trust-spec.md 对齐
+
+- ✅ LEX-REQ-001：关键字表 43 个，与设计 §2.2/§14 一致。`interface`/`impl`/`select`/`loop`/`bigint`/`undefined`/`None`/`Some`/`Ok`/`Err`/`Rc`/`Arc`/`Weak`/`Box`/`dyn`/`extends` 已移除
+- ✅ LEX-REQ-002：字面量 5 种，BigInt `Nn` 后缀已移除。`number`=f64 已标注
+- ✅ AC-LEX-004：`throws` 替代旧 `Result<T,E>` 返回标注
+- ✅ `fn` vs `function` 设计决策保留（v2.0 仍适用）
+
+### stdlib.md 对齐
+
+- ✅ `std::result` → `std::error` + `std::console`，旧 Option/Result API 已移除
+- ✅ `std::rc`（Box/Rc/Arc/Weak）已移除——用户不接触（设计 §3.7）
+- ✅ 模块依赖图更新：`error`/`console` 为新的基础模块
+- ✅ FsError ADT（`type X = | ...`）替换为结构类型
+- ✅ 映射表已更新，旧条目加注「已移除」
+- ✅ 仍含 `Result<T,E>` 的 API（如 fs/net）加注「过渡→throws Phase 4」
+
+### design-constraints.md 对齐
+
+- ✅ constraints §9.2 ferro_rt API 映射表不受影响（stdlib.md 映射表独立）
+
+### 未覆盖事项
+
+- 🔜 `null` 安全具体语义（Phase 4）
+- 🔜 `throw`/`try-catch` 穷举检查（Phase 4）
+- 🔜 `unknown` + `match`（Phase 3）
+- 🔜 位运算 codegen（2.2.5）
+
+**结论：** 四文档在 2.1 范围内一致，Phase 3+ 特性已在 spec 中标注为前瞻条目。
 
 ## 章节冻结矩阵（MS-2.1-8）
 

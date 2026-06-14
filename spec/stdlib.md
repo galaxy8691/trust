@@ -1,7 +1,11 @@
-# Trust 标准库 API 规范 v0.0
+# Trust 标准库 API 规范 v2.0
 
-> 版本：v0.0-draft · 对齐 `spec/trust-spec.md` · 对齐 `docs/Trust-设计文档.md §10`  
+> 版本：v2.0 · 对齐 `spec/trust-spec.md` · 对齐 `docs/Trust-设计文档.md` v2.0 §13  
 > 本文档定义 Trust 标准库每个模块的完整 API 签名、语义描述和 Rust 实现映射。
+>
+> ⚠️ v2.0 重大变更：`Option`/`Result` 不暴露给用户（由 null 安全 §2.7 和 throw/try-catch §5.1 替代）。
+> `Box`/`Rc`/`Arc`/`Weak` 用户不可见（编译器自动管理 §3.7）。`!`/`?` 后缀运算符已移除。
+> 本文件已据此对齐；仍含 `Result<T,E>` 的 API 标注了「过渡→throws Phase 4」。
 
 ---
 
@@ -9,32 +13,29 @@
 
 ```
                     ┌─────────┐
-                    │ result  │  (Option / Result — 所有其他模块的基础)
+                    │  error  │  (Error("msg") 构造器)
+                    │ console │  (console.log)
                     └────┬────┘
                          │
          ┌───────────────┼───────────────┐
          │               │               │
     ┌────▼────┐    ┌─────▼──────┐   ┌───▼────┐
     │ string  │    │ collections│   │  fs    │
-    └─────────┘    └──┬─────┬───┘   └────────┘
-                      │     │
-                 ┌────▼──┐  │
-                 │  rc   │◄─┘  (rc 可使用 collections)
-                 └───┬───┘
-                     │
-                ┌────▼────┐
-                │  sync   │  (依赖 rc 的 Arc + collections 的 VecDeque)
-                └────┬────┘
-                     │
-                ┌────▼────┐
-                │  async  │  (依赖 sync 的 spawn)
-                └────┬────┘
-                     │
-    ┌────────────────┼────────────────┐
-    │                │                │
-┌───▼───┐    ┌──────▼──────┐   ┌─────▼─────┐
-│  net  │    │   process   │   │   time    │
-└───────┘    └─────────────┘   └───────────┘
+    └─────────┘    └─────┬─────┘   └────────┘
+                         │
+                    ┌────▼────┐
+                    │  sync   │  (Channel / shared / spawn)
+                    └────┬────┘
+                         │
+                    ┌────▼────┐
+                    │  async  │  (依赖 sync 的 spawn)
+                    └────┬────┘
+                         │
+    ┌────────────────────┼──────────────────┐
+    │                    │                  │
+┌───▼───┐    ┌──────▼──────┐    ┌──────▼──────┐
+│  net  │    │   process   │    │    time     │
+└───────┘    └─────────────┘    └─────────────┘
     │
 ┌───▼────┐
 │ crypto │
@@ -45,53 +46,37 @@ serde —— 独立模块
 
 ---
 
-## std::result — 可空与可恢复错误
+## std::error — 错误构造器
 
-> **说明：** `Option<T>` 和 `Result<T,E>` 是语言核心类型（由 `trust-spec.md` ERR-REQ-001 定义）。本模块只定义它们的方法。
+> **v2.0：** `Option<T>`/`Result<T,E>` 不暴露给用户。错误通过 `throw`/`try-catch`（Phase 4）和 `null` 安全（Phase 4）处理。
+> `Error("msg")` 返回纯结构 `{ message: string }`——等价于对象字面量，不引入特殊类型身份。
 
 ### API
 
 | 函数 | 签名 | 语义 | Rust 映射 |
 |------|------|------|----------|
-| 构造 | | | |
-| `Option::Some` | `Some<T>(value: T) -> Option<T>` | 创建有值变体 | `Some(value)` |
-| `Option::None` | `None -> Option<T>` | 创建空变体 | `None` |
-| `Result::Ok` | `Ok<T,E>(value: T) -> Result<T,E>` | 创建成功变体 | `Ok(value)` |
-| `Result::Err` | `Err<T,E>(error: E) -> Result<T,E>` | 创建错误变体 | `Err(error)` |
-| 检查 | | | |
-| `isSome` | `opt.isSome(): boolean` | 是否为 Some | `opt.is_some()` |
-| `isNone` | `opt.isNone(): boolean` | 是否为 None | `opt.is_none()` |
-| `isOk` | `result.isOk(): boolean` | 是否为 Ok | `result.is_ok()` |
-| `isErr` | `result.isErr(): boolean` | 是否为 Err | `result.is_err()` |
-| 解包 | | | |
-| `unwrap` | `opt.unwrap(): T` | 解包，None 时 panic | `opt.unwrap()` |
-| `unwrap` | `result.unwrap(): T` | 解包，Err 时 panic | `result.unwrap()` |
-| `unwrapOr` | `opt.unwrapOr(default: T): T` | 解包或默认值 | `opt.unwrap_or(default)` |
-| `unwrapOr` | `result.unwrapOr(default: T): T` | 解包或默认值 | `result.unwrap_or(default)` |
-| `expect` | `opt.expect(msg: string): T` | 解包，None 时 panic 携带 msg | `opt.expect(msg)` |
-| `expect` | `result.expect(msg: string): T` | 解包，Err 时 panic 携带 msg | `result.expect(msg)` |
-| 映射 | | | |
-| `map` | `opt.map<U>(f: (T) => U): Option<U>` | Some 时应用 f | `opt.map(f)` |
-| `map` | `result.map<U>(f: (T) => U): Result<U,E>` | Ok 时应用 f | `result.map(f)` |
-| `andThen` | `opt.andThen<U>(f: (T) => Option<U>): Option<U>` | Some 时链式调用 | `opt.and_then(f)` |
-| `andThen` | `result.andThen<U>(f: (T) => Result<U,E>): Result<U,E>` | Ok 时链式调用 | `result.and_then(f)` |
-
-### 设计决策
-
-**`!` 仅限 Option：** `!` 断言"我知道这里有值"，仅允许用于 `Option<T>`。`Result<T,E>` 的错误不可控（I/O 失败）——允许 `Result!` 将训练开发者忽略错误。Trust 选择显式处理：`Result` 用 `?` 传播或用 `.expect()` 断言。
-
-**`??` 同时用于 Option 和 Result：** `??` 映射 `unwrapOr`，不涉及 panic。用于 `Result` 时静默丢弃错误信息——适合错误可忽略的场景。
+| `Error` | `Error(msg: string) -> { message: string }` | 创建错误对象（纯结构，不含类型标签） | `{ message: msg.to_string() }` |
 
 ### 验收标准
 
-- [ ] `Some(42).isSome()` → `true`
-- [ ] `None.isNone()` → `true`
-- [ ] `Ok(42).unwrap()` → `42`
-- [ ] `None.unwrap()` → panic
-- [ ] `None.unwrapOr(0)` → `0`
-- [ ] `Err("fail").unwrapOr(0)` → `0`
-- [ ] `Some(42).map(x => x * 2)` → `Some(84)`
-- [ ] `None.map(x => x * 2)` → `None`
+- [ ] `Error("not found")` → `{ message: "not found" }`
+- [ ] `throw Error("fail")` → 抛出含 `message` 字段的错误（Phase 4 实现 throw 后）
+
+> **过渡注记：** 当前 Phase 2 阶段仍可内部使用 `Result<T,E>` 作为编译器实现类型。用户面 API 中的 `Result<T,E>` 将在 Phase 4 替换为 `throws` 语法。
+
+---
+
+## std::console — 控制台输出
+
+### API
+
+| 函数 | 签名 | 语义 | Rust 映射 |
+|------|------|------|----------|
+| `console.log` | `console.log(value: T): void` | 输出到 stdout | `println!("{}", value)` |
+
+### 验收标准
+
+- [ ] `console.log("Hello, Trust!")` → stdout 输出 `Hello, Trust!`
 
 ---
 
@@ -216,11 +201,9 @@ serde —— 独立模块
 ### 类型
 
 ```
-type FsError =
-    | { kind: "NotFound"; path: string }
-    | { kind: "PermissionDenied"; path: string }
-    | { kind: "AlreadyExists"; path: string }
-    | { kind: "IoError"; message: string }
+// v2.0: ADT (type X = | ...) 已移除。FsError 定义为含 message 的结构类型。
+// throw/try-catch (Phase 4) 按 message 字段 + 可选的 kind 字段匹配。
+type FsError = { message: string, kind: string, path?: string }
 ```
 
 ### 验收标准
@@ -231,44 +214,6 @@ type FsError =
 - [ ] `fs.exists("test.txt")` → `true`
 - [ ] `fs.remove("test.txt")` → `Ok(())`
 - [ ] `fs.exists("test.txt")` → `false`
-
----
-
-## std::rc — 智能指针
-
-### API
-
-| 函数 | 签名 | 语义 | Rust 映射 |
-|------|------|------|----------|
-| **Box<T>** | | | |
-| `Box::new` | `Box::new<T>(value: T) -> Box<T>` | 堆分配 | `Box::new(value)` |
-| `intoInner` | `(move box).intoInner(): T` | 取出值，释放 Box | `*box` |
-| **Rc<T>** | | | |
-| `Rc::new` | `Rc::new<T>(value: T) -> Rc<T>` | 创建引用计数智能指针 | `Rc::new(value)` |
-| `clone` | `rc.clone(): Rc<T>` | 引用计数 +1 | `Rc::clone(&rc)` |
-| `strongCount` | `rc.strongCount(): number` | 强引用计数 | `Rc::strong_count(&rc)` |
-| `weakCount` | `rc.weakCount(): number` | 弱引用计数 | `Rc::weak_count(&rc)` |
-| **Arc<T>** | | | |
-| `Arc::new` | `Arc::new<T>(value: T) -> Arc<T>` | 创建原子引用计数智能指针 | `Arc::new(value)` |
-| `clone` | `arc.clone(): Arc<T>` | 原子引用计数 +1 | `Arc::clone(&arc)` |
-| `strongCount` | `arc.strongCount(): number` | 强引用计数 | `Arc::strong_count(&arc)` |
-| **Weak<T>** | | | |
-| `downgrade` | `rc.downgrade(): Weak<T>` | 创建弱引用 | `Rc::downgrade(&rc)` |
-| `upgrade` | `weak.upgrade(): Option<Rc<T>>` | 升级为强引用 | `weak.upgrade()` |
-
-### 设计决策
-
-**`Rc` 不实现 `Send`：** `Rc<T>` 使用非原子引用计数，跨线程使用导致数据竞争。Trust 编译器在 `spawn` 中使用 `Rc` 时报错——提示改用 `Arc`。
-
-### 验收标准
-
-- [ ] `let b = Box::new(42); *b` → `42`
-- [ ] `let b = Box::new(42); let v = b.intoInner();` → `v == 42`，`b` 已 move 不可再用
-- [ ] `let a = Rc::new([1,2,3]); let b = a.clone(); Rc::strongCount(a)` → `2`
-- [ ] `let a = Arc::new([1,2,3]); let b = a.clone(); Arc::strongCount(a)` → `2`
-- [ ] `let w = Rc::downgrade(a); w.upgrade()` → `Some`
-- [ ] `Rc::new(1)` 传入 `spawn` → 编译错误（非 Send）
-- [ ] `Arc::new(1)` 传入 `spawn` → 编译通过
 
 ---
 
@@ -463,15 +408,12 @@ type ChannelError =
 
 | Trust API | Rust 实现 | 来源 |
 |-----------|----------|------|
-| `Option::unwrap` | `Option::unwrap` | `std::option` |
-| `Result::unwrapOr` | `Result::unwrap_or` | `std::result` |
-| `Vec::push` | `Vec::push` | `std::vec` |
+| `Error("msg")` | `{ message: msg }` | `std::error` |
+| `console.log` | `println!("{}", value)` | `std::console` |
+| `Vec::push` | `Vec::push` | `std::collections` |
 | `HashMap::insert` | `HashMap::insert` | `std::collections` |
 | `String::split` | `str::split` + `collect` | `std::string` |
-| `fs::readToString` | `std::fs::read_to_string` | `std::fs` |
-| `Rc::new` | `std::rc::Rc::new` | `std::rc` |
-| `Arc::new` | `std::sync::Arc::new` | `std::sync` |
-| `Box::new` | `Box::new` | `std::boxed` |
+| `fs::readToString` | `std::fs::read_to_string` | `std::fs`（→throws Phase 4） |
 | `Channel` | `tokio::sync::mpsc::channel` | `ferro_rt` |
 | `Sender::send` | `tokio::sync::mpsc::Sender::send` | `ferro_rt` |
 | `Mutex::lock` | `std::sync::Mutex::lock` | `ferro_rt` |
@@ -485,6 +427,8 @@ type ChannelError =
 | `http.get` | `reqwest::get` | `ferro_rt` / extern binding |
 | `serde.fromStr` | `serde_json::from_str` | `ferro_rt` / extern binding |
 | `crypto.sha256` | `sha2::Sha256::digest` | extern binding |
+
+> **v2.0 已移除：** `Option::unwrap`、`Result::unwrapOr`、`Rc::new`、`Arc::new`、`Box::new`——这些是编译器内部类型，不暴露给用户。`Option<T>` 由 `T | null` 替代（Phase 4），`Result<T,E>` 由 `throw`/`try-catch` 替代（Phase 4）。
 
 ---
 

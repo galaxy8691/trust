@@ -19,43 +19,44 @@
 
 ### LEX-REQ-001：关键字
 
-**需求：** Trust 的关键字不可作为标识符。分类如下：
+**需求：** Trust 的关键字不可作为标识符。v2.0 关键字表共 43 个，分类如下：
 
 | 分类 | 关键字 | 说明 |
 |------|--------|------|
 | 声明 | `let` `mut` `const` `shared` | 变量声明 |
 | 函数 | `function` `fn` | `fn` 仅用于 `extern` 块 |
 | 参数 | `inout` `move` | 借用/所有权标注 |
-| 并发 | `spawn` `async` `await` `select` | 异步与并发 |
-| 控制流 | `if` `else` `for` `of` `while` `loop` `break` `continue` `return` `throw` | 控制流 |
+| 并发 | `spawn` `async` `await` | 异步与并发（`select` 已移除 §14） |
+| 控制流 | `if` `else` `for` `of` `while` `break` `continue` `return` `throw` | 控制流（`loop` 已移除 §14） |
 | 匹配 | `switch` `case` `default` `match` | 模式匹配 |
 | 模块 | `import` `export` `from` `as` | 模块系统 |
-| 类型 | `interface` `type` `impl` `extends` `this` `dyn` | 类型系统 |
+| 类型 | `type` `this` | 类型系统（`interface`/`impl`/`extends`/`dyn` 已移除 §14） |
 | 测试 | `test` | 测试函数 |
 | 外部 | `extern` | FFI 声明 |
-| 字面量 | `true` `false` `undefined` `None` | 值字面量 |
-| 构造器 | `Some` `Ok` `Err` | Option/Result 构造 |
-| 智能指针 | `Rc` `Arc` `Weak` `Box` | 标准库类型 |
-| 类型名 | `number` `string` `boolean` `bigint` `void` | 内置类型名，不可用于变量/函数名 |
+| 字面量 | `true` `false` `null` | 值字面量（`undefined`/`None` 已移除） |
+| 新增预留 | `unknown` `try` `catch` `panic` | Phase 3/4 实现（仅 lexer 预留） |
+| 类型名 | `number` `string` `boolean` `void` | 内置类型名（`bigint` 已移除 §14） |
 
 **验收标准：**
 - AC-LEX-001: `let async = 42` → 词法错误（`async` 是关键字）
 - AC-LEX-002: `function void() {}` → 词法错误（`void` 是类型名）
 - AC-LEX-003: `let x: number = 42` → 合法
-- AC-LEX-004: `extern "rust" { fn sqlx_query<T>(query: string): Result<T, SqlxError>; }` → `fn` 被识别为关键字（仅在 `extern` 块内合法）
+- AC-LEX-004: `extern "rust" { fn sqlx_query(query: string): string throws { message: string }; }` → `fn` 被识别为关键字（仅在 `extern` 块内合法）。v2.0: `throws` 替代旧 `Result<T,E>` 返回标注
 
 **设计决策——`fn` vs `function`：** `extern "rust"` 块内使用 `fn` 而非 `function`，视觉区分 FFI 声明（映射 Rust 函数签名，不经过 Trust 所有权检查）与 Trust 自身函数。`fn` 仅在 `extern` 块内合法，全局不可作为标识符。方案 B（统一用 `function`）被否决——会使 FFI 块的"不安全边界"在视觉上不够明显。
 
 ### LEX-REQ-002：字面量
 
-**需求：** 字面量格式与承载类型如下：
+**需求：** v2.0 字面量格式与承载类型（5 种，已移除 BigInt `Nn` 后缀）：
 
 | 种类 | 词法格式 | 承载类型 | 示例 |
 |------|---------|---------|------|
-| 整数 | `[0-9]+` | `i32` | `42` |
-| 浮点 | `[0-9]+ "." [0-9]+` | `f64` | `3.14` |
-| BigInt | `[0-9]+ "n"` | `i64` | `9007199254740991n` |
-| 字符串 | `"\"" ... "\""` | `String` | `"hello"` |
+| 整数 | `[0-9]+` | `number`(f64) | `42` |
+| 浮点 | `[0-9]+ "." [0-9]+` | `number`(f64) | `3.14` |
+| 字符串 | `"\"" ... "\""` | `string` | `"hello"` |
+| 模板 | `` "`" ... "${" expr "}" ... "`" `` | `string`（展开为 format!） | `` `Hello, ${name}` `` |
+| 布尔 | `true` `false` | `boolean` | |
+| null | `null` | `T \| null`（内部 `Option<T>`） | `null` |
 | 模板 | `` "`" ... "${" expr "}" ... "`" `` | `String`（展开为 format!） | `` `Hello, ${name}` `` |
 | 布尔 | `true` `false` | `bool` | |
 
