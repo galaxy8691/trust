@@ -2,7 +2,7 @@
 
 > 版本：v2.0 · 分支：lang-redesign  
 > 上一版已废弃 → `docs/Trust-设计文档-DEPRECATED.md`  
-> 本文档基于 26 项设计决策重写，是 Trust 语言的唯一权威规范
+> 本文档是 Trust 语言的唯一权威规范
 
 **代号:** Trust  
 **理念:** JavaScript 的语法，Rust 的安全，编译到原生代码。  
@@ -100,7 +100,9 @@ let user: { name: string, age: number } = { name: "Bob", age: 30 };
 
 ### 2.3 具名类型别名
 
-使用 `type` 关键字为结构类型命名。`type` 仅创建**透明别名**——`type Point = { x: number, y: number }` 等价于直接书写 `{ x: number, y: number }`。同形状即兼容（结构类型）——两个同名 `Point` 或两个形状相同的匿名结构体可以互相赋值。
+使用 `type` 关键字为结构类型命名。`type` 创建一个**名义类型**（拥有类型身份）——`type Point = { x: number, y: number }` 定义的 Point 被编译器视为独立类型，用于 receiver 方法绑定。赋值时按**结构类型**兼容——两个 `type` 如果右侧形状相同，可以互相赋值，匿名结构体只要形状匹配也能赋值给具名类型。
+
+> **K1 fix:** `type` 具有**双重语义**——方法绑定层面它是名义的（`function Point.distance()` 绑定到这个名字），赋值兼容层面它是结构的（同形状即兼容）。编译器内部：每个 `type` 生成独立的 Rust struct，形状相同的 `type` 通过 `From`/`Into` trait 互相转换。receiver 方法编译为 Rust `impl` 块，绑定到对应的 struct。匿名结构体调用 receiver 方法时，编译器自动推断最匹配的具名类型并插入转换。
 
 ```js
 // 具名类型别名——方便复用和文档化
@@ -118,8 +120,8 @@ pt.distance({ x: 0, y: 0 });  // 5
 ```
 
 **`type` 语法约束：**
-- `type` 右侧**仅允许对象字面量类型**（`{ ... }`）——不允许 ADT 联合语法（D11）
-- `type` 创建的是**透明别名**——不引入新的类型身份。两个 `type` 如果右侧形状相同，编译为同一 Rust 类型
+- `type` 右侧**仅允许对象字面量类型**（`{ ... }`）——不允许 ADT 联合语法（见 §14 被拒绝的特性）
+- `type` 创建的是**名义类型**——拥有独立的类型身份用于方法绑定。两个 `type` 即使右侧形状相同也编译为不同 Rust struct，通过自动生成的 `From`/`Into` 实现互相赋值
 - `type` 是可选语法——可以完全不用，直接用对象字面量描述形状。`type` 的作用是复用和文档化
 
 ### 2.4 纯结构类型
@@ -142,7 +144,7 @@ let pt2: { x: number; y: number } = { x, y };  // 等价 { x: 10, y: 20 }
 
 > **约束：** 简写仅在**类型上下文明确**时有效——即赋值目标、函数参数、返回值类型三者之一已知。对于 `let obj = { x, y }` 且无法从上下文推断目标类型时，编译器报错要求显式标注。
 
-### 2.4 隐式泛型
+### 2.5 隐式泛型
 
 函数参数无类型标注 → 该参数为泛型。有标注 = 固定类型。可混用。
 
@@ -159,26 +161,55 @@ function add(a: number, b: number): number { return a + b; }
 
 > **隐式泛型 vs 旧版显式 `<T>`：** v2.0 不保留 `<T extends ...>` 语法。泛型参数通过"无标注"隐式声明。如果函数需要泛型约束，通过标注参数为具体结构类型来实现。这比 `<T>` 更简洁，也更贴近 JS 开发者的直觉——"我没写类型 = 我不知道也不关心它是什么类型，你帮我处理"。
 
-### 2.5 `unknown` + `match`
+### 2.6 `unknown` + `match`
 
-`unknown` 类似 JS 的 `dynamic`，但不能直接使用——必须通过 `match` 确认类型，编译期保证安全。`match` 的每个 `case` 是一个类型模式，全不匹配时 `panic`。
+`unknown` 不是 `any`——它**不能被直接使用**（不能取成员、不能调方法）。`unknown` 的值来自运行期才能确定类型的数据（反序列化、网络响应、FFI 动态数据）。要使用它，必须先把它"装载"成确定的类型，有两种方式。
+
+**方式一：类型化装载（已知目标类型）**
+
+用带类型标注的绑定把 `unknown` 装载成具体类型。编译器在装载点插入一次运行期形状校验——数据符合则得到该类型的值，不符合则 `throw`（可被 `try/catch` 接住）：
+
+```js
+// fetchUser 返回 unknown
+let p: People = fetchUser(url);   // ✅ 标注 People → 运行期校验 → 装载成 People
+p.getName();                       // ✅ p 现在是 People，正常使用
+
+// fetchUser(url).getName();       // ❌ 在 unknown 上直接调方法 → 编译错误
+
+try {
+    let q: People = fetchUser(url);  // 数据形状不符 → throw ParseError
+    q.getName();
+} catch (e: { message: string }) {
+    console.log("invalid response: " + e.message);
+}
+```
+
+**方式二：`match` 类型匹配（不确定是哪种类型）**
+
+外部 API 返回的数据常常很杂乱——同一接口可能返回对象、数组或字符串。用 `match` 按运行期形状分支，每个 `case` 是一个类型模式，命中后分支内 `data` 自动收窄为该类型：
 
 ```js
 let data: unknown = fetchData();
 
 match (data) {
-    case { name: string, age: number } => console.log(data.name);
-    case number[] => data.forEach(x => console.log(x));
-    case string => console.log(data);
+    case { name: string, age: number } => console.log(data.name);  // data: { name, age }
+    case number[] => data.forEach(x => console.log(x));            // data: number[]
+    case string   => console.log(data);                            // data: string
+    case _        => throw Error("unexpected shape");              // 兜底（可选）
 }
-// 全部不匹配 → panic!
+// 无兜底 case 且全部不匹配 → panic
 ```
 
-编译器实现：`unknown` 编译为隐式泛型参数 + 每个 `match` 分支生成单态化代码。`match` 的每个 `case` 对应一个可能的 Rust 类型，编译器在调用点根据实际类型选择分支。这避免了 `Box<dyn Any>` 的动态分发开销。
+> **`match` 与装载的关系：** 类型化装载等价于"单分支 + 失败抛错"的 `match`。知道目标类型用装载；需要按多种可能形状分支用 `match`。两者底层是同一机制。
+
+**编译器实现：**
+- **编译期：** 目标类型来自标注（装载）或 `case` 模式（match）——所以 `unknown` 表达式不能裸用，没有标注/模式就无法确定要校验成什么类型。每个 `case` 分支按其确定类型生成单态化代码，无虚表、无动态分发。
+- **运行期：** `unknown` 内部是一个可检视的动态载荷（编译器生成的封闭 `Value` 枚举：null/bool/number/string/数组/对象）。装载和 `match` 都编译为"对该载荷做形状校验，命中则转换为对应的具体类型"。这**不是** `Box<dyn Any>` 的动态分发——用户代码拿到的始终是具体类型。
+- 装载校验失败 → `throw`；`match` 全不匹配且无 `case _` → `panic`。
 
 `switch` 用于普通值匹配：`switch (x) { case 1: ...; case "hello": ... }`。
 
-### 2.6 `null` 安全
+### 2.7 `null` 安全
 
 只有 `null`，没有 `undefined`。编译器强制 null 检查——不检查直接使用 → 编译错误。
 
@@ -321,6 +352,11 @@ function log(msg: string): void {
 // function log(msg: string) { ... }  // ❌ 编译错误：无 :void
 ```
 
+> **返回类型标注规则：**
+> - **块体函数**（`function f(...) { ... }`）必须显式标注返回类型，包括无返回值时的 `:void`——缺失即编译错误。
+> - **表达式体函数**（`function f(...) = expr`）和**箭头函数**（`(...) => expr`）的返回类型可省略，由表达式自动推断。
+> - 这一区分让块体函数的签名始终自文档化，同时保留单行函数的简洁。
+
 ### 4.2 Go 风格 Receiver 方法
 
 直接在类型上定义方法：
@@ -365,10 +401,15 @@ try {
 ```
 
 **编译期保证：**
-- `throw` 的参数必须是 `Error` 类型或自定义错误类型（`type X = { message: string }` 自动满足 `Error` 的形状要求——即需包含 `message: string` 字段）
+- `throw` 的参数必须是**包含 `message: string` 字段的结构**。任何拥有 `message: string` 的匿名对象或具名类型（`type X = { message: string }`）都可以被 throw。`Error` 不是内置类型——只要求形状。这等于说所有错误类型都满足 `{ message: string }` 的最小公约
 - `catch` 按**结构形状**匹配（不是按类型名）。`catch (e: { message: string, code: number })` 匹配任何拥有这两个字段的错误对象。`catch (e: IoError)` 等价于 `catch (e: { message: string, code: number })`——但优先推荐显式写形状
 - `try/catch` 必须穷举所有可达的错误类型，或含兜底 `catch (e)`
 - 缺漏 → 编译错误
+
+> **结构匹配的重叠与优先级：** 由于 `catch` 按结构形状匹配，可能出现一个错误同时满足多个 `catch` 的形状（宽度子类型：`{ message, code, url }` 同时满足 `{ message, code }`）。匹配规则：
+> - **声明顺序优先**——从上到下第一个形状匹配的 `catch` 命中（与 JS `catch`、Rust `match` 一致）。
+> - 编译器对**永远不可达的 `catch`**（被前面更宽的形状完全覆盖）发出 `warning`。
+> - **形状完全相同的两个错误类型无法区分**（它们编译为同一类型）。若需区分语义不同但形状相同的错误，在 `catch` 内对字段值（如 `e.code`）二次判别。
 
 ```js
 // 自定义错误类型——仅需包含 message: string 字段即可作为 Error 抛出
@@ -413,7 +454,7 @@ function readFile(path: string): string {
 // 生成的 Rust 代码（简化示意）
 fn readFile(path: &str) -> Result<String, ReadFileError> {
     if !fs::exists(path) {
-        return Err(ReadFileError::NotFound { message: "not found".into(), code: 404 });
+        return Err(ReadFileErrorValues::NotFound { message: "not found".into(), code: 404 });
     }
     Ok(fs::read_to_string(path))
 }
@@ -552,7 +593,7 @@ spawn(move async () => {
 });
 ```
 
-`Sender` 可 Clone（多个发送方），`Receiver` 不 Clone（唯一接收方）。默认有界容量 64。发送即所有权转移。
+发送即所有权转移——`send` 后该值失效，避免发送方与接收方同时持有可变数据。
 
 ### 7.3 `shared`
 
@@ -578,7 +619,9 @@ counter.withLock(c => { c += 1; });
 ```js
 async function fetchUser(id: number): { name: string, id: number } {
     let response = await http.get("/api/user/" + id);
-    return response.json();
+    // json() 返回 unknown，装载到带标注的返回类型 → 运行期校验，形状不符则 throw
+    let user: { name: string, id: number } = response.json();
+    return user;
 }
 
 // 并发执行——join() 同时 poll 多个 Future
@@ -794,25 +837,27 @@ $ echo 'let arr = [1,2,3]; arr.map(x => x * 2)' | trust eval -
 
 ## 14. 被明确拒绝的特性及理由
 
+以下特性经过了严格的设计评审后被**永久拒绝**。记录在此是为了防止未来的设计讨论反复回到已被论证不可行的方案上。
+
 | 拒绝的特性 | 理由 |
 |-----------|------|
-| `interface` / `implements` | JS 没有；Trust 用纯结构类型替代 |
+| `interface` / `implements` | JS 没有。Trust 用纯结构类型替代 |
 | `Result<T,E>` / `Option<T>` | 换成 `throw`/`try-catch` + `null` |
 | `?` 操作符（`Result` 传播） | 换成 `try-catch` |
-| ADT（`type X = \| ...`） | `unknown` + `match` 覆盖了相同场景 |
-| `impl` 块 | Go 风格 receiver 更简洁 |
-| `Box<dyn Trait>` / `Dynamic` | D8 禁止动态分发 |
-| `select` 多通道竞速 | 精简并发设计；未来需要时再加 |
-| `bigint` | `number`=f64 足够 |
-| `loop` | `for`/`while` 足够 |
-| `defer` 延迟执行 | 所有权系统天然管理资源生命周期；`withLock` 块级作用域覆盖剩余场景 |
-| `\|>` 管道操作符 | JS 没有；方法链 `.filter().map()` 已覆盖 |
-| 过程宏（proc-macro） | 破坏静态可分析性 |
-| `// @trust: pure` 意图注释 | 无编译器验证 = 谎言注释 |
-| 完整 REPL | move 语义与会话状态持续性物理矛盾；用 `trust eval` 替代 |
-| 默认静默的编译器自动修复 | 开发者不会理解所有权；`--fix` 交互相反 |
-| `undefined` | 只有 `null` |
-| `any` | `unknown` 替代（但必须类型确认后才能用） |
+| ADT（`type X = \| ...`） | `unknown` + `match` 覆盖了相同场景（编译期穷举 → 运行时类型匹配） |
+| `impl` 块 | Go 风格 receiver 更简洁，语义等价 |
+| `Box<dyn Trait>` / `Dynamic` 枚举 | 禁止动态分发。`unknown` + `match`（内部 `Value` 载荷 + 运行期形状校验，非虚表分发）替代 |
+| `select` 多通道竞速 | 精简并发设计。未来需要时可通过标准库扩展 |
+| `bigint` | `number`=f64 足够覆盖大多数场景 |
+| `loop` | `for`/`while` 足够。`while (true)` 可替代无限循环 |
+| `defer` 延迟执行 | 所有权系统天然管理资源生命周期。`withLock` 块级作用域覆盖剩余场景 |
+| `\|>` 管道操作符 | JS 没有。方法链 `.filter().map().reduce()` 已覆盖相同场景 |
+| 过程宏（proc-macro） | 破坏"看到的代码就是被编译的代码"的可分析性。替代方案：`trust generate` 子命令 |
+| `// @trust: pure` 等无验证意图注释 | 编译器不强制检查 → 开发者可标注 `pure` 却在函数内执行 I/O → "谎言注释" |
+| 完整 REPL | move 语义的一次性消耗与 REPL 的会话状态持续性在物理上矛盾。替代方案：`trust eval` |
+| 默认静默的编译器自动修复 | 开发者永远不会理解所有权。`--fix` 提供手动确认的辅助修复 |
+| `undefined` | 只有 `null`。减少空值类型数量，降低认知负荷 |
+| `any` | `unknown` 替代——但 `unknown` 必须经类型化装载或 `match` 确认后才能使用，比 `any` 更安全 |
 
 ---
 
@@ -978,12 +1023,12 @@ import { readToString } from "std::fs";
 
 type Config = { port: number, static_dir: string };
 
-// 请求计数器（原子操作，无锁）
+// 请求计数器（number 类型的 shared，编译器优化为原子指令）
 shared request_count = 0;
 
 // 路由处理
 async function handleRequest(req: Request): { status: number, body: string } {
-    // 原子递增计数器
+    // 递增计数器（number shared → 原子指令）
     request_count.withLock(c => { c += 1; });
 
     // 路由匹配
@@ -1033,28 +1078,3 @@ function main(): void {
 }
 ```
 
----
-
-## 20. 被明确拒绝的特性及理由（完整版）
-
-以下特性经过了严格的设计评审后被**永久拒绝**。记录在此是为了防止未来的设计讨论反复回到已被论证不可行的方案上。
-
-| 拒绝的特性 | 理由 |
-|-----------|------|
-| `interface` / `implements` | JS 没有。Trust 用纯结构类型替代 |
-| `Result<T,E>` / `Option<T>` | 换成 `throw`/`try-catch` + `null` |
-| `?` 操作符（`Result` 传播） | 换成 `try-catch` |
-| ADT（`type X = \| ...`） | `unknown` + `match` 覆盖了相同场景（编译期穷举 → 运行时类型匹配） |
-| `impl` 块 | Go 风格 receiver 更简洁，语义等价 |
-| `Box<dyn Trait>` / `Dynamic` 枚举 | 禁止动态分发。`unknown` + `match`（单态化）替代 |
-| `select` 多通道竞速 | 精简并发设计。未来需要时可通过标准库扩展 |
-| `bigint` | `number`=f64 足够覆盖大多数场景 |
-| `loop` | `for`/`while` 足够。`while (true)` 可替代无限循环 |
-| `defer` 延迟执行 | 所有权系统天然管理资源生命周期。`withLock` 块级作用域覆盖剩余场景 |
-| `\|>` 管道操作符 | JS 没有。方法链 `.filter().map().reduce()` 已覆盖相同场景 |
-| 过程宏（proc-macro） | 破坏"看到的代码就是被编译的代码"的可分析性。替代方案：`trust generate` 子命令 |
-| `// @trust: pure` 等无验证意图注释 | 编译器不强制检查 → 开发者可标注 `pure` 却在函数内执行 I/O → "谎言注释" |
-| 完整 REPL | move 语义的一次性消耗与 REPL 的会话状态持续性在物理上矛盾。替代方案：`trust eval` |
-| 默认静默的编译器自动修复 | 开发者永远不会理解所有权。`--fix` 提供手动确认的辅助修复 |
-| `undefined` | 只有 `null`。减少空值类型数量，降低认知负荷 |
-| `any` | `unknown` 替代——但 `unknown` 必须被 `match` 类型确认后才能使用，比 `any` 更安全 |
