@@ -128,7 +128,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - run: rustup component add miri --toolchain nightly
       - run: rustup component add rust-src --toolchain nightly
-      - run: cargo miri test -p ferro_rt
+      - run: cargo +nightly miri test -p ferro_rt
 
   # ========== JOB 10: MSRV 测试（P1） ==========
   msrv:

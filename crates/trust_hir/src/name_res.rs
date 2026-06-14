@@ -1008,6 +1008,7 @@ impl std::error::Error for DiagError {}
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn parse_expr(src: &str) -> ast::Expr {
         use trust_parser::parser::Parser;
         // 简单解析——依赖 parser 的完整路径
