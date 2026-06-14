@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Phase 1.5: `trust_codegen` — TIR → Rust source generation + source map + ferro_rt API mapping
 - Phase 1.6: `trust_error` — unified Diagnostic struct + JSON output + fix suggestion engine
 - Phase 1.7: `trustc` — compiler entry point (CLI + pipeline orchestration + end-to-end tests)
-- Phase 1.8: 27 end-to-end test fixtures (37 tests), criterion benchmark skeleton, fuzzing infrastructure (3 targets)
+- Phase 1.8: 47 end-to-end test fixtures (56 tests), benchmark skeleton (113ms), fuzzing infrastructure (3 targets)
 - Phase 0: Language specification (`spec/trust-spec.md`) + design document (`docs/Trust-设计文档.md`)
 - `ferro_rt` runtime stub: `console::log` → `println!` mapping
 

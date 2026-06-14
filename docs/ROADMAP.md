@@ -169,7 +169,7 @@
 **优先级：** P0  
 **依赖：** 1.7
 
-- [x] 27 个语法特性端到端测试（`.trust` 输入 → rustc 编译 → 执行验证），37 tests 全部通过
+- [x] 47 个语法特性端到端测试（`.trust` 输入 → rustc 编译 → 执行验证），56 tests 全部通过
 - [x] `benches/` 基础目录 + criterion 骨架（`compile_bench.rs`）
 - [x] Fuzzing 基础设施（parse / tir_borrowck / codegen 三个 target）
 - [x] 自举验证：Trust 编译器编译 hello.trust 并执行输出 `"Hello, Trust!"`

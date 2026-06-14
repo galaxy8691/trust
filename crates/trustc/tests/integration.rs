@@ -1,6 +1,6 @@
 //! §4.2: Phase 1.8 端到端集成测试
 //!
-//! 验证 trustc compile 管线完整执行。27 个语法特性覆盖。
+//! 验证 trustc compile 管线完整执行。47 个语法特性覆盖。
 
 use std::process::Command;
 

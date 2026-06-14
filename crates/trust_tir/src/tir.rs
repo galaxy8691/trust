@@ -398,7 +398,7 @@ fn lower_stmt(stmt: &HirStmt, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
 }
 
 fn lower_let(let_s: &HirLet, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
-    // §OWN-REQ: 不可变赋值检测——非 `let mut` 变量不允许重新赋值
+    // §OWN-REQ: let mut 变量标记为可变（不可变赋值检测在 name_res 阶段完成）
     if let_s.mutable {
         ctx.map.mark_mutable(&let_s.name);
     }
@@ -412,14 +412,6 @@ fn lower_let(let_s: &HirLet, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
                 };
                 if is_copy_type(ty) {
                     if let Some(existing) = ctx.map.lookup_name(name) {
-                        // 检查不可变变量赋值（let 非 mut → 不允许重新赋值）
-                        if !ctx.map.is_mutable(name) {
-                            diags.push(DiagError::new(
-                                format!("cannot assign to immutable variable `{name}`; declare it with `let mut`"),
-                                let_s.span.clone(),
-                            ));
-                            return;
-                        }
                         let tmp = ctx.next_tmp();
                         ctx.emit(TirOp::Let(tmp, TirValue::Var(existing), let_s.span.clone()));
                         Some(tmp)
@@ -428,13 +420,6 @@ fn lower_let(let_s: &HirLet, ctx: &mut LowerCtx, diags: &mut Vec<DiagError>) {
                         None
                     }
                 } else if let Some(existing) = ctx.map.lookup_name(name) {
-                    if !ctx.map.is_mutable(name) {
-                        diags.push(DiagError::new(
-                            format!("cannot assign to immutable variable `{name}`; declare it with `let mut`"),
-                            let_s.span.clone(),
-                        ));
-                        return;
-                    }
                     let new_tmp = ctx.next_tmp();
                     ctx.emit(TirOp::Move(new_tmp, existing, let_s.span.clone()));
                     Some(new_tmp)
