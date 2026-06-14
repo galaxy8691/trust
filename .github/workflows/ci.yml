@@ -95,6 +95,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - run: rm -f rust-toolchain.toml
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install tarpaulin
         run: cargo +nightly install cargo-tarpaulin
@@ -107,9 +108,10 @@ jobs:
     continue-on-error: true  # Phase 1 baseline — 覆盖率未达标门控不阻塞 CI
     steps:
       - uses: actions/checkout@v4
+      - run: rm -f rust-toolchain.toml
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install tarpaulin
-        run: cargo +stable install cargo-tarpaulin
+        run: cargo +nightly install cargo-tarpaulin
       - name: trust_tir (>=85%)
         run: cargo tarpaulin -p trust_tir --fail-under 85 --out xml
       - name: trust_parser (>=70%)
@@ -125,6 +127,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - run: rm -f rust-toolchain.toml
       - uses: dtolnay/rust-toolchain@nightly
       - run: rustup component add miri --toolchain nightly
       - run: rustup component add rust-src --toolchain nightly
