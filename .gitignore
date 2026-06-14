@@ -2,7 +2,7 @@
 /target/
 **/*.rs.bk
 
-# IDE
+# IDE / Editor
 .idea/
 .vscode/
 *.swp
@@ -10,3 +10,16 @@
 
 # Build artifacts
 *.wasm
+*.profraw
+*.profdata
+
+# Fuzz
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+
+# AI / CodeWhale
+.codewhale/
+
+# Temp
+tmp/
