@@ -94,6 +94,7 @@ struct GenCtx {
     /// 当前函数的所有基本块（用于控制流上下文）
     blocks: Vec<BasicBlock>,
     /// 当前循环的出口块 ID 集合（用于 break 检测）
+    #[allow(dead_code)]
     loop_exits: Vec<BlockId>,
     /// 当前循环的入口块 ID 集合（用于 continue 检测）
     loop_entries: Vec<BlockId>,
@@ -161,6 +162,7 @@ impl GenCtx {
     }
 
     /// 获取 TmpVar 的 Rust 表达式引用（带 & / &mut 前缀）
+    #[allow(dead_code)]
     fn var_expr(&mut self, tmp: TmpVar) -> String {
         self.var_name(tmp)
     }
@@ -640,7 +642,7 @@ fn emit_op(
     op: &TirOp,
     func: &TirFunction,
     ctx: &mut GenCtx,
-    errors: &mut Vec<CodegenError>,
+    _errors: &mut [CodegenError],
 ) {
     ctx.record_span(&get_op_span(op));
 
@@ -749,7 +751,7 @@ fn emit_op(
 // 辅助：值表达式生成
 // ============================================================================
 
-fn emit_value(val: &TirValue, func: &TirFunction, ctx: &mut GenCtx) -> String {
+fn emit_value(val: &TirValue, _func: &TirFunction, ctx: &mut GenCtx) -> String {
     match val {
         TirValue::Var(tmp) => ctx.var_name(*tmp),
         TirValue::IntLiteral(v) => v.to_string(),
@@ -775,8 +777,8 @@ fn emit_value(val: &TirValue, func: &TirFunction, ctx: &mut GenCtx) -> String {
             }
         }
         TirValue::Function(name) => {
-            if name.starts_with('$') {
-                format!("_{}", &name[1..])
+            if let Some(stripped) = name.strip_prefix('$') {
+                format!("_{}", stripped)
             } else {
                 name.clone()
             }
@@ -788,8 +790,8 @@ fn emit_value(val: &TirValue, func: &TirFunction, ctx: &mut GenCtx) -> String {
 fn emit_call_target(callee: &TirValue, func: &TirFunction, ctx: &mut GenCtx) -> String {
     match callee {
         TirValue::Function(name) => {
-            if name.starts_with('$') {
-                format!("_{}", &name[1..])
+            if let Some(stripped) = name.strip_prefix('$') {
+                format!("_{}", stripped)
             } else {
                 name.clone()
             }

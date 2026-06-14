@@ -12,3 +12,8 @@ trust_hir = { path = "../trust_hir" }
 trust_tir = { path = "../trust_tir" }
 trust_codegen = { path = "../trust_codegen" }
 trust_error = { path = "../trust_error" }
+
+[[bench]]
+name = "compile_bench"
+harness = false
+path = "../../benches/compile_bench.rs"

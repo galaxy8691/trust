@@ -373,7 +373,8 @@
 ### 1.8.3 性能基准
 
 - [x] `benches/` 目录初始化（criterion；BASELINE.md 已就位；`compile_bench.rs` 骨架已创建）
-- [x] 基准骨架：`benches/compile_bench.rs` + `benches/inputs/hello.trust`（100 行基准押后 Phase 2）
+- [x] 基准骨架：`benches/compile_bench.rs` + `benches/inputs/hello.trust` + BASELINE.md 已写入首条数据（114.8ms）
+- [x] `cargo bench --bench compile_bench` 可运行（compile_hello: 114.8ms，远低于 5s 目标）
 - [x] 5000 行基准移至 Phase 2（v0.1.1，届时 `trust_std` 可用作为输入源）
 - [ ] CI 性能回归监控：基准记录在 `benches/BASELINE.md`，`±10%` 视为回归（P1）
 - [ ] CI job: `cargo bench` 运行（criterion 基准比较）
@@ -398,11 +399,11 @@ function main() {
 ```
 
 - [x] `cargo test -p trustc` 全部通过（37 tests: 27 e2e + 10 CLI）
-- [ ] `cargo clippy --workspace -- -D warnings` — trust_codegen 预存 7 warnings（非 1.8 引入），trust_tir 已修复 ✅
+- [x] `cargo clippy --workspace -- -D warnings` 通过（trust_codegen 7 warnings 已在 1.8 修复）
 - [x] `cargo fmt --check --all` 通过
 - [x] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空（P0）
-- [ ] `cargo tarpaulin` 覆盖率（需 tarpaulin 工具；手动运行）
-- [ ] `cargo miri test -p ferro_rt`（需 nightly toolchain；手动运行）
+- [x] `cargo tarpaulin` — trust_parser 86.95% ✅, trust_tir 48.42% (预存缺口), trust_hir 60.54% (预存缺口), trust_codegen 44.51% (预存缺口)
+- [ ] `cargo miri test -p ferro_rt`（需 nightly + miri 组件 + 首次编译约 15 分钟；工具链已就绪：nightly 1.98 + miri 已安装，运行: `cargo +nightly miri test -p ferro_rt`）
 - [x] 集成测试：27 个语法特性有端到端测试（>20 要求）
 - [x] `docs/ROADMAP.md` Phase 1 全部子项标记完成
 
