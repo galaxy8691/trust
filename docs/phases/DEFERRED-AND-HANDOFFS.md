@@ -71,6 +71,10 @@
 | H-P3-05 | **Go 风格 receiver 方法** | `ROADMAP §3` | Phase 2 | 同上 | 🔜 |
 | H-P3-06 | **隐式泛型** | `ROADMAP §3` | Phase 2 | 同上 | 🔜 |
 | H-P3-07a | **箭头参数从上下文推断** `(name) => expr` | 设计 §4.1 · `2.3-spec` MS-2.3-4 | H-P3-06 | `let greet = (name) => \`Hi ${name}\`` 无参标注 | 🔜 |
+| H-P3-07b | **`test function` 块体返回标注规则** | `2.3-spec` §0 · 设计 §11 | parser `test function` | `test function f(): void { ... }` — 经同一 `lower_function` 路径继承 2.3 规则 | 🔜 |
+| H-P3-07c | **嵌套函数声明** | `2.3-spec` §0 · `name_res.rs:289-296` | 类型系统扩展 | 当前 `lower_hir_stmt` 拒绝嵌套函数，Phase 3 启用后继承块体标注规则 | 🔜 |
+| H-P3-07d | **`HirType::Error` → `Infer`/`Error` 拆分** | `2.3-spec` Step 3 技术债务 · `typeck.rs:76` | — | 消除"需推断"与"类型失败"双语义重载 | 🔜 |
+| H-P3-07e | **spec SEM-REQ-003 interface 旧示例清理** | `2.3-spec` MS-2.3-7 · `cross-check.md` | — | `trust-spec` 全文中 interface 名义类型等 pre-v2.0 示例残留清理 | 🔜 |
 | H-P3-07 | **`i++` / `+=` 等更新表达式语法** | `2/TODO.md §2.2.4` · `2.2-spec` Step 4 | Phase 2 number=f64 | parser + typeck；循环可用 `i++` | 🔜 |
 | H-P3-08 | **#9 跨函数 `inout` 对称检查**（`inout this` 方法） | 1.7 §8 #9 · `ROADMAP §3` | receiver 方法 (H-P3-05) | borrowck 跨函数场景 | 🔜 |
 | H-P3-09 | **#11 修复建议扩展**（3→≥8 规则） | 1.7 §8 #11 · `ROADMAP §4`（1.7 原定 Phase 3.2，ROADMAP 移至 Phase 4） | Phase 4 错误/`null` 落地后 | 规则数 + e2e 诊断 JSON | 🔜 |
@@ -94,6 +98,7 @@
 
 | ID | 能力 / 工作项 | 来源 | 阻塞 / 依赖 | 验收提示 | 状态 |
 |----|---------------|------|-------------|----------|------|
+| H-P5-00 | **`async function` 块体返回标注规则** | `2.3-spec` §0 · 设计 §8 | parser `async function` | `async function f(): void { ... }` — 经同一 `lower_function` 路径继承 2.3 规则 | 🔜 |
 | H-P5-01 | **`async` / `await` 运行时语义** | `ROADMAP §5` · 冻结矩阵 | Phase 4 | ferro_rt + e2e | 🔜 |
 | H-P5-02 | **`spawn` / `Channel` / `shared` / `join` 等** | `ROADMAP §5` | Phase 4 | stdlib `sync` | 🔜 |
 | H-P5-03 | **并发相关 stdlib 模块冻结** | 冻结矩阵 · `ROADMAP` | H-P5-01 | stdlib cross-check | 🔜 |
@@ -150,8 +155,9 @@
 | `2/2.1/2.1-spec.md` | H-P3-01–06, H-P4-04–07, H-P2-14–15 |
 | `2/2.2/2.2-spec.md` | H-P6-01–04, H-P2-13, H-P3-07, H-P3-10, H-P7-01 |
 | `2/2.2/cross-check.md` | H-P6-05, H-P2-13 |
+| `2/2.3/cross-check.md` | H-P3-07e（interface 清理） |
 | `2/2.1/known-failures.md` | H-P2-07–08, H-P2-14–15 |
-| `2/2.3/2.3-spec.md` | H-P2-04–06, H-P3-07a |
+| `2/2.3/2.3-spec.md` | H-P2-04–06, H-P3-07a–07e, H-P5-00 |
 | `2/TODO.md` | H-P2-01–15, H-P3-07, H-P6-01–02 |
 | `spec/stdlib.md` | H-P4-05–06, H-P6-05 |
 | `docs/ROADMAP.md` | 各 Phase 章节 ↔ 上表同 Phase 段 |
