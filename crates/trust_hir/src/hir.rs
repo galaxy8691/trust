@@ -216,6 +216,8 @@ pub enum HirExpr {
     AsCast(Box<HirExpr>, HirType, Span),
     /// `&` 显式引用
     Reference(Box<HirExpr>, Span),
+    /// `&mut` 可变引用 — §3.5
+    RefMut(Box<HirExpr>, Span),
     // v2.0: AssertUnwrap and TryPropagate removed (replaced by null safety §2.7 / try-catch §5.1)
     /// `if` 表达式 — `let x = if (c) { 1 } else { 0 }` 降级产物（AC-SEM-002）
     If(HirIf, Span),

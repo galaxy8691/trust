@@ -102,8 +102,11 @@ fn check_stmt(
             // v2.0: number 统一，不再 I32↔F64 提升
 
             let was_unannotated = let_s.ty == HirType::Error;
+            // §2.4: ArrowFn 绑定——name_res 设 Function(params, Error)，typeck 推断后需同步
+            let is_closure_binding = matches!(&*let_s.init, HirExpr::ArrowFn(..));
             let mismatched = let_s.ty != HirType::Error
                 && init_ty != HirType::Error
+                && !is_closure_binding
                 && !types_compatible(&let_s.ty, &init_ty);
 
             if mismatched {
@@ -112,8 +115,8 @@ fn check_stmt(
                     let_s.span.clone(),
                 ));
                 let_s.ty = HirType::Error;
-            } else if was_unannotated && init_ty != HirType::Error {
-                // 只有原本无类型标注时才从 init 推断——类型不匹配后不应覆盖 Error 哨兵
+            } else if (was_unannotated || is_closure_binding) && init_ty != HirType::Error {
+                // 只有原本无类型标注时或闭包绑定时才从 init 推断
                 let_s.ty = init_ty;
             }
         }
@@ -364,6 +367,10 @@ fn check_expr(
         }
 
         HirExpr::Reference(inner, _span) => {
+            check_expr(inner, scope, diagnostics, fn_return_type);
+        }
+
+        HirExpr::RefMut(inner, _span) => {
             check_expr(inner, scope, diagnostics, fn_return_type);
         }
 
@@ -627,6 +634,7 @@ fn expr_type(expr: &HirExpr) -> HirType {
             HirType::Function(param_types, Box::new(ret.clone()))
         }
         HirExpr::Reference(inner, _) => HirType::Ref(Box::new(expr_type(inner))),
+        HirExpr::RefMut(inner, _) => HirType::Ref(Box::new(expr_type(inner))),
         HirExpr::TemplateLiteral(..) => HirType::String,
         HirExpr::Error(..) => HirType::Error,
     }
@@ -690,6 +698,14 @@ fn infer_return_type(body: &HirBlock) -> HirType {
 fn types_compatible(expected: &HirType, actual: &HirType) -> bool {
     if *expected == HirType::Error || *actual == HirType::Error {
         return true; // 哨兵——跳过比较
+    }
+    // §2.4: Function 类型递归兼容——允许 Error 子组件（推断未完成）通过
+    if let (HirType::Function(ep, er), HirType::Function(ap, ar)) = (expected, actual) {
+        if ep.len() != ap.len() {
+            return false;
+        }
+        return ep.iter().zip(ap.iter()).all(|(e, a)| types_compatible(e, a))
+            && types_compatible(er, ar);
     }
     expected == actual
 }

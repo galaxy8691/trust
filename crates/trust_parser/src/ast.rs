@@ -255,6 +255,8 @@ pub enum Expr {
     ArrowFn(ArrowFn),
     /// `&expr`
     Reference(Box<Expr>),
+    /// `&mut expr` — 可变引用
+    RefMut(Box<Expr>),
     // v2.0: AssertUnwrap(expr!) and TryPropagate(expr?) removed
     // (replaced by null safety §2.7 and try-catch §5.1 respectively)
     /// `expr as Type`

@@ -433,6 +433,11 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
             HirExpr::Reference(Box::new(i), Span::dummy())
         }
 
+        ast::Expr::RefMut(inner) => {
+            let i = lower_expr(inner, diagnostics);
+            HirExpr::RefMut(Box::new(i), Span::dummy())
+        }
+
         ast::Expr::AsCast { expr, ty } => {
             let e = lower_expr(expr, diagnostics);
             let t = HirType::from_ast_type(ty);
@@ -779,7 +784,13 @@ fn resolve_block_names(
             HirStmt::Let(let_s) => {
                 resolve_expr_names(&mut let_s.init, &block_scope, diagnostics);
                 if let_s.ty == HirType::Error {
-                    let_s.ty = infer_type_from_expr(&let_s.init);
+                    // §2.4: ArrowFn → Function 类型，使闭包绑定可被 Call 识别
+                    if let HirExpr::ArrowFn(ref params, ref ret, ..) = *let_s.init {
+                        let param_tys: Vec<HirType> = params.iter().map(|p| p.ty.clone()).collect();
+                        let_s.ty = HirType::Function(param_tys, Box::new(ret.clone()));
+                    } else {
+                        let_s.ty = infer_type_from_expr(&let_s.init);
+                    }
                 }
                 block_scope.insert(
                     &let_s.name,
@@ -929,7 +940,7 @@ fn resolve_expr_names(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<D
         HirExpr::AsCast(inner, ..) => {
             resolve_expr_names(inner, scope, diagnostics);
         }
-        HirExpr::Reference(inner, ..) => {
+        HirExpr::Reference(inner, ..) | HirExpr::RefMut(inner, ..) => {
             resolve_expr_names(inner, scope, diagnostics);
         }
         HirExpr::TemplateLiteral(parts, ..) => {
@@ -966,6 +977,9 @@ fn infer_type_from_expr(expr: &HirExpr) -> HirType {
         },
         HirExpr::Binary(.., ty, _) => ty.clone(),
         HirExpr::AsCast(_, ty, _) => ty.clone(),
+        // §2.4: ArrowFn 返回 Error 哨兵——name_res 不做类型推断；
+        // typeck 在 HirStmt::Let 中由 was_unannotated 路径推断为 Function 类型
+        HirExpr::ArrowFn(..) => HirType::Error,
         _ => HirType::Error,
     }
 }

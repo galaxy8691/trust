@@ -702,10 +702,21 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
         }
         HirExpr::Reference(inner, span) => {
             let i = lower_expr_to_value(inner, ctx, diags);
-            // Find the source TmpVar from inner
             if let TirValue::Var(src) = i {
                 let tmp = ctx.next_tmp();
                 ctx.emit(TirOp::Borrow(tmp, src, BorrowKind::Shared, span.clone()));
+                TirValue::Var(tmp)
+            } else {
+                let tmp = ctx.next_tmp();
+                ctx.emit(TirOp::Let(tmp, i, span.clone()));
+                TirValue::Var(tmp)
+            }
+        }
+        HirExpr::RefMut(inner, span) => {
+            let i = lower_expr_to_value(inner, ctx, diags);
+            if let TirValue::Var(src) = i {
+                let tmp = ctx.next_tmp();
+                ctx.emit(TirOp::Borrow(tmp, src, BorrowKind::Mutable, span.clone()));
                 TirValue::Var(tmp)
             } else {
                 let tmp = ctx.next_tmp();
@@ -920,6 +931,9 @@ fn collect_free_vars_expr(
             }
         }
         // v2.0: Loop removed
+        HirExpr::Reference(inner, _) | HirExpr::RefMut(inner, _) => {
+            collect_free_vars_expr(inner, params, var_map, captured, kind);
+        }
         HirExpr::Block(b, _) => collect_free_vars(b, params, var_map, captured, kind),
         _ => {}
     }

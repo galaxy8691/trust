@@ -116,6 +116,10 @@ fn snap_continue() {
 fn snap_ref() {
     assert_ast_snapshot("let r=&data", &["LetStmt", "Reference"]);
 }
+#[test]
+fn snap_ref_mut() {
+    assert_ast_snapshot("let r=&mut data", &["LetStmt", "RefMut"]);
+}
 // v2.0: snap_bang/snap_try removed (AssertUnwrap/TryPropagate removed)
 #[test]
 fn snap_nullish() {

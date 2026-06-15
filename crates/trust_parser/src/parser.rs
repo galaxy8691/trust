@@ -719,7 +719,12 @@ impl Parser {
             }
             TokenKind::Amp => {
                 self.advance();
-                self.parse_unary().map(|e| Expr::Reference(Box::new(e)))
+                if matches!(self.cur, TokenKind::Mut) {
+                    self.advance();
+                    self.parse_unary().map(|e| Expr::RefMut(Box::new(e)))
+                } else {
+                    self.parse_unary().map(|e| Expr::Reference(Box::new(e)))
+                }
             }
             _ => self.parse_postfix(),
         }

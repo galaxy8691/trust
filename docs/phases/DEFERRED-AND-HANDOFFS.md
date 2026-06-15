@@ -44,8 +44,8 @@
 
 | ID | 能力 / 工作项 | 来源 | 阻塞 / 依赖 | 验收提示 | 状态 |
 |----|---------------|------|-------------|----------|------|
-| H-P2-01 | **#7 可变引用 `&mut x`** 端到端（parser `RefMut` + TIR borrowck） | 1.7 §8 #7 · `2/TODO.md §2.4.1` · `ROADMAP §2.4` | 2.1 完成 | e2e：`&mut` 合法场景通过、冲突报错 | 🔜 |
-| H-P2-02 | **#8 闭包调用 `r()`** 端到端（name_res + `TirFunction.captures`） | 1.7 §8 #8 · `2/TODO.md §2.4.2` · `ROADMAP §2.4` | 2.1 完成 | `let f = (x)=>x+1; f(5)` e2e | 🔜 |
+| H-P2-01 | **#7 可变引用 `&mut x`** 端到端（parser `RefMut` + TIR `BorrowKind::Mutable` 发射；borrowck 规则已有） | 1.7 §8 #7 · `2/TODO.md §2.4.1` · `2.4-spec` | 2.3 完成 | e2e：`&mut` 合法通过、冲突报错 | 🔜 |
+| H-P2-02 | **#8 闭包调用 `r()`** 端到端（`infer_type_from_expr` → `Function` 绑定 + e2e） | 1.7 §8 #8 · `2/TODO.md §2.4.2` · `2.4-spec` | 2.3 完成 | `let f=(x:number)=>x+1; f(5)` e2e | 🔜 |
 | H-P2-03 | **#10 JSON→serde 迁移评估** + `serde-evaluation.md` | 1.7 §8 #10 · `2/TODO.md §2.4.3` | 无 | 1 页决策文档 | 🔜 |
 | H-P2-04 | **块体函数强制返回标注**（无 `:ReturnType` → 编译错误） | `2/TODO.md §2.3.1` · `2.1-spec` 前瞻 | 2.1 | typeck 测试 | ✅ |
 | H-P2-05 | **表达式体函数** `function f(...) = expr` | `2/TODO.md §2.3.2` | 2.1 | parser + typeck 测试 | ✅ |

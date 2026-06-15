@@ -292,7 +292,7 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 - [ ] **parser：**
   - Phase 1 已支持 `let mut`，补齐 `&mut x` 表达式解析
   - `&mut x` → AST 节点 `Expr::RefMut(Box<Expr>)`
-  - `&x` → 已有 `Expr::Ref`，确认与设计 §3.5 一致
+  - `&x` → 已有 `Expr::Reference`（非 `Ref`），确认与设计 §3.5 一致
 - [ ] **TIR borrowck：**
   - `&mut x` → 可变借用路径：检查 `x` 是否已存在活跃可变借用或只读借用
   - 错误信息：已有活跃借用时输出 borrowck 错误（含修复建议——如缩小作用域或 clone）
@@ -304,13 +304,13 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 **涉及 crate：** `trust_hir`（name_res）、`trust_tir`
 
 - [ ] **HIR name_res：**
-  - 箭头函数绑定 → 保留为 `ArrowFn`（Phase 1 可能仅支持声明不支持调用）
-  - `let f = (x) => x + 1; f(5)` → name_res 将 `f` 解析为闭包类型，调用处生成 `Call(Ident("f"), args)`
+  - `infer_type_from_expr` 将 `HirExpr::ArrowFn` 映射为 `HirType::Function`（根因：`let f = …` 当前绑定为 `Error`）
+  - `let f = (x: number) => x + 1; f(5)` → name_res 将 `f` 解析为可调用 `Function` 类型
 - [ ] **TIR：**
-  - 利用现有 `TirFunction` 结构，新增 `captures: Vec<Capture>` 字段表示闭包捕获（与现有 `TirFunction`/`TirOp`/`TirValue` 架构对齐）
+  - 利用现有 `TirFunction.captured_vars: Vec<CapturedVar>`（非新增 `captures` 字段）
   - 捕获分析（与 §3.4 一致）：默认只读借用 + `move` 闭包
   - 闭包调用 → 编译为闭包体的内联/函数调用
-- [ ] **为 Phase 3 打好基础：** 闭包类型推断机制与隐式泛型共享——确保 `TirFunction.captures` 设计可扩展至泛型闭包
+- [ ] **为 Phase 3 打好基础：** 闭包类型推断与隐式泛型共享——确保 `captured_vars` 设计可扩展至泛型闭包
 - [ ] 验证：添加端到端测试——闭包定义+调用通过编译并正确执行
 
 ### 2.4.3 #10 JSON→serde 迁移评估

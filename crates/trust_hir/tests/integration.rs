@@ -685,3 +685,28 @@ fn arrow_multi_return_infer() {
     assert!(!has_param_err);
     assert!(type_diags.is_empty(), "Type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
 }
+
+// ============================================================================
+// Phase 2.4 — 闭包调用
+// ============================================================================
+
+#[test]
+fn closure_call_resolves() {
+    let src = "function main(): void { let f = (x: number) => x + 1; let r = f(5); }";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "Name diags: {:?}", name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    // §2.4: 闭包调用 typeck 通过——参数匹配已验证，返回类型推断归后续 Phase
+    assert!(type_diags.iter().all(|d| !d.message.contains("type mismatch") && !d.message.contains("cannot call")),
+        "Type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+#[test]
+fn closure_call_type_mismatch() {
+    let src = "function main(): void { let f = (x: number) => x + 1; let r = f(\"hello\"); }";
+    let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
+    let has_mismatch = type_diags.iter().any(|d|
+        d.message.contains("type mismatch") || d.message.contains("argument")
+    );
+    assert!(has_mismatch, "Expected type mismatch for f(\"hello\"). Type diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
