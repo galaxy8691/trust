@@ -172,34 +172,34 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 **优先级：** P0  
 **依赖：** 2.1（关键字移除完成后，避免旧类型残留干扰）
 
-### 2.2.1 类型统一（HIR typeck）
+### 2.2.1 类型统一（HIR typeck）✅
 
 **涉及 crate：** `trust_hir`
 
-- [ ] 删除 i32 / f64 类型区分——`Type::Number` 统一为单一 f64 类型
-- [ ] 删除 `i32 + f64 → error` 类型不匹配规则
-- [ ] `number` 之间运算（`+`/`-`/`*`/`/`/`%`/`**`）自由通过，不报类型错误
-- [ ] 字面量类型推断：`404` → `number`(f64)（当前推断为 i32，需修正）
-- [ ] 验证：`cargo test -p trust_hir` 中与 number 类型相关的测试用例更新通过
+- [x] 删除 i32 / f64 类型区分——`Type::Number` 统一为单一 f64 类型
+- [x] 删除 `i32 + f64 → error` 类型不匹配规则
+- [x] `number` 之间运算（`+`/`-`/`*`/`/`/`%`/`**`）自由通过，不报类型错误
+- [x] 字面量类型推断：`404` → `number`(f64)（当前推断为 i32，需修正）
+- [x] 验证：`cargo test -p trust_hir` 中与 number 类型相关的测试用例更新通过
 
-### 2.2.2 codegen 映射
+### 2.2.2 codegen 映射 ✅
 
 **涉及 crate：** `trust_codegen`
 
-- [ ] `Type::Number` → Rust `f64`（替换现有 i32 映射）
-- [ ] 字面量生成 f64 后缀：整数字面量 `404` → `404.0_f64`，浮点字面量 `3.14` → `3.14_f64`
-- [ ] 二元运算生成：`a + b` 保持 `a + b`（f64 原生运算，无需转换）
-- [ ] 更新所有 codegen 快照（`.snap` 文件中的 `i32` → `f64`）
-- [ ] 验证：`cargo test -p trust_codegen` 快照测试更新通过
+- [x] `Type::Number` → Rust `f64`（替换现有 i32 映射）
+- [x] 字面量生成 f64 后缀：整数字面量 `404` → `404.0_f64`，浮点字面量 `3.14` → `3.14_f64`
+- [x] 二元运算生成：`a + b` 保持 `a + b`（f64 原生运算，无需转换）
+- [x] 更新所有 codegen 快照（`.snap` 文件中的 `i32` → `f64`）
+- [x] 验证：`cargo test -p trust_codegen` 快照测试更新通过
 
-### 2.2.3 `as` 收敛
+### 2.2.3 `as` 收敛 ✅
 
 **涉及 crate：** `trust_parser`、`trust_hir`
 
-- [ ] `number` 之间移除 `as` 转换需求（设计 §2.2："`number` 之间可以自由运算，不需要 `as` 转换"）
-- [ ] 移除 parser 中 `as number` / `as f64` / `as i32` 的数字转换解析路径
-- [ ] `as` 仅保留用于非 `number` 的必要转换（如 `unknown`→具体类型）
-- [ ] 验证：`cargo test -p trust_parser` 中 as 相关测试用例更新通过
+- [x] `number` 之间移除 `as` 转换需求（设计 §2.2："`number` 之间可以自由运算，不需要 `as` 转换"）
+- [x] 移除 parser 中 `as number` / `as f64` / `as i32` 的数字转换解析路径
+- [x] `as` 仅保留用于非 `number` 的必要转换（如 `unknown`→具体类型）
+- [x] 验证：`cargo test -p trust_parser` 中 as 相关测试用例更新通过
 
 ### 2.2.4 整数语义
 
