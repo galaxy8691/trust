@@ -13,17 +13,18 @@
 
 - ✅ 模块依赖图无 std::result
 - ✅ 无用户面 Option/Result 构造器
-- 🔜 索引/容量等 number API 签名在 Phase 6 集合类型落地时同步
+- ✅ number=f64 已同步（Phase 2.2 冻结声明已加入 header）
+- 🔜 索引/容量等 number API 具体实现在 Phase 6 集合类型落地
 
 ## Trust-设计文档.md
 
-- 🔜 §2.2 "help 级别警告"还需同步为 "Warning + Help 子诊断"（低优先级，措辞层面）
+- ✅ §2.2 "help 级别警告"→"Warning+Help 子诊断"已同步
 - ✅ number=f64、整数语义、位运算、as 收敛均与实现一致
 
 ## design-constraints.md
 
-- ✅ 无冲突（2.2 变更约束编译器代码，不改变约束本身）
+- ✅ 无冲突
 - ✅ P0:magic: 2^53 检查使用命名常量 MAX_SAFE_INTEGER
 - ✅ P0:unsafe: 无新增 unsafe
 
-**结论：** 2.2 通过四文档交叉核对。设计文档 §2.2 措辞微调归入后续 PR。
+**结论：** 2.2 四文档交叉核对通过。Phase 6 集合类型落地后复查 stdlib number API 签名。

@@ -5,6 +5,7 @@
 >
 > ⚠️ v2.0 重大变更：`Option`/`Result` 不暴露给用户（由 null 安全 §2.7 和 throw/try-catch §5.1 替代）。
 > `Box`/`Rc`/`Arc`/`Weak` 用户不可见（编译器自动管理 §3.7）。`!`/`?` 后缀运算符已移除。
+> `number`=f64（Phase 2.2 已冻结）。`number` 之间自由运算，位运算仅允许 `number`。
 > 本文件已据此对齐；仍含 `Result<T,E>` 的 API 标注了「过渡→throws Phase 4」。
 
 ---
