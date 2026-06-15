@@ -90,6 +90,8 @@ pub struct FunctionDecl {
     pub return_type: Option<Type>,
     pub body: Block,
     pub span: Span,
+    /// 是否为表达式体函数（`= expr`）而非块体（`{ ... }`）
+    pub is_expression_body: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -316,6 +318,8 @@ pub struct MemberAccess {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrowFn {
     pub params: Vec<Param>,
+    /// `=>` 前的可选返回类型标注：`(x): T => ...`
+    pub return_type: Option<Type>,
     pub body: ArrowBody,
     pub is_move: bool,
     pub span: Span,

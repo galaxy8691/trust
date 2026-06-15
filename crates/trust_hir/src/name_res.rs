@@ -24,30 +24,37 @@ pub fn lower(program: &ast::Program, diagnostics: &mut Vec<DiagError>) -> HirPro
         }
     }
 
+    let exports = lower_exports(&program.exports, &mut items, diagnostics);
+
     HirProgram {
         file: program.span.file.clone(),
         imports: Vec::new(), // 名称解析阶段填充
-        exports: lower_exports(&program.exports, diagnostics),
+        exports,
         items,
         scope: Scope::new(),
     }
 }
 
-fn lower_exports(exports: &[ast::ExportDecl], diagnostics: &mut Vec<DiagError>) -> Vec<HirExport> {
+fn lower_exports(
+    exports: &[ast::ExportDecl],
+    items: &mut Vec<HirItem>,
+    diagnostics: &mut Vec<DiagError>,
+) -> Vec<HirExport> {
     let mut result = Vec::new();
     for exp in exports {
         let (name, binding) = match exp.item.as_ref() {
             ast::Stmt::Function(f) => {
-                let param_types: Vec<HirType> = f
-                    .params
-                    .iter()
-                    .map(|p| p.ty.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Error))
-                    .collect();
-                let return_type =
-                    f.return_type.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Void);
+                // §2.3: 经 lower_function 统一降级（含块体返回标注检查 + is_expression_body）
+                let hf = lower_function(f, diagnostics);
+                let param_types: Vec<HirType> = hf.params.iter().map(|p| p.ty.clone()).collect();
+                let return_type = hf.return_type.clone();
+                let span = hf.span.clone();
+                let name = f.name.clone();
+                // 纳入 items，使 typeck 对 export 函数 body 做与顶层 function 相同的检查
+                items.push(HirItem::Function(hf));
                 (
-                    f.name.clone(),
-                    HirBinding::Function { param_types, return_type, span: f.span.clone() },
+                    name,
+                    HirBinding::Function { param_types, return_type, span },
                 )
             }
             ast::Stmt::Let(l) => {
@@ -136,7 +143,21 @@ fn lower_function(f: &ast::FunctionDecl, diagnostics: &mut Vec<DiagError>) -> Hi
         })
         .collect();
 
-    let return_type = f.return_type.as_ref().map(HirType::from_ast_type).unwrap_or(HirType::Void);
+    // §2.3: 块体函数强制返回标注；表达式体可推断
+    let return_type = if let Some(ast_ty) = &f.return_type {
+        // 用户显式标注 → 直接映射
+        HirType::from_ast_type(ast_ty)
+    } else if !f.is_expression_body {
+        // 块体函数缺失返回标注 → 编译错误
+        diagnostics.push(DiagError::new(
+            "块体函数必须显式标注返回类型。无返回值时使用 `:void`".into(),
+            f.span.clone(),
+        ));
+        HirType::Void // 回退类型，允许 typeck 继续检查 body
+    } else {
+        // 表达式体函数无标注 → 需推断（typeck 阶段填充）
+        HirType::Error
+    };
 
     let body = lower_block(&f.body, diagnostics);
 
@@ -147,6 +168,7 @@ fn lower_function(f: &ast::FunctionDecl, diagnostics: &mut Vec<DiagError>) -> Hi
         body,
         scope: Scope::new(),
         span: f.span.clone(),
+        is_expression_body: f.is_expression_body,
     }
 }
 
@@ -390,15 +412,18 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
                 }
                 ast::ArrowBody::Block(b) => lower_block(b, diagnostics),
             };
-            let ret_ty = if has_no_type {
+            // §2.3: 箭头函数返回类型——显式标注优先，否则由 typeck 推断
+            let ret_ty = if let Some(ref ast_ty) = a.return_type {
+                HirType::from_ast_type(ast_ty)
+            } else if has_no_type {
                 diagnostics.push(DiagError::new(
-                    "arrow function parameters must have explicit type annotations in Phase 1"
+                    "arrow function parameters must have explicit type annotations in Phase 2"
                         .into(),
                     a.span.clone(),
                 ));
                 HirType::Error
             } else {
-                HirType::Error // 闭包返回类型由 body 推断，Phase 1 暂不推断
+                HirType::Error // typeck 阶段推断返回类型
             };
             HirExpr::ArrowFn(params, ret_ty, body, a.is_move, a.span.clone())
         }
@@ -691,19 +716,25 @@ fn lower_imports(
 fn register_module_bindings(
     hir: &HirProgram,
     scope: &mut Scope,
-    _diagnostics: &mut Vec<DiagError>,
+    diagnostics: &mut Vec<DiagError>,
 ) {
     // Phase 1: import 绑定仅在单文件项目中有用；跨文件解析需要模块图。
     // 此处将 HirProgram 的 exports 注册到作用域，使 import 符号可解析。
     for exp in &hir.exports {
-        if let Some(b) = scope.lookup(&exp.name) {
-            // 已有绑定 — 符号冲突：本地声明与 import/export 同名
-            if !matches!(b, HirBinding::Unresolved { .. }) {
-                _diagnostics.push(DiagError::new(
-                    format!("symbol conflict: `{}` already declared in this scope", exp.name),
-                    exp.span.clone(),
-                ));
+        if scope.lookup(&exp.name).is_some() {
+            // §2.3: export-only function 已作为 HirItem::Function 写入 items 并注册进 scope
+            if hir
+                .items
+                .iter()
+                .any(|i| matches!(i, HirItem::Function(f) if f.name == exp.name))
+            {
+                continue;
             }
+            // 已有绑定 — 符号冲突：本地声明与 import/export 同名
+            diagnostics.push(DiagError::new(
+                format!("symbol conflict: `{}` already declared in this scope", exp.name),
+                exp.span.clone(),
+            ));
         } else {
             scope.insert(&exp.name, exp.binding.clone());
         }
@@ -1023,6 +1054,25 @@ mod tests {
         } else {
             panic!("expected function item, got {:?}", hir.items);
         }
+    }
+
+    // §2.3: export 块体无返回标注 → 与顶层 function 相同错误
+    #[test]
+    fn export_block_body_missing_return_type() {
+        let src = "export function f() { return 42; }";
+        let mut p = trust_parser::parser::Parser::new(src, "test.trust");
+        let prog = p.parse_program();
+        let mut diags = vec![];
+        let hir = lower(&prog, &mut diags);
+        assert!(
+            diags.iter().any(|d| d.message.contains("必须显式标注返回类型")),
+            "export missing return type: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        assert!(
+            hir.items.iter().any(|i| matches!(i, HirItem::Function(f) if f.name == "f")),
+            "export function should be in items for typeck"
+        );
     }
 
     // AC-SEM-003: import { add } → 名称解析到目标文件

@@ -47,10 +47,10 @@
 | H-P2-01 | **#7 可变引用 `&mut x`** 端到端（parser `RefMut` + TIR borrowck） | 1.7 §8 #7 · `2/TODO.md §2.4.1` · `ROADMAP §2.4` | 2.1 完成 | e2e：`&mut` 合法场景通过、冲突报错 | 🔜 |
 | H-P2-02 | **#8 闭包调用 `r()`** 端到端（name_res + `TirFunction.captures`） | 1.7 §8 #8 · `2/TODO.md §2.4.2` · `ROADMAP §2.4` | 2.1 完成 | `let f = (x)=>x+1; f(5)` e2e | 🔜 |
 | H-P2-03 | **#10 JSON→serde 迁移评估** + `serde-evaluation.md` | 1.7 §8 #10 · `2/TODO.md §2.4.3` | 无 | 1 页决策文档 | 🔜 |
-| H-P2-04 | **块体函数强制返回标注**（无 `:ReturnType` → 编译错误） | `2/TODO.md §2.3.1` · `2.1-spec` 前瞻 | 2.1 | typeck 测试 | 🔜 |
-| H-P2-05 | **表达式体函数** `function f(...) = expr` | `2/TODO.md §2.3.2` | 2.1 | parser + typeck 测试 | 🔜 |
-| H-P2-06 | **箭头函数返回类型推断** | `2/TODO.md §2.3.3` | 2.1 | typeck 测试 | 🔜 |
-| H-P2-07 | **2.5 测试迁移**：56 集成测试 v2.0 语义全绿 | `2/TODO.md §2.5` · `known-failures.md` | 2.1–2.4 | `cargo test --workspace` 零失败 | 🔜 |
+| H-P2-04 | **块体函数强制返回标注**（无 `:ReturnType` → 编译错误） | `2/TODO.md §2.3.1` · `2.1-spec` 前瞻 | 2.1 | typeck 测试 | ✅ |
+| H-P2-05 | **表达式体函数** `function f(...) = expr` | `2/TODO.md §2.3.2` | 2.1 | parser + typeck 测试 | ✅ |
+| H-P2-06 | **箭头函数返回类型推断** | `2/TODO.md §2.3.3` | 2.1 | typeck 测试 | ✅ |
+| H-P2-07 | **2.5 测试迁移**：56 集成测试 v2.0 语义全绿 | `2/TODO.md §2.5` · `known-failures.md` | 2.1–2.4 | `cargo test --workspace` 零失败；含 2.3 表达式体边界 trustc e2e（§2.5.3） | 🔜 |
 | H-P2-08 | **禁用测试恢复/改写**（loop/bigint/bang/try 等） | `2.1/known-failures.md` | 2.5 | 见 known-failures 表逐项 | 🔜 |
 | H-P2-09 | **Trust.toml** 解析与 `Cargo.toml` 桥接 | `2/TODO.md §2.6.1` · `ROADMAP` Phase 1 下沉 | 2.1 | `trustc compile --project` | 🔜 |
 | H-P2-10 | **CI 性能回归** + `benches/BASELINE.md` | `2/TODO.md §2.6.2` | 2.1 | criterion ±10% | 🔜 |
@@ -70,6 +70,7 @@
 | H-P3-04 | **纯结构类型** | `ROADMAP §3` | Phase 2 | 同上 | 🔜 |
 | H-P3-05 | **Go 风格 receiver 方法** | `ROADMAP §3` | Phase 2 | 同上 | 🔜 |
 | H-P3-06 | **隐式泛型** | `ROADMAP §3` | Phase 2 | 同上 | 🔜 |
+| H-P3-07a | **箭头参数从上下文推断** `(name) => expr` | 设计 §4.1 · `2.3-spec` MS-2.3-4 | H-P3-06 | `let greet = (name) => \`Hi ${name}\`` 无参标注 | 🔜 |
 | H-P3-07 | **`i++` / `+=` 等更新表达式语法** | `2/TODO.md §2.2.4` · `2.2-spec` Step 4 | Phase 2 number=f64 | parser + typeck；循环可用 `i++` | 🔜 |
 | H-P3-08 | **#9 跨函数 `inout` 对称检查**（`inout this` 方法） | 1.7 §8 #9 · `ROADMAP §3` | receiver 方法 (H-P3-05) | borrowck 跨函数场景 | 🔜 |
 | H-P3-09 | **#11 修复建议扩展**（3→≥8 规则） | 1.7 §8 #11 · `ROADMAP §4`（1.7 原定 Phase 3.2，ROADMAP 移至 Phase 4） | Phase 4 错误/`null` 落地后 | 规则数 + e2e 诊断 JSON | 🔜 |
@@ -150,6 +151,7 @@
 | `2/2.2/2.2-spec.md` | H-P6-01–04, H-P2-13, H-P3-07, H-P3-10, H-P7-01 |
 | `2/2.2/cross-check.md` | H-P6-05, H-P2-13 |
 | `2/2.1/known-failures.md` | H-P2-07–08, H-P2-14–15 |
+| `2/2.3/2.3-spec.md` | H-P2-04–06, H-P3-07a |
 | `2/TODO.md` | H-P2-01–15, H-P3-07, H-P6-01–02 |
 | `spec/stdlib.md` | H-P4-05–06, H-P6-05 |
 | `docs/ROADMAP.md` | 各 Phase 章节 ↔ 上表同 Phase 段 |

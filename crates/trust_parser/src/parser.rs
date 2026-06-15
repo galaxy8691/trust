@@ -215,19 +215,19 @@ impl Parser {
         } else {
             None
         };
-        let body = if matches!(self.cur, TokenKind::Eq) {
+        let (body, is_expression_body) = if matches!(self.cur, TokenKind::Eq) {
             self.advance();
             let e = self.parse_expr()?;
             self.expect_semi();
-            Block {
+            (Block {
                 statements: vec![Stmt::Return(ReturnStmt {
                     value: Some(Box::new(e)),
                     span: self.span(),
                 })],
                 span: self.span(),
-            }
+            }, true)
         } else {
-            self.parse_block()?
+            (self.parse_block()?, false)
         };
         Some(Stmt::Function(FunctionDecl {
             name,
@@ -235,6 +235,7 @@ impl Parser {
             return_type: ret,
             body,
             span: self.span(),
+            is_expression_body,
         }))
     }
 
@@ -775,6 +776,76 @@ impl Parser {
         Some(e)
     }
 
+    /// 尝试解析箭头函数参数列表 `(params): ReturnType? =>`
+    /// 成功时返回 ArrowFn（已消费 `=>` 及其后的 body）；失败时回退到调用前位置。
+    /// `already_past_lparen`：true 表示调用方已消费 `(`。
+    fn try_parse_arrow_params(&mut self, _already_past_lparen: bool) -> Option<ArrowFn> {
+        // 保存 lexer 状态用于回溯
+        let snap = self.lexer.snapshot();
+        let saved_cur = self.cur.clone();
+
+        let mut params = vec![];
+        if !matches!(self.cur, TokenKind::RParen) {
+            loop {
+                // 尝试解析一个 param：`name (: type)?`
+                let name = if let TokenKind::Ident(s) = &self.cur {
+                    let n = s.clone();
+                    self.advance();
+                    n
+                } else {
+                    // 不是合法 param → 回退
+                    self.lexer.restore(&snap);
+                    self.cur = saved_cur;
+                    return None;
+                };
+                let ty = if matches!(self.cur, TokenKind::Colon) {
+                    self.advance();
+                    self.parse_type()
+                } else {
+                    None
+                };
+                params.push(Param {
+                    name,
+                    mode: ParamMode::Default,
+                    ty,
+                    optional: false,
+                    span: self.span(),
+                });
+                if matches!(self.cur, TokenKind::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        if !matches!(self.cur, TokenKind::RParen) {
+            self.lexer.restore(&snap);
+            self.cur = saved_cur;
+            return None;
+        }
+        self.advance(); // consume )
+        // 可选的返回类型标注 `: Type`
+        let return_type = if matches!(self.cur, TokenKind::Colon) {
+            self.advance();
+            self.parse_type()
+        } else {
+            None
+        };
+        // 必须跟 `=>`
+        if !matches!(self.cur, TokenKind::Arrow) {
+            self.lexer.restore(&snap);
+            self.cur = saved_cur;
+            return None;
+        }
+        self.advance();
+        let body = if matches!(self.cur, TokenKind::LBrace) {
+            ArrowBody::Block(self.parse_block()?)
+        } else {
+            ArrowBody::Expr(Box::new(self.parse_expr()?))
+        };
+        Some(ArrowFn { params, return_type, body, is_move: false, span: self.span() })
+    }
+
     fn parse_primary(&mut self) -> Option<Expr> {
         match &self.cur {
             TokenKind::IntLiteral(n) => {
@@ -811,13 +882,18 @@ impl Parser {
             }
             TokenKind::LParen => {
                 self.advance();
+                // 尝试解析为箭头函数参数列表 `(params): T? =>`
+                if let Some(arrow) = self.try_parse_arrow_params(false) {
+                    return Some(Expr::ArrowFn(arrow));
+                }
+                // 回退：括号表达式 `(expr)`
                 let e = self.parse_expr()?;
                 if !matches!(self.cur, TokenKind::RParen) {
                     self.error("expected )");
                 }
                 self.advance();
+                // 单标识符括号后跟 `=>` → 无类型标注的箭头函数
                 if matches!(self.cur, TokenKind::Arrow) {
-                    // (x) => expr
                     self.advance();
                     let body = if matches!(self.cur, TokenKind::LBrace) {
                         ArrowBody::Block(self.parse_block()?)
@@ -839,6 +915,7 @@ impl Parser {
                     };
                     return Some(Expr::ArrowFn(ArrowFn {
                         params,
+                        return_type: None,
                         body,
                         is_move: false,
                         span: self.span(),
@@ -862,6 +939,11 @@ impl Parser {
                     return None;
                 }
                 self.advance();
+                if let Some(mut arrow) = self.try_parse_arrow_params(true) {
+                    arrow.is_move = true;
+                    return Some(Expr::ArrowFn(arrow));
+                }
+                // 回退：手动解析 move 闭包参数
                 let mut params = vec![];
                 if !matches!(self.cur, TokenKind::RParen) {
                     loop {
@@ -890,6 +972,12 @@ impl Parser {
                     self.error("expected )");
                 }
                 self.advance();
+                let return_type = if matches!(self.cur, TokenKind::Colon) {
+                    self.advance();
+                    self.parse_type()
+                } else {
+                    None
+                };
                 if !matches!(self.cur, TokenKind::Arrow) {
                     self.error("expected =>");
                     return None;
@@ -900,7 +988,7 @@ impl Parser {
                 } else {
                     ArrowBody::Expr(Box::new(self.parse_expr()?))
                 };
-                Some(Expr::ArrowFn(ArrowFn { params, body, is_move: true, span: self.span() }))
+                Some(Expr::ArrowFn(ArrowFn { params, return_type, body, is_move: true, span: self.span() }))
             }
             TokenKind::TemplateHead(s) => {
                 let h = s.clone();
@@ -1027,7 +1115,7 @@ mod tests {
     }
     #[test]
     fn syn008_inout() {
-        match s1("function push(inout arr:number[]){}") {
+        match s1("function push(inout arr:number[]):void{}") {
             Stmt::Function(f) => assert_eq!(f.params[0].mode, ParamMode::InOut),
             _ => panic!(),
         }

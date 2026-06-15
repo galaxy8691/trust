@@ -1019,6 +1019,7 @@ mod tests {
             body: HirBlock { statements: vec![], span: Span::dummy() },
             scope: Scope::new(),
             span: Span::dummy(),
+            is_expression_body: false,
         };
         let mut diags = vec![];
         let (tf, closures) = lower_function(&f, &mut diags);
@@ -1068,12 +1069,13 @@ mod tests {
             },
             scope: Scope::new(),
             span: Span::dummy(),
+            is_expression_body: false,
         };
         let mut diags = vec![];
         let (tf, closures) = lower_function(&f, &mut diags);
         assert!(diags.is_empty(), "diags: {:?}", diags);
         assert!(closures.is_empty());
-        // 应该有 ≥5 个基本块：entry + cond + then + else + join
+        // 应该有 >=5 个基本块：entry + cond + then + else + join
         assert!(tf.blocks.len() >= 5, "blocks: {}", tf.blocks.len());
     }
 

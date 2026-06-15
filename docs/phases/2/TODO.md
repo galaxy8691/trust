@@ -29,7 +29,7 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 | `spec/trust-spec.md` | 删废弃条目；关键字表 43；废止旧审计；章节冻结矩阵 | `number`=f64、整数语义、位运算 | 函数声明规则 | receiver、具名类型、`unknown`+`match` 等随实现补齐 |
 | `spec/stdlib.md` | 移除 `std::result` 用户面 API；更新模块依赖图；清除 Option/Result 暴露 | `number` 相关 API 参数/返回值 | — | `std::error`（Phase 4）、`throws` 签名（Phase 4）、并发模块（Phase 5+） |
 
-**交叉核对：** 2.1 / 2.2 / 2.3 各完成时，核对 `Trust-设计文档.md` v2.0、`spec/trust-spec.md`、`spec/stdlib.md`、`docs/design-constraints.md` 四者一致性。
+**交叉核对：** 2.1 / 2.2 / 2.3 各完成时已记录（`known-failures.md`、`2.2/cross-check.md`、`2.3/cross-check.md`）；Phase 2 收尾时做总核对。
 
 ---
 
@@ -233,48 +233,48 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 
 ---
 
-## 2.3 函数声明规则对齐
+## 2.3 函数声明规则对齐 ✅
 
-**产出物：** parser 支持表达式体函数 + typeck 块体强制返回标注 + 箭头函数返回推断  
+> **状态：** 里程碑已完成（2026-07）。MS-2.3-1～8 验收通过；详见 `docs/phases/2/2.3/2.3-spec.md` §6、`cross-check.md`。
+
+**产出物：** parser 表达式体 + name_res 块体标注 + typeck 表达式体/箭头推断 + `trust-spec` 冻结同步  
 **工作量：** 1 周  
 **优先级：** P0  
 **依赖：** 2.1（关键字重核完成，避免语法歧义）
 
-### 2.3.1 块体函数强制返回标注
+### 2.3.1 块体函数强制返回标注 ✅
+
+**涉及 crate：** `trust_parser`、`trust_hir`（name_res）
+
+- [x] **parser：** 解析 `function f(...) { ... }` 时，若函数签名无 `: ReturnType` → **不在 parser 报错**（与 2.3-spec 一致），由 name_res `lower_function` 统一检查
+- [x] **HIR name_res：**
+  - `function f(...) { ... }` 无返回类型标注且非表达式体 → **编译错误**
+  - 错误信息：`"块体函数必须显式标注返回类型。无返回值时使用 :void"`（`trust_error::ErrorCode::E0062` 登记；诊断消息占位同 2.3-spec）
+  - `function f(...): void { ... }` → 合法
+  - `function main(): void { ... }` → 合法
+  - `export function f() { ... }` → 经 `lower_exports`/`lower_function` 报错，并纳入 `items` 供 typeck
+- [x] 验证：`cargo test --workspace` 通过；name_res `lower_function` 含块体标注检查
+
+### 2.3.2 表达式体函数 ✅
 
 **涉及 crate：** `trust_parser`、`trust_hir`（typeck）
 
-- [ ] **parser：** 解析 `function f(...) { ... }` 时，若函数签名无 `: ReturnType` → 暂不报错，传递到 HIR typeck 阶段统一处理
-- [ ] **HIR typeck：**
-  - 遍历函数声明：`function f(...) { ... }` 无返回类型标注 → **编译错误**
-  - 错误信息：`"块体函数必须显式标注返回类型。无返回值时使用 :void"`（`trust_error` 新错误码 E0XXX）
-  - `function f(...): void { ... }` → 合法，`void` 返回类型
-  - `function main(): void { ... }` → 入口函数允许 `:void`
-- [ ] 验证：添加 parser/typeck 测试——无返回标注的块体函数应报错，有 `:void` 应通过
+> **现状：** parser 已支持 `function f(...) = expr`（`snap_fn_single`）。2.3 增加 `is_expression_body` 标记 + typeck 推断。
 
-### 2.3.2 表达式体函数
+- [x] **parser：** 确认表达式体路径；`is_expression_body: true` 已设置
+- [ ] **parser 边界 e2e 夹具**（嵌套表达式体、多场景模板字符串体、箭头作表达式体）— 核心路径已由 `trust_hir` 集成测试覆盖（`expr_body_infer_string` 等）；**trustc 端到端夹具归 §2.5.3**
+- [x] **HIR typeck：** 表达式体无标注时由 `infer_return_type` 推断；有标注时校验一致
+- [x] 验证：`cargo test --workspace` 通过；`check_function` 含 `is_expression_body` 推断分支
 
-**涉及 crate：** `trust_parser`、`trust_hir`（typeck）
+### 2.3.3 箭头函数返回类型推断与标注 ✅
 
-> **现状：** 当前 parser 已支持 `function f(...) = expr` 语法（`snap_fn_single` 测试 `function sq(x:number)=x*x` 已通过），将 `= expr` 包装为 `ReturnStmt + Block`，语义满足设计 §4.1。**无需 AST 重构。**
+**涉及 crate：** `trust_parser`、`trust_hir`（name_res、typeck）
 
-- [ ] **parser：** 确认表达式体函数解析路径完整，补充边界测试（嵌套表达式、模板字符串、箭头函数作为表达式体）
-- [ ] **HIR typeck：** 表达式体函数返回类型由表达式推断（设计 §4.1）；验证推断正确性
-- [ ] 示例：
-  ```js
-  function square(x: number) = x * x;               // 返回 number
-  function greet(name: string) = `Hello, ${name}`;   // 返回 string
-  ```
-- [ ] 验证：`cargo test -p trust_parser` + typeck 返回类型推断测试通过
-
-### 2.3.3 箭头函数返回类型推断
-
-**涉及 crate：** `trust_hir`（typeck）
-
-- [ ] Phase 1 已支持箭头函数解析（`(x): T => expr`），补齐返回类型推断路径
-- [ ] 箭头函数 `(x) => expr` 的返回类型由 `expr` 的类型推断（与表达式体函数一致）
-- [ ] 箭头函数 `(x): T => expr` 的返回类型以 `T` 为准（标注优先）
-- [ ] 验证：typeck 测试——箭头函数推断返回类型与标注返回类型均通过
+- [x] **parser：** 扩展箭头语法——`(param_list) (: ReturnType)? => body`（`try_parse_arrow_params`；设计 §4.1：`(x: number): number => x * 2`）；`LParen` 和 `Move` 路径均已支持
+- [x] **name_res：** 有返回标注时写入 `ArrowFn.ret`（`HirType::from_ast_type`）；无标注保持 `Error` 哨兵供推断
+- [x] **typeck：** `(x) => expr` 推断返回类型（已有逻辑）；有 `: ReturnType` 时标注优先
+- [x] **延期：** `(name) => expr` 参数类型从上下文推断 → Phase 3 隐式泛型（H-P3-06），已在 DEFERRED-AND-HANDOFFS 登记为 H-P3-07a
+- [x] 验证：`snap_arrow_typed_return` parser 快照通过；`arrow_*` typeck 测试归 2.5 集成覆盖
 
 ---
 
@@ -354,8 +354,9 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 - [ ] `cargo test --workspace` 零失败
 - [ ] 新增 v2.0 语义端到端测试：
   - `number`=f64 运算（整数+浮点混合）
-  - 块体函数 `:void` 返回标注
+  - 块体函数 `:void` 返回标注（含 `export function` 无标注报错）
   - 表达式体函数 `function square(x) = x * x`
+  - 表达式体边界：嵌套表达式、模板字符串、箭头函数作表达式体（承接 2.3 §2.3.2 延期项）
   - `&mut` 可变引用（正确+冲突场景）
   - 闭包调用（简单闭包 + move 闭包）
 
@@ -415,21 +416,23 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 
 ## Phase 2 交付标准
 
-- [ ] `number`=f64，整数/浮点自由运算
-- [ ] 关键字表 43 个（移除 16 + 新增 5）
-- [ ] 无 `loop` / `bigint` / `interface` / `impl` / `select` / `undefined` / `Option` / `Result` / `Box` / `dyn` 等旧设计残留
-- [ ] 块体函数强制返回类型标注（含 `:void`）
-- [ ] 表达式体函数（`function f(...) = expr`）可用
-- [ ] `&mut x` 可变引用可用（parser + borrowck）
-- [ ] 闭包调用 `r()` 可用（name_res + TIR）
-- [ ] `as` 仅保留非 number 的必要转换（设计 §2.2：number 之间不需要 `as`——number 统一后 `as number`/`as i32`/`as f64` 为恒等变换，移除避免无意义代码通过编译）
-- [ ] 位运算 token/AST/parser/typeck/codegen 完整落地（设计 §2.2）
-- [ ] 超 2^53 字面量/索引发 `Warning` 级诊断（`Severity::Warning`；当前 2.2 为 `DiagError` 占位，索引 Warning 归 Phase 6）
-- [ ] `spec/trust-spec.md`：废弃条目已删除，LEX-REQ-001 已更新为 43 关键字，2.2/2.3 前瞻条目已写入
-- [ ] `spec/stdlib.md`：无用户面 `Option`/`Result`/`std::result`；模块大纲对齐设计 §13；`Result<T,E>` API 已标过渡注记
-- [ ] 设计文档 / `trust-spec` / `stdlib` / `design-constraints` 四文档交叉核对已记录（2.1/2.2/2.3 各完成时）
+> 子里程碑进度：2.1 ✅ · 2.2 ✅ · 2.3 ✅ · 2.4 🔜 · 2.5 🔜 · 2.6 🔜
+
+- [ ] `number`=f64，整数/浮点自由运算（2.2 核心已实现；2.5 全量 e2e 验收）
+- [x] 关键字表 43 个（移除 16 + 新增 5）—— 2.1
+- [ ] 无 `loop` / `bigint` / `interface` / `impl` / `select` / `undefined` / `Option` / `Result` / `Box` / `dyn` 等旧设计残留（2.1 核心已清；2.5 夹具扫描）
+- [x] 块体函数强制返回类型标注（含 `:void`）—— **2.3 已实现**（`lower_function` + export）；2.5 trustc e2e 全量验收
+- [x] 表达式体函数（`function f(...) = expr`）可用 —— **2.3**
+- [ ] `&mut x` 可变引用可用（parser + borrowck）—— 2.4
+- [ ] 闭包调用 `r()` 可用（name_res + TIR）—— 2.4
+- [ ] `as` 仅保留非 number 的必要转换 —— 2.2（typeck 已拒 number `as`；2.5 夹具验收）
+- [x] 位运算 token/AST/parser/typeck/codegen 完整落地 —— **2.2**
+- [ ] 超 2^53 字面量/索引发 `Warning` 级诊断（2.2 `DiagError` 占位；正式 Warning + 索引归 Phase 6）
+- [ ] `spec/trust-spec.md`：废弃条目已删除，LEX-REQ-001 43 关键字 —— 2.1 ✅；2.2/2.3 条目已冻结 ✅；全文废弃清理随 Phase 3+
+- [ ] `spec/stdlib.md`：无用户面 `Option`/`Result`/`std::result`；模块大纲对齐；`Result` 过渡注记 —— 2.1 骨架 ✅
+- [x] 四文档交叉核对已记录 —— 2.1 `known-failures.md` · 2.2 `2.2/cross-check.md` · 2.3 `2.3/cross-check.md` ✅（Phase 2 收尾时再总核对）
 - [ ] 旧审计报告已标注废止
-- [ ] 56 个集成测试全部通过（v2.0 语义）；2.4 完成后 `&mut`/闭包调用增量测试通过
+- [ ] 56 个集成测试全部通过（v2.0 语义）；2.4 完成后 `&mut`/闭包调用增量测试通过 —— **2.5**
 - [ ] `cargo clippy --workspace -- -D warnings` 通过
 - [ ] `cargo fmt --check --all` 通过
 - [ ] `grep -r "unsafe" crates/trust_parser crates/trust_hir crates/trust_tir` 结果为空

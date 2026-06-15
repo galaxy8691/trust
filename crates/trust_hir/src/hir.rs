@@ -50,6 +50,8 @@ pub struct HirFunction {
     /// 函数局部作用域（参数 + 局部变量）
     pub scope: Scope,
     pub span: Span,
+    /// 是否为表达式体函数（`= expr`）— 从 AST 传递，供 typeck 推断用
+    pub is_expression_body: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

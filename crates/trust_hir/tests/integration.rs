@@ -486,3 +486,202 @@ fn regression_number_annotation_with_f64_literal() {
         type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+// ============================================================================
+// Phase 2.3 — 函数声明规则对齐 测试
+// ============================================================================
+
+// === MS-2.3-1: 块体函数强制返回标注 ===
+
+#[test]
+fn block_body_missing_return_type() {
+    let src = "function f() { return 42; }";
+    let (_hir, name_diags, _type_diags) = run_full_pipeline(src);
+    let has_err = name_diags.iter().any(|d| d.message.contains("必须显式标注返回类型"));
+    assert!(has_err, "Expected block-body missing return type error. Name diags: {:?}",
+        name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+#[test]
+fn export_block_body_missing_return_type() {
+    let src = "export function f() { return 42; }";
+    let (_hir, name_diags, _type_diags) = run_full_pipeline(src);
+    let has_err = name_diags.iter().any(|d| d.message.contains("必须显式标注返回类型"));
+    assert!(has_err, "export function should require explicit return type. Name diags: {:?}",
+        name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+#[test]
+fn export_block_body_return_type_mismatch() {
+    let src = "export function f(): number { return \"hello\"; }";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "Unexpected name diags: {:?}", name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let has_mismatch = type_diags.iter().any(|d| d.message.contains("return type mismatch"));
+    assert!(has_mismatch, "export function body should be type-checked. Type diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+#[test]
+fn block_body_with_void_ok() {
+    let src = "function f(): void { }";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "Unexpected name diags: {:?}", name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(type_diags.is_empty(), "Unexpected type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+#[test]
+fn block_body_with_return_type_ok() {
+    let src = "function f(): number { return 42; }";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "Unexpected name diags: {:?}", name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(type_diags.is_empty(), "Unexpected type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+// === MS-2.3-2: 表达式体函数推断 ===
+
+#[test]
+fn expr_body_infer_number() {
+    let src = "function sq(x: number) = x * x";
+    let (hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "Unexpected name diags: {:?}", name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(type_diags.is_empty(), "Unexpected type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    // verify return_type inferred as Number
+    let sq = hir.items.iter().find_map(|i| match i { HirItem::Function(f) if f.name == "sq" => Some(f), _ => None });
+    assert!(sq.is_some(), "sq function not found");
+    assert_eq!(sq.unwrap().return_type, HirType::Number, "expr body should infer Number");
+}
+
+#[test]
+fn expr_body_infer_string() {
+    let src = "function greet(name: string) = `Hello, ${name}`";
+    let (hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty());
+    assert!(type_diags.is_empty());
+    let f = hir.items.iter().find_map(|i| match i { HirItem::Function(f) if f.name == "greet" => Some(f), _ => None });
+    assert!(f.is_some());
+    assert_eq!(f.unwrap().return_type, HirType::String);
+}
+
+#[test]
+fn expr_body_annotated_return() {
+    let src = "function getUnit(): number = 1";
+    let (hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty());
+    assert!(type_diags.is_empty());
+    let f = hir.items.iter().find_map(|i| match i { HirItem::Function(f) if f.name == "getUnit" => Some(f), _ => None });
+    assert!(f.is_some());
+    assert_eq!(f.unwrap().return_type, HirType::Number, "annotation should take priority");
+}
+
+// === MS-2.3-3: 表达式体标注与推断冲突 ===
+
+#[test]
+fn expr_body_type_mismatch() {
+    let src = "function f(): number = \"hello\"";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "Unexpected name diags: {:?}", name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let has_mismatch = type_diags.iter().any(|d| d.message.contains("type mismatch") || d.message.contains("return type mismatch"));
+    assert!(has_mismatch, "Expected type mismatch. Type diags: {:?}",
+        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+// === MS-2.3-4: 箭头函数推断 + 返回标注 ===
+
+#[test]
+fn arrow_return_infer_number() {
+    let src = "function main(): void { let f = (x: number) => x * 2; }";
+    let (hir, name_diags, type_diags) = run_full_pipeline(src);
+    let has_param_err = name_diags.iter().any(|d| d.message.contains("must have explicit type annotations"));
+    assert!(!has_param_err);
+    assert!(type_diags.is_empty());
+    // verify arrow's return type was inferred as Number
+    let main = hir.items.iter().find_map(|i| match i { HirItem::Function(f) if f.name == "main" => Some(f), _ => None });
+    assert!(main.is_some());
+    let has_arrow_number = main.unwrap().body.statements.iter().any(|s| match s {
+        HirStmt::Let(l) => match l.ty {
+            HirType::Function(ref params, ref ret) => params.len() == 1 && params[0] == HirType::Number && **ret == HirType::Number,
+            _ => false,
+        },
+        _ => false,
+    });
+    assert!(has_arrow_number, "Arrow infer should produce Function([Number], Number)");
+}
+
+#[test]
+fn arrow_return_infer_string() {
+    let src = "function main(): void { let f = (name: string) => `Hi ${name}`; }";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    let has_param_err = name_diags.iter().any(|d| d.message.contains("must have explicit type annotations"));
+    assert!(!has_param_err);
+    assert!(type_diags.is_empty(), "Unexpected type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+#[test]
+fn arrow_return_annotated() {
+    let src = "function main(): void { let f = (x: number): number => x; }";
+    let (hir, name_diags, type_diags) = run_full_pipeline(src);
+    let has_param_err = name_diags.iter().any(|d| d.message.contains("must have explicit type annotations"));
+    assert!(!has_param_err);
+    assert!(type_diags.is_empty());
+    // verify annotation took priority: ret should be Number
+    let main = hir.items.iter().find_map(|i| match i { HirItem::Function(f) if f.name == "main" => Some(f), _ => None });
+    assert!(main.is_some());
+    let has_arrow_annotated = main.unwrap().body.statements.iter().any(|s| match s {
+        HirStmt::Let(l) => match l.ty {
+            HirType::Function(ref params, ref ret) => params.len() == 1 && params[0] == HirType::Number && **ret == HirType::Number,
+            _ => false,
+        },
+        _ => false,
+    });
+    assert!(has_arrow_annotated, "Annotated arrow should have Function([Number], Number)");
+}
+
+#[test]
+fn arrow_block_return_infer() {
+    let src = "function main(): void { let f = (x: number) => { return x * 2; }; }";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    let has_param_err = name_diags.iter().any(|d| d.message.contains("must have explicit type annotations"));
+    assert!(!has_param_err);
+    assert!(type_diags.is_empty(), "Unexpected type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}
+
+// === 边界测试 ===
+
+#[test]
+fn expr_body_infer_closure() {
+    let src = "function f() = (x: number) => x * 2";
+    let (hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty(), "Name diags: {:?}", name_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    assert!(type_diags.is_empty(), "Type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let func = hir.items.iter().find_map(|i| match i { HirItem::Function(f) if f.name == "f" => Some(f), _ => None });
+    assert!(func.is_some(), "function f not found");
+    // inferred type should be Function([Number], Number)
+    match &func.unwrap().return_type {
+        HirType::Function(params, ret) => {
+            assert_eq!(params.len(), 1, "should have 1 param");
+            assert_eq!(params[0], HirType::Number);
+            assert_eq!(**ret, HirType::Number);
+        }
+        other => panic!("Expected Function type, got {:?}", other),
+    }
+}
+
+#[test]
+fn expr_body_empty_block() {
+    let src = "function f() = { }";
+    let (hir, name_diags, type_diags) = run_full_pipeline(src);
+    assert!(name_diags.is_empty());
+    assert!(type_diags.is_empty());
+    let func = hir.items.iter().find_map(|i| match i { HirItem::Function(f) if f.name == "f" => Some(f), _ => None });
+    assert!(func.is_some());
+    assert_eq!(func.unwrap().return_type, HirType::Void, "empty block expr body should infer Void");
+}
+
+#[test]
+fn arrow_multi_return_infer() {
+    let src = "function main(): void { let f = (c: boolean) => { if (c) { return 1; } return 2; }; }";
+    let (_hir, name_diags, type_diags) = run_full_pipeline(src);
+    let has_param_err = name_diags.iter().any(|d| d.message.contains("must have explicit type annotations"));
+    assert!(!has_param_err);
+    assert!(type_diags.is_empty(), "Type diags: {:?}", type_diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}

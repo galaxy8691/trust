@@ -193,6 +193,39 @@ pub struct Lexer {
     in_template: u32,
 }
 
+/// Lexer 快照用于 parser 回溯
+#[derive(Debug, Clone)]
+pub struct LexerSnapshot {
+    pos: usize,
+    line: u32,
+    col: u32,
+    line_has_content: bool,
+    in_template: u32,
+    last_token: Option<TokenKind>,
+}
+
+impl Lexer {
+    pub fn snapshot(&self) -> LexerSnapshot {
+        LexerSnapshot {
+            pos: self.pos,
+            line: self.line,
+            col: self.col,
+            line_has_content: self.line_has_content,
+            in_template: self.in_template,
+            last_token: self.last_token.clone(),
+        }
+    }
+
+    pub fn restore(&mut self, snap: &LexerSnapshot) {
+        self.pos = snap.pos;
+        self.line = snap.line;
+        self.col = snap.col;
+        self.line_has_content = snap.line_has_content;
+        self.in_template = snap.in_template;
+        self.last_token = snap.last_token.clone();
+    }
+}
+
 impl Lexer {
     pub fn new(source: &str, file: &str) -> Self {
         Lexer {

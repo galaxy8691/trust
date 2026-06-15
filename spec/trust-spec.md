@@ -136,22 +136,26 @@ closure ::= ("move")? "(" param_list? ")" "=>" (expr | block)
 
 ### SYN-REQ-002：函数声明
 
-> **v2.0:** 移除 `<T extends ...>` 显式泛型语法，隐式泛型由参数无标注驱动（Phase 3）。块体函数强制返回类型标注。
+> **v2.0 / 2.3 已冻结。** 移除 `<T extends ...>` 显式泛型语法（隐式泛型由参数无标注驱动，Phase 3）。块体函数强制返回类型标注（name_res 降级阶段检查，`E0062`）。表达式体函数与箭头函数返回类型可推断。
 
 ```ebnf
 function_decl ::= "function" ident "(" param_list? ")" (":" type)? ("{" stmt* "}" | "=" expr ";")
 param         ::= ("inout" | "move")? ident (":" type)?
+arrow_fn      ::= ("move")? "(" param_list? ")" (":" type)? "=>" (expr | block)
 ```
 
-**块体函数返回标注规则：** `function f(...) { ... }` 必须显式标注返回类型，无返回值使用 `:void`。缺失 → 编译错误。
-**表达式体函数：** `function f(...) = expr` 返回类型由表达式推断，可不标注。
-**箭头函数：** 返回类型可省略，由表达式推断；标注时以标注为准。
+**块体函数返回标注规则：** `function f(...) { ... }` 必须显式标注返回类型，无返回值使用 `:void`。缺失 → 编译错误（`E0062`），包括 `export function f() { ... }` 同样适用。
+**表达式体函数：** `function f(...) = expr` 返回类型由表达式推断，可不标注；显式标注时以标注为准，不一致 → 类型不匹配错误。
+**箭头函数：** 返回类型可省略，由表达式推断；`(params): ReturnType => body` 标注时以标注为准。参数类型从上下文推断（`(name) => expr`）归 Phase 3 隐式泛型。
 
 **验收标准：**
-- AC-SYN-005: `function add(a: number, b: number): number { return a + b; }` → 成功解析
-- AC-SYN-006: `function square(x: number) = x * x;` → 表达式体函数解析，返回类型由 `x * x` 推断
-- AC-SYN-007: `function pushOne(inout arr: number[]): void { arr.push(1); }` → inout 参数 + 块体 `:void`
-- AC-SYN-008: `function greet(name: string) = \`Hello, ${name}\`;` → 表达式体模板字符串
+- AC-SYN-005: `function add(a: number, b: number): number { return a + b; }` → 成功解析，无错误
+- AC-SYN-006: `function square(x: number) = x * x;` → 表达式体函数，返回 `number`
+- AC-SYN-007: `function pushOne(inout arr: number[]): void { arr.push(1); }` → inout + 块体 `:void`，通过
+- AC-SYN-008: `function greet(name: string) = \`Hello, ${name}\`;` → 表达式体模板字符串，返回 `string`
+- AC-SYN-008a: `function f() { return 42; }` → 编译错误「块体函数必须显式标注返回类型」
+- AC-SYN-008b: `function f(): number = "hello"` → 类型不匹配错误（`string` vs `number`）
+- AC-SYN-008c: `let f = (x: number): number => x * 2` → 箭头返回标注解析成功，返回 `number`
 
 ### SYN-REQ-003：控制流
 

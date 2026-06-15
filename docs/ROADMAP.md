@@ -129,15 +129,15 @@ function main() {
 
 > 注：数组下标/`.length` 的完整整数语义依赖集合类型，复杂部分可与 Phase 6（`std::collections`）协同；Phase 2 先落地循环计数与字面量精度警告。
 
-### 2.3 函数声明规则对齐
+### 2.3 函数声明规则对齐 ✅
 
-**工作量：** 1 周  
-**优先级：** P0  
-**依赖：** 2.1
+**工作量：** 1 周 · **状态：** 已完成（2026-07）  
+**依赖：** 2.1 · **规格：** `docs/phases/2/2.3/2.3-spec.md` · **核对：** `2.3/cross-check.md`
 
-- **块体函数强制返回标注**（设计 §4.1）：`function f(...) { ... }` 无返回类型 → 编译错误（含无返回值必须 `:void`）。在 parser/typeck 落地
-- **表达式体函数** `function f(...) = expr`（设计 §4.1）：parser 支持，返回类型由表达式推断
-- **箭头函数返回类型推断**：复用 Phase 1 箭头函数解析，补齐返回类型推断路径
+- **块体函数强制返回标注**（name_res `lower_function`，含 `export function` + typeck body）
+- **表达式体函数** `function f(...) = expr` + `is_expression_body` 推断
+- **箭头函数** `(params): T? =>` parser + 返回推断/标注优先
+- **延期：** `(name) =>` 参数推断 → Phase 3；trustc 边界 e2e → 2.5.3
 
 ### 2.4 承接 Phase 1 遗留项
 

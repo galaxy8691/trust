@@ -59,20 +59,29 @@ fn snap_const() {
 fn snap_fn_basic() {
     assert_ast_snapshot(
         "function add(a:number,b:number):number{return a+b}",
-        &["FunctionDecl", "add"],
+        &["FunctionDecl", "add", "is_expression_body: false"],
     );
 }
 #[test]
 fn snap_fn_inout() {
-    assert_ast_snapshot("function push(inout arr:number[]){}", &["FunctionDecl", "InOut"]);
+    assert_ast_snapshot(
+        "function push(inout arr:number[]):void{}",
+        &["FunctionDecl", "InOut", "is_expression_body: false"],
+    );
 }
 #[test]
 fn snap_fn_move() {
-    assert_ast_snapshot("function consume(move data:number[]){}", &["FunctionDecl", "Move"]);
+    assert_ast_snapshot(
+        "function consume(move data:number[]):void{}",
+        &["FunctionDecl", "Move", "is_expression_body: false"],
+    );
 }
 #[test]
 fn snap_fn_single() {
-    assert_ast_snapshot("function sq(x:number)=x*x", &["FunctionDecl", "sq"]);
+    assert_ast_snapshot(
+        "function sq(x:number)=x*x",
+        &["FunctionDecl", "sq", "is_expression_body: true"],
+    );
 }
 #[test]
 fn snap_if() {
@@ -111,6 +120,13 @@ fn snap_ref() {
 #[test]
 fn snap_nullish() {
     assert_ast_snapshot("let n=maybeName??\"anon\"", &["QuestionQuestion"]);
+}
+#[test]
+fn snap_arrow_typed_return() {
+    assert_ast_snapshot(
+        "let f=(x:number):number=>x*2",
+        &["ArrowFn", "return_type:", "NumberType"],
+    );
 }
 #[test]
 fn snap_null_literal() {

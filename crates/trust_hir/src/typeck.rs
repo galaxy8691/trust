@@ -71,6 +71,11 @@ fn check_function(func: &mut HirFunction, diagnostics: &mut Vec<DiagError>) {
     let fn_scope = func.scope.clone();
     let ret_ty = func.return_type.clone();
     check_block(&mut func.body, &fn_scope, diagnostics, &ret_ty);
+
+    // §2.3: 表达式体函数返回类型推断
+    if func.is_expression_body && func.return_type == HirType::Error {
+        func.return_type = infer_return_type(&func.body);
+    }
 }
 
 fn check_block(
@@ -330,6 +335,7 @@ fn check_expr(
         HirExpr::ArrowFn(params, ret, body, _is_move, _span) => {
             // 闭包类型检查：推断返回类型
             // 使用 parent scope 以访问外部变量（与 name_res 行为一致）
+            // §2.3: 使用箭头自身的返回类型检查 body，非外围函数返回类型
             let mut fn_scope = Scope::new_child(Box::new(scope.clone()));
             for p in params.iter() {
                 fn_scope.insert(
@@ -337,7 +343,7 @@ fn check_expr(
                     HirBinding::LocalVar { ty: p.ty.clone(), mutable: false, span: p.span.clone() },
                 );
             }
-            check_block(body, &fn_scope, diagnostics, fn_return_type);
+            check_block(body, &fn_scope, diagnostics, ret);
 
             // 从 body 推断返回类型
             if *ret == HirType::Error {
