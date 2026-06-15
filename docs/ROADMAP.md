@@ -77,7 +77,8 @@ function main() {
 >
 > **本 Phase 合计：** 约 5-6 周（2.1~2.5 之和）
 >
-> **规范工作：** 除编译器实现修正外，本 Phase 同步推进 `spec/trust-spec.md`（语言规范）与 `spec/stdlib.md`（标准库规范）的 v2.0 增量对齐——删旧、前瞻写入、随 Phase 3+ 补齐新特性条目（非一次性整篇重写）。详见 `docs/phases/2/TODO.md` §规范与标准库对齐策略。
+> **规范工作：** 除编译器实现修正外，本 Phase 同步推进 `spec/trust-spec.md`（语言规范）与 `spec/stdlib.md`（标准库规范）的 v2.0 增量对齐——删旧、前瞻写入、随 Phase 3+ 补齐新特性条目（非一次性整篇重写）。详见 `docs/phases/2/TODO.md` §规范与标准库对齐策略。  
+> **延期/承接总表：** `docs/phases/DEFERRED-AND-HANDOFFS.md`（各 spec 中「归 Phase X」条目须同步登记，避免遗漏）。
 
 ### 2.1 移除已废弃的语法与类型 + 规范对齐 v2.0
 

@@ -1,7 +1,8 @@
 # Phase 2.1 — 已知失败清单
 
 > 里程碑：2.1-CLEANUP · 创建：2026-06-14
-> 用途：记录因 AST/运算符/关键字删除而禁用或失败的测试，由 Phase 2.5 统一恢复/改写。
+> 用途：记录因 AST/运算符/关键字删除而禁用或失败的测试，由 Phase 2.5 统一恢复/改写。  
+> 承接 ID：`H-P2-07`、`H-P2-08`（见 [`docs/phases/DEFERRED-AND-HANDOFFS.md`](../../DEFERRED-AND-HANDOFFS.md)）。
 
 ## 已禁用的测试
 

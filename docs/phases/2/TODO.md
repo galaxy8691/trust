@@ -5,7 +5,8 @@
 > **基准设计：** `docs/Trust-设计文档.md` v2.0（唯一权威规范）
 > **期限：** 5–6 周
 > **优先级：** P0（阻塞 Phase 3+）
-> **前置：** Phase 1 ✅ 完成
+> **前置：** Phase 1 ✅ 完成  
+> **承接追踪：** 各 spec 中的延期/承接项统一登记于 [`docs/phases/DEFERRED-AND-HANDOFFS.md`](DEFERRED-AND-HANDOFFS.md)（新增延期时请同步更新）。
 
 ---
 
@@ -129,7 +130,7 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 - [x] **重写 LEX-REQ-001 关键字表**为 43 个（与 lexer 一致），更新字面量说明（5 种，无 `bigint`/`Nn`）
 - [x] **前瞻同步**（写入 spec，实现归 2.2/2.3，不要求 2.1 实现）：
   - `number`=f64 类型规则（TYP-REQ-001 重写，对应 2.2）
-  - `number` 整数语义（索引/循环/长度 + 2^53 精度警告，对应 2.2）
+  - `number` 整数语义（循环 + 2^53 占位，对应 2.2；索引/长度归 Phase 6）
   - `number` 位运算约束（`&`/`|`/`^`/`<<`/`>>` 仅允许 `number`，对应 2.2）
   - 块体函数强制返回标注规则（SYN-REQ-002 更新，对应 2.3）
   - 表达式体函数（`function f(...) = expr`）语法（SYN-REQ-002 更新，对应 2.3）
@@ -167,7 +168,7 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 
 ## 2.2 `number` 统一为 f64
 
-**产出物：** HIR typeck 规则更新 + codegen 映射修改 + 整数语义落地 + 位运算约束  
+**产出物：** HIR typeck 规则更新 + codegen 映射修改 + 整数语义（循环/2^53 占位；索引/length 归 Phase 6）+ 位运算约束  
 **工作量：** 1–1.5 周  
 **优先级：** P0  
 **依赖：** 2.1（关键字移除完成后，避免旧类型残留干扰）
@@ -423,7 +424,7 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 - [ ] 闭包调用 `r()` 可用（name_res + TIR）
 - [ ] `as` 仅保留非 number 的必要转换（设计 §2.2：number 之间不需要 `as`——number 统一后 `as number`/`as i32`/`as f64` 为恒等变换，移除避免无意义代码通过编译）
 - [ ] 位运算 token/AST/parser/typeck/codegen 完整落地（设计 §2.2）
-- [ ] 超 2^53 字面量/索引发 `Warning` 级诊断（`Severity::Warning`）
+- [ ] 超 2^53 字面量/索引发 `Warning` 级诊断（`Severity::Warning`；当前 2.2 为 `DiagError` 占位，索引 Warning 归 Phase 6）
 - [ ] `spec/trust-spec.md`：废弃条目已删除，LEX-REQ-001 已更新为 43 关键字，2.2/2.3 前瞻条目已写入
 - [ ] `spec/stdlib.md`：无用户面 `Option`/`Result`/`std::result`；模块大纲对齐设计 §13；`Result<T,E>` API 已标过渡注记
 - [ ] 设计文档 / `trust-spec` / `stdlib` / `design-constraints` 四文档交叉核对已记录（2.1/2.2/2.3 各完成时）
@@ -441,7 +442,7 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 > **规范冻结矩阵（本 Phase 交付时）：**
 > - ✅ 词法规范（关键字集 43 个、字面量、注释格式）—— 2.1 完成时冻结
 > - ✅ 标准库模块大纲（无用户面 Option/Result）—— 2.1 骨架对齐后逐 Phase 冻结
-> - ✅ `number`=f64 类型规则 + 整数语义 + 位运算约束 —— 2.2 完成时冻结
+> - ✅ `number`=f64 类型规则 + 位运算约束 + 循环计数/2^53 检查（`DiagError` 占位）—— 2.2 完成时冻结；索引/`.length` 整数语义 API 归 Phase 6
 > - ✅ 函数声明规则（块体强制返回标注、表达式体函数、箭头函数推断）—— 2.3 完成时冻结
 > - 🔜 具名类型/纯结构类型/隐式泛型/`unknown`+`match` —— Phase 3 逐子任务冻结
 > - 🔜 错误处理/`null` 安全 —— Phase 4
