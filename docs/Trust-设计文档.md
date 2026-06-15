@@ -96,7 +96,7 @@ let user: { name: string, age: number } = { name: "Bob", age: 30 };
 > | 长度/容量 | `arr.length` / `Channel<T>(64)` | 返回/期望 `number`(f64)，内部存储为 `usize` | 装箱/拆箱编译器自动处理 |
 > | FFI 整数 | `extern fn f(x: number): number` 对接 `fn f(x: i32) -> u64` | 生成 `f(x as i32) as f64` | 见 §10 `extern` 块所有权规则 |
 > 
-> **精度边界：** 超过 2^53 的整数可能丢失精度（IEEE 754 双精度限制）。编译器在检测到超出安全整数范围的 `number` 字面量或数组索引时发出 `help` 级别警告。需要精确 64 位整数的场景应使用 FFI 调用 Rust 端的 `i64`/`u64` 函数。
+> **精度边界：** 超过 2^53 的整数可能丢失精度（IEEE 754 双精度限制）。编译器在检测到超出安全整数范围的 `number` 字面量或数组索引时发出 `Warning` 级别诊断，附 `Help` 子诊断说明精度风险。需要精确 64 位整数的场景应使用 FFI 调用 Rust 端的 `i64`/`u64` 函数。
 
 ### 2.3 具名类型别名
 

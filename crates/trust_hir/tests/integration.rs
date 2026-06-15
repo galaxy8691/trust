@@ -155,10 +155,7 @@ fn integration_as_cast_number_to_number_rejected() {
     // v2.0: number→number as 恒等变换，应拒绝（无意义代码）
     let src = "function f(): number { let a = 42; return a as number; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
-    assert!(
-        !type_diags.is_empty(),
-        "v2.0: number as number should be rejected, got empty diags"
-    );
+    assert!(!type_diags.is_empty(), "v2.0: number as number should be rejected, got empty diags");
 }
 
 // ============================================================================
@@ -170,10 +167,7 @@ fn integration_as_cast_in_expression_rejected() {
     // v2.0: a as number 在表达式中也应被拒绝
     let src = "function f(): number { let a = 42; let b = 10; return a as number + b; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
-    assert!(
-        !type_diags.is_empty(),
-        "v2.0: as number should be rejected"
-    );
+    assert!(!type_diags.is_empty(), "v2.0: as number should be rejected");
 }
 
 // ============================================================================

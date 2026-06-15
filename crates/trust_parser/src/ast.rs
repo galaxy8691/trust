@@ -417,8 +417,11 @@ mod tests {
         assert_eq!(literals.len(), 5); // v2.0: BigIntLiteral removed
 
         // Binary / Unary
-        let _bin =
-            Expr::Binary(Box::new(Expr::IntLiteral(1.0)), BinOp::Add, Box::new(Expr::IntLiteral(2.0)));
+        let _bin = Expr::Binary(
+            Box::new(Expr::IntLiteral(1.0)),
+            BinOp::Add,
+            Box::new(Expr::IntLiteral(2.0)),
+        );
         let _un = Expr::Unary(UnaryOp::Neg, Box::new(Expr::IntLiteral(1.0)));
 
         // Reference / AsCast

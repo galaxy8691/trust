@@ -460,7 +460,9 @@ impl Parser {
         }
         self.expect_semi();
         #[allow(deprecated)]
-        { Some(Stmt::Break(BreakStmt { value: None, span: self.span() })) }
+        {
+            Some(Stmt::Break(BreakStmt { value: None, span: self.span() }))
+        }
     }
 
     fn parse_paren_expr(&mut self) -> Option<Expr> {
@@ -647,12 +649,12 @@ impl Parser {
                 TokenKind::Ge => (7, 8, Some(BinOp::Ge)),
                 TokenKind::And => (6, 7, Some(BinOp::And)),
                 TokenKind::Or => (5, 6, Some(BinOp::Or)),
-                // v2.0 §2.2: 位运算（优先级: <<>> > & > ^ > |）
-                TokenKind::Shl => (10, 9, Some(BinOp::Shl)),
-                TokenKind::Shr => (10, 9, Some(BinOp::Shr)),
-                TokenKind::Amp => (8, 7, Some(BinOp::BitAnd)),
-                TokenKind::Caret => (6, 5, Some(BinOp::BitXor)),
-                TokenKind::Pipe => (4, 3, Some(BinOp::BitOr)),
+                // v2.0 §2.2: 位运算（左结合，优先级: <<>> > & > ^ > |）
+                TokenKind::Shl => (10, 11, Some(BinOp::Shl)),
+                TokenKind::Shr => (10, 11, Some(BinOp::Shr)),
+                TokenKind::Amp => (8, 9, Some(BinOp::BitAnd)),
+                TokenKind::Caret => (7, 8, Some(BinOp::BitXor)),
+                TokenKind::Pipe => (4, 5, Some(BinOp::BitOr)),
                 TokenKind::Plus => (10, 11, Some(BinOp::Add)),
                 TokenKind::Minus => (10, 11, Some(BinOp::Sub)),
                 TokenKind::Star => (11, 12, Some(BinOp::Mul)),

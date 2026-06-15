@@ -217,10 +217,12 @@ fn check_expr(
         // 字面量——类型已固定
         HirExpr::IntLiteral(v, sp) => {
             // v2.0 §2.2: 超 IEEE 754 安全整数范围发出 Warning
-            const MAX_SAFE_INTEGER: f64 = 9007199254740991.0;
+            // 注: 当前 trust_error 无 Warning 级别，使用 DiagError 占位；
+            // 完整 Warning+Help 子诊断需 trust_error Diagnostic 扩展（归后续 Phase）
+            const MAX_SAFE_INTEGER: f64 = 9007199254740992.0;
             if v.abs() > MAX_SAFE_INTEGER {
                 diagnostics.push(DiagError::new(
-                    format!("integer literal `{v}` exceeds IEEE 754 safe integer range (±2^53); precision may be lost"),
+                    format!("warning: integer literal `{v}` exceeds IEEE 754 safe integer range (±2^53); precision may be lost"),
                     sp.clone(),
                 ));
             }
@@ -502,7 +504,10 @@ fn check_as_cast(
     match (src, target) {
         // v2.0: number 统一——number→number as 恒等变换，拒绝无意义代码
         (HirType::Number, HirType::Number) => {
-            diagnostics.push(DiagError::new("`as` between number types is unnecessary — number is unified as f64".into(), span));
+            diagnostics.push(DiagError::new(
+                "`as` between number types is unnecessary — number is unified as f64".into(),
+                span,
+            ));
             false
         }
         // Bool → 数字禁止
@@ -636,7 +641,7 @@ fn infer_block_type(block: &HirBlock) -> HirType {
 
 // v2.0: collect_break_info retains for/while break analysis.
 // Break values are no longer possible (loop removed, break value deprecated).
-#[allow(unused_variables)]
+#[allow(dead_code, unused_variables, clippy::only_used_in_recursion)]
 fn collect_break_info(block: &HirBlock, types: &mut Vec<HirType>, has_bare: &mut bool) {
     for stmt in &block.statements {
         match stmt {
@@ -695,8 +700,13 @@ mod tests {
     #[test]
     fn check_binary_number_plus_number_ok() {
         let mut diags = vec![];
-        let r =
-            check_binary_op(BinOp::Add, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        let r = check_binary_op(
+            BinOp::Add,
+            &HirType::Number,
+            &HirType::Number,
+            Span::dummy(),
+            &mut diags,
+        );
         assert!(r.is_ok(), "number + number should be allowed (v2.0 number=f64)");
     }
 
@@ -726,8 +736,13 @@ mod tests {
     #[test]
     fn check_binary_i32_plus_i32_ok() {
         let mut diags = vec![];
-        let r =
-            check_binary_op(BinOp::Add, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        let r = check_binary_op(
+            BinOp::Add,
+            &HirType::Number,
+            &HirType::Number,
+            Span::dummy(),
+            &mut diags,
+        );
         assert_eq!(r, Ok(HirType::Number));
         assert!(diags.is_empty());
     }
@@ -736,8 +751,13 @@ mod tests {
     #[test]
     fn check_binary_f64_plus_f64_ok() {
         let mut diags = vec![];
-        let r =
-            check_binary_op(BinOp::Add, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        let r = check_binary_op(
+            BinOp::Add,
+            &HirType::Number,
+            &HirType::Number,
+            Span::dummy(),
+            &mut diags,
+        );
         assert_eq!(r, Ok(HirType::Number));
     }
 
@@ -745,7 +765,13 @@ mod tests {
     #[test]
     fn check_binary_eq_i32_returns_bool() {
         let mut diags = vec![];
-        let r = check_binary_op(BinOp::Eq, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        let r = check_binary_op(
+            BinOp::Eq,
+            &HirType::Number,
+            &HirType::Number,
+            Span::dummy(),
+            &mut diags,
+        );
         assert_eq!(r, Ok(HirType::Bool));
     }
 
@@ -762,15 +788,21 @@ mod tests {
     #[test]
     fn check_binary_and_i32_error() {
         let mut diags = vec![];
-        let r =
-            check_binary_op(BinOp::And, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        let r = check_binary_op(
+            BinOp::And,
+            &HirType::Number,
+            &HirType::Number,
+            Span::dummy(),
+            &mut diags,
+        );
         assert!(r.is_err());
     }
 
     // 函数调用签名验证
     #[test]
     fn check_call_matching_params_returns_ret_type() {
-        let func_ty = HirType::Function(vec![HirType::Number, HirType::Number], Box::new(HirType::Bool));
+        let func_ty =
+            HirType::Function(vec![HirType::Number, HirType::Number], Box::new(HirType::Bool));
         let args = vec![
             HirCallArg {
                 mode: ParamMode::Default,
@@ -816,8 +848,13 @@ mod tests {
         // 当 lhs 是 Error 时，check_binary_op 不应该再报错
         // 这在 check_expr 中已处理：遇到 Error 操作数直接返回
         let mut diags = vec![];
-        let r =
-            check_binary_op(BinOp::Add, &HirType::Error, &HirType::Number, Span::dummy(), &mut diags);
+        let r = check_binary_op(
+            BinOp::Add,
+            &HirType::Error,
+            &HirType::Number,
+            Span::dummy(),
+            &mut diags,
+        );
         assert!(r.is_err()); // Error 哨兵仍返回 Err
     }
 }

@@ -132,10 +132,10 @@ pub enum TokenKind {
     Or,
     Not,
     Amp,
-    Pipe,   // | — v2.0 §2.2 位运算
-    Caret,  // ^ — v2.0 §2.2 位运算
-    Shl,    // << — v2.0 §2.2 位运算
-    Shr,    // >> — v2.0 §2.2 位运算
+    Pipe,  // | — v2.0 §2.2 位运算
+    Caret, // ^ — v2.0 §2.2 位运算
+    Shl,   // << — v2.0 §2.2 位运算
+    Shr,   // >> — v2.0 §2.2 位运算
     Dot,
     DotDot,
     Colon,

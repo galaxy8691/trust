@@ -171,8 +171,7 @@ impl GenCtx {
 /// ```
 /// # use trust_hir::hir::HirType;
 /// # use trust_codegen::codegen::hir_type_to_rust;
-/// assert_eq!(hir_type_to_rust(&HirType::Number), "i32");
-/// assert_eq!(hir_type_to_rust(&HirType::Number), "f64");
+/// assert_eq!(hir_type_to_rust(&HirType::Number), "f64"); // v2.0: number=f64
 /// assert_eq!(hir_type_to_rust(&HirType::Bool), "bool");
 /// assert_eq!(hir_type_to_rust(&HirType::Void), "()");
 /// ```
@@ -677,7 +676,10 @@ fn emit_op(op: &TirOp, func: &TirFunction, ctx: &mut GenCtx, _errors: &mut [Code
             let rhs_str = emit_value(rhs, func, ctx);
             let op_str = bin_op_str(*op);
             // v2.0 §2.2: f64 不支持位运算，通过 to_bits/from_bits 转换
-            let is_bitwise = matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr);
+            let is_bitwise = matches!(
+                op,
+                BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+            );
             if is_bitwise {
                 ctx.write_line(&format!(
                     "{let_kw} {dst} = f64::from_bits({lhs}.to_bits() {op} {rhs}.to_bits()); /* bitwise on f64: behavior per IEEE 754 */",
@@ -782,13 +784,13 @@ fn emit_op(op: &TirOp, func: &TirFunction, ctx: &mut GenCtx, _errors: &mut [Code
 fn emit_value(val: &TirValue, _func: &TirFunction, ctx: &mut GenCtx) -> String {
     match val {
         TirValue::Var(tmp) => ctx.var_name(*tmp),
-        TirValue::IntLiteral(v) => v.to_string(),
+        TirValue::IntLiteral(v) => format!("{v}_f64"), // v2.0: f64 suffix
         TirValue::FloatLiteral(v) => {
-            // C5 fix: 完整精度，使用 Rust 默认 Display
+            // v2.0: f64 suffix
             if v.fract() == 0.0 {
-                format!("{:.1}", v)
+                format!("{:.1}_f64", v)
             } else {
-                v.to_string()
+                format!("{v}_f64")
             }
         }
         TirValue::StringLiteral(s) => {
