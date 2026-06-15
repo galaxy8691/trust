@@ -126,13 +126,13 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
   - 旧 `Option` / `Result` 用户暴露语义、**后缀** `expr?`（Result 传播）、**后缀** `expr!`（Option 断言）条目
   - `select` 并发条目
   - `loop` / `bigint` 词法+语法+语义条目
-- [ ] **重写 LEX-REQ-001 关键字表**为 43 个（与 lexer 一致），更新字面量说明（5 种，无 `bigint`/`Nn`）
-- [ ] **前瞻同步**（写入 spec，实现归 2.2/2.3，不要求 2.1 实现）：
-  - `number`=f64 类型规则（对应 2.2）
-  - `number` 整数语义（索引/循环/长度/FFI + 2^53 精度警告，对应 2.2）
+- [x] **重写 LEX-REQ-001 关键字表**为 43 个（与 lexer 一致），更新字面量说明（5 种，无 `bigint`/`Nn`）
+- [x] **前瞻同步**（写入 spec，实现归 2.2/2.3，不要求 2.1 实现）：
+  - `number`=f64 类型规则（TYP-REQ-001 重写，对应 2.2）
+  - `number` 整数语义（索引/循环/长度 + 2^53 精度警告，对应 2.2）
   - `number` 位运算约束（`&`/`|`/`^`/`<<`/`>>` 仅允许 `number`，对应 2.2）
-  - 块体函数强制返回标注规则（对应 2.3）
-  - 表达式体函数（`function f(...) = expr`）语法+语义（对应 2.3）
+  - 块体函数强制返回标注规则（SYN-REQ-002 更新，对应 2.3）
+  - 表达式体函数（`function f(...) = expr`）语法（SYN-REQ-002 更新，对应 2.3）
 - [x] **不在 2.1 写入：** 具名类型、receiver、隐式泛型、`unknown`+`match`、`throw`/`try-catch` 穷举、完整 `null` 安全——归 Phase 3+（见上表）
 - [x] **废止旧审计：** 在 `docs/phases/0/0.3/audit-report.md` 顶部添加废止声明：
   ```

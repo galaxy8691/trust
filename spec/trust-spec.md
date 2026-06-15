@@ -138,36 +138,41 @@ closure ::= ("move")? "(" param_list? ")" "=>" (expr | block)
 
 ### SYN-REQ-002：函数声明
 
+> **v2.0:** 移除 `<T extends ...>` 显式泛型语法，隐式泛型由参数无标注驱动（Phase 3）。块体函数强制返回类型标注。
+
 ```ebnf
-function_decl ::= "function" ident generic_params? "(" param_list? ")" (":" type)? ("{" stmt* "}" | "=" expr ";")
-param         ::= ("inout" | "move")? ident "?"? (":" type)?
-generic_param ::= ident ("extends" type ("+" type)*)?
-generic_params ::= "<" generic_param ("," generic_param)* ">"
+function_decl ::= "function" ident "(" param_list? ")" (":" type)? ("{" stmt* "}" | "=" expr ";")
+param         ::= ("inout" | "move")? ident (":" type)?
 ```
+
+**块体函数返回标注规则：** `function f(...) { ... }` 必须显式标注返回类型，无返回值使用 `:void`。缺失 → 编译错误。
+**表达式体函数：** `function f(...) = expr` 返回类型由表达式推断，可不标注。
+**箭头函数：** 返回类型可省略，由表达式推断；标注时以标注为准。
 
 **验收标准：**
 - AC-SYN-005: `function add(a: number, b: number): number { return a + b; }` → 成功解析
-- AC-SYN-006: `function square(x: number) = x * x;` → 单表达式简写解析
-- AC-SYN-007: `function identity<T>(value: T): T { return value; }` → 泛型解析
-- AC-SYN-008: `function pushOne(inout arr: number[]) { arr.push(1); }` → inout 参数解析
+- AC-SYN-006: `function square(x: number) = x * x;` → 表达式体函数解析，返回类型由 `x * x` 推断
+- AC-SYN-007: `function pushOne(inout arr: number[]): void { arr.push(1); }` → inout 参数 + 块体 `:void`
+- AC-SYN-008: `function greet(name: string) = \`Hello, ${name}\`;` → 表达式体模板字符串
 
 ### SYN-REQ-003：控制流
+
+> **v2.0:** `loop` 已移除（`while (true)` 替代）。`break` 不再带值。
 
 ```ebnf
 if_expr    ::= "if" "(" expr ")" block ("else" ("if" "(" expr ")" block | block))?
 for_stmt   ::= "for" "(" ("let" ident "=" expr ";" expr ";" expr) ")" block
              | "for" "(" "let" ident "of" expr ")" block
 while_stmt ::= "while" "(" expr ")" block
-loop_expr  ::= "loop" block
 return_stmt ::= "return" expr? ";?"
-break_stmt ::= "break" expr? ";?"
+break_stmt ::= "break" ";?"
 ```
 
-**设计决策——`if` 和 `loop` 是表达式：** `let x = if (c) { a } else { b };` 合法。`loop { break val; }` 返回 `val`。`for`/`while` 是语句，无返回值。`break` 仅在 `loop` 中可带值——其他上下文（`for`/`while`/`switch`）中 `break expr` 由 parser 拒绝。
+**设计决策——`if` 是表达式：** `let x = if (c) { a } else { b };` 合法。`for`/`while` 是语句，无返回值。
 
 **验收标准：**
 - AC-SYN-009: `let label = if (score >= 60) { "pass" } else { "fail" };` → 解析为 `IfExpr`（表达式）
-- AC-SYN-010: `let result = loop { if (count >= 3) { break count * 2; } count += 1; };` → `break` 带值解析
+- AC-SYN-010: `while (true) { if (done) { break; } }` → `while (true)` 替代旧 `loop`
 - AC-SYN-011: `for (let i = 0; i < 10; i++) { console.log(i); }` → C-style for 解析
 - AC-SYN-012: `for (let item of items) { process(item); }` → for-of 解析
 
@@ -229,23 +234,18 @@ withlock_expr ::= ident "." "withLock" "(" closure ")"
 
 **验收标准：**
 - AC-SYN-024: `let (tx, rx) = Channel<number>(64);` → 解析
-- AC-SYN-025: `select { case msg = rx.receive() => { console.log(msg); } }` → 解析（分支内**无** `await`）
-- AC-SYN-026: `counter.withLock(c => { c += 1; });` → 解析
+- AC-SYN-025: `counter.withLock(c => { c += 1; });` → 解析
 
-### SYN-REQ-008：类型声明（interface / type / ADT）
+### SYN-REQ-008：类型别名（v2.0）
+
+> **v2.0:** `interface`/`impl`/ADT（`type X = | ...`）已移除。仅保留 `type` 具名结构别名（Phase 3 实现）。
 
 ```ebnf
-interface_decl ::= "interface" ident generic_params? ("extends" type ("," type)*)? "{" method_sig* "}"
-method_sig     ::= ident "(" param_list? ")" ":" type ";?"
-type_decl      ::= "type" ident generic_params? "=" type ";?"
-adt_decl       ::= "type" ident "=" "|" adt_variant ("|" adt_variant)* ";?"
-adt_variant    ::= "{" ident ":" string (":" type)? "}"
+type_decl ::= "type" ident "=" type ";?"
 ```
 
 **验收标准：**
-- AC-SYN-027: `interface Printable { print(): void; }` → 成功解析 interface 声明
-- AC-SYN-028: `type Point2D = { x: number; y: number };` → 成功解析结构别名
-- AC-SYN-029: `type Msg = | { kind: "quit" } | { kind: "data"; payload: number[] };` → 成功解析 ADT
+- AC-SYN-026: `type Point2D = { x: number; y: number };` → 成功解析结构别名（Phase 3 实现 receiver 方法绑定）
 
 ### SYN-REQ-009：箭头函数与闭包
 
@@ -262,7 +262,7 @@ closure   ::= ("move")? "(" param_list? ")" "=>" block
 
 ```ebnf
 extern_decl   ::= "extern" string "{" extern_fn* "}"
-extern_fn     ::= "fn" ident generic_params? "(" param_list? ")" (":" type)? ";"
+extern_fn     ::= "fn" ident "(" param_list? ")" (":" type)? (";" | "throws" type ";")
 ```
 
 **验收标准：**
@@ -430,54 +430,45 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 ## TYP：类型系统规范
 
-### TYP-REQ-001：数字类型严格分离
+### TYP-REQ-001：`number`=f64（v2.0 前瞻，实现归 2.2）
 
-**需求：** `number` 在词法阶段即区分整数（`i32`）和浮点（`f64`）。隐式混算禁止。
+> ⚠️ 本节为 v2.0 前瞻规范。实现由 Phase 2.2 完成；2.1 阶段仅写入 spec，不要求编译器支持。
+
+**需求：** `number` 统一为 64 位浮点（f64）。整数和浮点自由运算，不需要 `as` 转换。
 
 | 字面量 | 承载类型 | Rust 映射 |
 |--------|---------|----------|
-| `42` `0` `-7` | `i32` | `i32` |
-| `3.14` `0.0` | `f64` | `f64` |
-| `9007199254740991n` | `bigint` | `i64` |
+| `42` `0` `-7` | `number`(f64) | `f64` |
+| `3.14` `0.0` | `number`(f64) | `f64` |
 
-**设计决策——方案 B（严格分离）：** 方案 A（`i32→f64` 自动提升）被否决——违反 §2.2 隐式转换禁止的安全承诺。方案 B 要求 `42 as f64 + 3.14`，TS 开发者付出的代价是显式 `as` 语法，换来"编译通过 = 数值无隐式精度丢失"。
+**整数语义：** `number` 存储为 f64，以下场景编译器自动进行整数转换：
 
-**验收标准：**
-- AC-TYP-001: `let a: number = 42; let b: number = 3.14; let c = a + b;` → 编译错误：`i32` 与 `f64` 不能混用（`number` 字面量 42 承载为 i32，3.14 承载为 f64）
-- AC-TYP-002: `let c = a as f64 + b;` → 类型检查通过，生成 Rust `a as f64 + b`
-- AC-TYP-003: `let c = a + b as i32;` → 类型检查通过（b 截断为 3）
+| 场景 | Trust 写 | Codegen 生成 | 说明 |
+|------|---------|-------------|------|
+| 数组索引 | `arr[n]` | `arr[n as usize]` | 自动转 |
+| 循环计数 | `for (let i=0; i<N; i++)` | `i: f64`，`i++` → `i += 1.0` | |
+| 长度/容量 | `arr.length` / `Channel<T>(64)` | 返回/期望 `number`(f64) | 编译器自动装箱/拆箱 |
 
-### TYP-REQ-002：ADT（标签联合）
+**精度边界：** 超过 2^53 的整数可能丢失精度。编译器在检测到超出安全整数范围的字面量或数组索引时发出 `Warning` 级别诊断，附 `Help` 子诊断说明精度风险。
 
-**需求：** `type Msg = | { kind: "a" } | { kind: "b"; data: number }` 生成 Rust enum。
+**位运算：** 位运算 `&`/`|`/`^`/`<<`/`>>` 仅允许 `number` 类型。编译器不保证浮点值上的位运算行为——开发者需确保操作数为整数。codegen 生成 `f64::to_bits()`→`u64`→位运算→`f64::from_bits()` 转换链。
 
-`switch` 和 `match` 在 ADT 上强制穷举检查——遗漏分支 → 编译错误。
+**验收标准（Phase 2.2 实现后生效）：**
+- AC-TYP-001: `let a = 42; let b = 3.14; let c = a + b;` → 类型检查通过（number 之间自由运算）
+- AC-TYP-002: `let arr = [1,2,3]; let x = arr[1];` → codegen 生成 `arr[1 as usize]`
+- AC-TYP-003: `let big = 9007199254740993;` → 超 2^53 字面量，发出 `Warning`
 
-**验收标准：**
-- AC-TYP-004: ADT 定义后，`switch` 遗漏一个变体 → 编译错误（穷举检查）
-- AC-TYP-005: `let label = match (msg.kind) { case "a" => 1, case "b" => 2 };` → 合法，穷举全部变体
+### TYP-REQ-002：ADT（标签联合）— ⚠️ v2.0 已废弃
 
-### TYP-REQ-003：Dynamic 枚举
+> ⚠️ v2.0 已废弃。ADT（`type X = | ...`）由 `unknown` + `match` 替代（Phase 3）。本节保留为历史参考。
 
-**需求：** `Dynamic` 是标准库类型，变体：
-- `Dynamic.Number(n: i32)` / `Dynamic.Float(f: f64)`
-- `Dynamic.String(s: String)` / `Dynamic.Boolean(b: bool)`
-- `Dynamic.Array(arr: Vec<Dynamic>)` / `Dynamic.Null`
-- `Dynamic.Object(map: HashMap<String, Dynamic>)`
+### TYP-REQ-003：Dynamic 枚举 — ⚠️ v2.0 已废弃
 
-模式匹配：`case Dynamic.Number(n) => n * 2`
+> ⚠️ v2.0 已废弃。`Dynamic` 枚举由 `unknown` + 类型化装载/`match` 替代（Phase 3），内部使用带类型标签的 `Value` 载荷，非虚表分发。本节保留为历史参考。
 
-**验收标准：**
-- AC-TYP-006: `let val: Dynamic = 42; match (val) { case Dynamic.Number(n) => ..., case Dynamic.String(s) => ..., default => ... }` → 类型安全穷举
-- AC-TYP-007: `let val: Dynamic = "hello"; if let Dynamic.String(s) = val { ... }` → `if let` 解构 Dynamic 合法
+### TYP-REQ-004：Box<dyn Trait> — ⚠️ v2.0 已废弃
 
-### TYP-REQ-004：Box<dyn Trait>
-
-**需求：** `Box<dyn Trait>` 是 trait object。vtable 分发，不可穷举检查。与 `Dynamic` 的选择指南：已知集合 → Dynamic；开放集合 → `Box<dyn Trait>`。
-
-**验收标准：**
-- AC-TYP-008: `let pt: Box<dyn Serializable> = Box::new(Point { x: 1, y: 2 }); pt.serialize();` → vtable 分发，生成 Rust `Box<dyn Serializable>`
-- AC-TYP-009: `interface Handler { handle(): void; } let handlers: Vec<Box<dyn Handler>> = [...]; for (let h of handlers) { h.handle(); }` → 动态分发，无泛型单态化
+> ⚠️ v2.0 已废弃。禁止动态分发（设计 §14）。`Box`/`dyn` 关键字已移除。本节保留为历史参考。
 
 ### TYP-REQ-005：?? 与 ?. 类型规则
 
