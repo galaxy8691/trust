@@ -132,6 +132,10 @@ pub enum TokenKind {
     Or,
     Not,
     Amp,
+    Pipe,   // | — v2.0 §2.2 位运算
+    Caret,  // ^ — v2.0 §2.2 位运算
+    Shl,    // << — v2.0 §2.2 位运算
+    Shr,    // >> — v2.0 §2.2 位运算
     Dot,
     DotDot,
     Colon,
@@ -375,10 +379,18 @@ impl Lexer {
                 self.advance();
                 TokenKind::Le
             }
+            '<' if self.cur() == Some('<') => {
+                self.advance();
+                TokenKind::Shl
+            }
             '<' => TokenKind::Lt,
             '>' if self.cur() == Some('=') => {
                 self.advance();
                 TokenKind::Ge
+            }
+            '>' if self.cur() == Some('>') => {
+                self.advance();
+                TokenKind::Shr
             }
             '>' => TokenKind::Gt,
             '&' if self.cur() == Some('&') => {
@@ -390,7 +402,7 @@ impl Lexer {
                 self.advance();
                 TokenKind::Or
             }
-            '|' => TokenKind::Ident('|'.to_string()),
+            '|' => TokenKind::Pipe, // v2.0: 位运算 OR（曾退化为 Ident）
             '.' if self.cur() == Some('.') => {
                 self.advance();
                 TokenKind::DotDot
@@ -414,6 +426,7 @@ impl Lexer {
                 TokenKind::QuestionQuestion
             }
             '?' => TokenKind::Question,
+            '^' => TokenKind::Caret, // v2.0 §2.2: 位运算 XOR
             '\'' => {
                 let mut s = String::from("'");
                 while let Some(c) = self.cur() {

@@ -676,14 +676,27 @@ fn emit_op(op: &TirOp, func: &TirFunction, ctx: &mut GenCtx, _errors: &mut [Code
             let lhs_str = emit_value(lhs, func, ctx);
             let rhs_str = emit_value(rhs, func, ctx);
             let op_str = bin_op_str(*op);
-            ctx.write_line(&format!(
-                "{let_kw} {dst} = {lhs} {op} {rhs};",
-                let_kw = LET_KEYWORD,
-                dst = dst_name,
-                lhs = lhs_str,
-                op = op_str,
-                rhs = rhs_str
-            ));
+            // v2.0 §2.2: f64 不支持位运算，通过 to_bits/from_bits 转换
+            let is_bitwise = matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr);
+            if is_bitwise {
+                ctx.write_line(&format!(
+                    "{let_kw} {dst} = f64::from_bits({lhs}.to_bits() {op} {rhs}.to_bits()); /* bitwise on f64: behavior per IEEE 754 */",
+                    let_kw = LET_KEYWORD,
+                    dst = dst_name,
+                    lhs = lhs_str,
+                    op = op_str,
+                    rhs = rhs_str
+                ));
+            } else {
+                ctx.write_line(&format!(
+                    "{let_kw} {dst} = {lhs} {op} {rhs};",
+                    let_kw = LET_KEYWORD,
+                    dst = dst_name,
+                    lhs = lhs_str,
+                    op = op_str,
+                    rhs = rhs_str
+                ));
+            }
         }
 
         TirOp::Unary(dst, op, val, _span) => {
@@ -843,6 +856,12 @@ fn bin_op_str(op: BinOp) -> &'static str {
         BinOp::And => "&&",
         BinOp::Or => "||",
         BinOp::QuestionQuestion => "??",
+        // v2.0 §2.2: 位运算（Rust 符号，codegen 层处理 f64→u64 转换）
+        BinOp::BitAnd => "&",
+        BinOp::BitOr => "|",
+        BinOp::BitXor => "^",
+        BinOp::Shl => "<<",
+        BinOp::Shr => ">>",
     }
 }
 

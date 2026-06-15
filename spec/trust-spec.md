@@ -428,9 +428,9 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 
 ## TYP：类型系统规范
 
-### TYP-REQ-001：`number`=f64（v2.0 前瞻，实现归 2.2）
+### TYP-REQ-001：`number`=f64 ✅ 2.2 已冻结
 
-> ⚠️ 本节为 v2.0 前瞻规范。实现由 Phase 2.2 完成；2.1 阶段仅写入 spec，不要求编译器支持。
+> 本节已在 Phase 2.2 实现并冻结。编译器已统一 `number`=f64。
 
 **需求：** `number` 统一为 64 位浮点（f64）。整数和浮点自由运算，不需要 `as` 转换。
 
@@ -592,7 +592,7 @@ type ::= "number" | "string" | "boolean" | "bigint" | "void"
 ### OWN-REQ-008：Copy 类型判定
 
 **需求：** 类型是否实现 `Copy` 由编译器自动判定。基本规则：
-- 标量类型（`number`/`i32`/`f64`、`boolean`、`bigint`）→ `Copy`
+- 标量类型（`number`(f64)、`boolean`）→ `Copy`
 - 引用 `&T` → `Copy`
 - 元组/数组若所有元素 `Copy` → `Copy`
 - `Vec<T>`、`String`、`Box<T>`、`Rc<T>`、`Arc<T>` → **非** `Copy`

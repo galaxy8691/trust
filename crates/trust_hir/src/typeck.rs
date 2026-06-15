@@ -215,7 +215,16 @@ fn check_expr(
 ) {
     match expr {
         // 字面量——类型已固定
-        HirExpr::IntLiteral(..) => {}
+        HirExpr::IntLiteral(v, sp) => {
+            // v2.0 §2.2: 超 IEEE 754 安全整数范围发出 Warning
+            const MAX_SAFE_INTEGER: f64 = 9007199254740991.0;
+            if v.abs() > MAX_SAFE_INTEGER {
+                diagnostics.push(DiagError::new(
+                    format!("integer literal `{v}` exceeds IEEE 754 safe integer range (±2^53); precision may be lost"),
+                    sp.clone(),
+                ));
+            }
+        }
         HirExpr::FloatLiteral(..) => {}
         HirExpr::StringLiteral(..) => {}
         HirExpr::BoolLiteral(..) => {}
@@ -456,6 +465,18 @@ pub fn check_binary_op(
                 return Err(());
             }
             Ok(HirType::Bool)
+        }
+
+        // v2.0 §2.2: 位运算 — 操作数必须为 Number
+        BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+            if *lhs != HirType::Number || *rhs != HirType::Number {
+                diagnostics.push(DiagError::new(
+                    format!("bitwise operators require `number` operands, got `{lhs}` and `{rhs}`"),
+                    span,
+                ));
+                return Err(());
+            }
+            Ok(HirType::Number)
         }
 
         // ?? 运算符 — Phase 1 排除，不应到达此处

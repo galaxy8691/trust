@@ -366,6 +366,12 @@ pub enum BinOp {
     Or,
     /// 空值合并（Phase 1 降级时排除，HIR 中保留以对齐 AST 变体）
     QuestionQuestion,
+    // v2.0 §2.2: 位运算
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 /// 一元运算符——与 AST UnaryOp 对齐
@@ -413,6 +419,12 @@ impl HirType {
             AstBinOp::And => BinOp::And,
             AstBinOp::Or => BinOp::Or,
             AstBinOp::QuestionQuestion => BinOp::QuestionQuestion,
+            // v2.0 §2.2: 位运算
+            AstBinOp::BitAnd => BinOp::BitAnd,
+            AstBinOp::BitOr => BinOp::BitOr,
+            AstBinOp::BitXor => BinOp::BitXor,
+            AstBinOp::Shl => BinOp::Shl,
+            AstBinOp::Shr => BinOp::Shr,
         }
     }
 
@@ -561,6 +573,12 @@ mod tests {
             AstBinOp::And,
             AstBinOp::Or,
             AstBinOp::QuestionQuestion,
+            // v2.0 §2.2
+            AstBinOp::BitAnd,
+            AstBinOp::BitOr,
+            AstBinOp::BitXor,
+            AstBinOp::Shl,
+            AstBinOp::Shr,
         ];
         for op in &ops {
             let _ = HirType::binop_from_ast(op.clone());

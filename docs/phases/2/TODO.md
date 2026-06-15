@@ -205,12 +205,12 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 
 **涉及 crate：** `trust_hir`、`trust_codegen`
 
-- [ ] **数组索引：** `arr[n]` → codegen 生成 `arr[n as usize]`（自动插入 `as usize` 转换）
-- [ ] **循环计数：** `for (let i = 0; i < N; i++)` — 迭代变量 `i` 类型为 `number`(f64)，`i++` 等价 `i += 1.0`
-- [ ] **长度/容量：** `.length` 返回 `number`(f64)，内部存储为 `usize`，编译器自动装箱/拆箱
-- [ ] **FFI 整数（Phase 2 仅建立默认映射）：** `number` → Rust `f64` 默认映射。具体 FFI 整数转换机制（如何获知 Rust 侧是 `i32` 还是 `u64`）待 Phase 7 的 `extern "rust"` 类型注解——Phase 2 不实现跨 FFI 边界的整数类型推导
-- [ ] **超 2^53 精度警告：** 字面量 `> 2^53` 或 `< -(2^53)`，或数组索引为非整数/超范围时，发出 `Warning` 级别诊断（`Severity::Warning`），可附 `Help` 子诊断说明精度风险
-- [ ] 验证：编写端到端测试用例覆盖数组索引/循环计数/长度 3 场景（在 2.5 中集成；FFI 场景延后 Phase 7）
+- [x] **数组索引：** `arr[n]` → codegen 生成 `arr[n as usize]`（自动插入 `as usize` 转换）
+- [x] **循环计数：** `for (let i = 0; i < N; i++)` — 迭代变量 `i` 类型为 `number`(f64)，`i++` 等价 `i += 1.0`
+- [x] **长度/容量：** `.length` 返回 `number`(f64)，内部存储为 `usize`，编译器自动装箱/拆箱
+- [x] **FFI 整数（Phase 2 仅建立默认映射）：** `number` → Rust `f64` 默认映射。具体 FFI 整数转换机制（如何获知 Rust 侧是 `i32` 还是 `u64`）待 Phase 7 的 `extern "rust"` 类型注解——Phase 2 不实现跨 FFI 边界的整数类型推导
+- [x] **超 2^53 精度警告：** 字面量 `> 2^53` 或 `< -(2^53)`，或数组索引为非整数/超范围时，发出 `Warning` 级别诊断（`Severity::Warning`），可附 `Help` 子诊断说明精度风险
+- [x] 验证：编写端到端测试用例覆盖数组索引/循环计数/长度 3 场景（在 2.5 中集成；FFI 场景延后 Phase 7）
 
 ### 2.2.5 位运算（新增 token/AST/parser/typeck/codegen 完整路径）
 
@@ -218,17 +218,17 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 
 > **背景：** 设计 §2.2 要求位运算 `&`/`|`/`^`/`<<`/`>>` 仅允许 `number`。当前 `&` 仅用于 `Expr::Reference`（`TokenKind::Amp`），`|` 退化为 `Ident`，`^`/`<<`/`>>` 无对应 token。需新增完整路径。
 
-- [ ] **lexer token 新增：**
+- [x] **lexer token 新增：**
   - `|` → 从当前退化为 `Ident` 改为识别为 `TokenKind::Pipe`
   - `&` → 在 parser 中按上下文区分 `TokenKind::Amp`（前缀 `&x` = Reference）与 `TokenKind::BitAnd`（中缀 `a & b`）
   - `^` → 新增 `TokenKind::Caret`
   - `<<` → 新增 `TokenKind::Shl`
   - `>>` → 新增 `TokenKind::Shr`
-- [ ] **AST：** `BinOp` 枚举新增 `BitAnd` / `BitOr` / `BitXor` / `Shl` / `Shr` 变体
-- [ ] **parser：** 在 `parse_binary` 中新增位运算中缀解析（运算符优先级：`<<`/`>>` > `&` > `^` > `|`）
-- [ ] **HIR typeck：** 位运算操作数类型检查——仅允许 `number`
-- [ ] **codegen：** Rust `f64` 不支持位运算——生成 `f64::to_bits()`→`u64`→位运算→`f64::from_bits()` 转换链，并附加注释 `/* bitwise on f64: behavior per IEEE 754 */`
-- [ ] **验证：** `cargo test -p trust_parser` 位运算解析 + `cargo test -p trust_hir` 位运算类型检查 + 端到端测试（在 2.5 中集成）
+- [x] **AST：** `BinOp` 枚举新增 `BitAnd` / `BitOr` / `BitXor` / `Shl` / `Shr` 变体
+- [x] **parser：** 在 `parse_binary` 中新增位运算中缀解析（运算符优先级：`<<`/`>>` > `&` > `^` > `|`）
+- [x] **HIR typeck：** 位运算操作数类型检查——仅允许 `number`
+- [x] **codegen：** Rust `f64` 不支持位运算——生成 `f64::to_bits()`→`u64`→位运算→`f64::from_bits()` 转换链，并附加注释 `/* bitwise on f64: behavior per IEEE 754 */`
+- [x] **验证：** `cargo test -p trust_parser` 位运算解析 + `cargo test -p trust_hir` 位运算类型检查 + 端到端测试（在 2.5 中集成）
 
 ---
 

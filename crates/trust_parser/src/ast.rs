@@ -289,6 +289,12 @@ pub enum BinOp {
     And,
     Or,
     QuestionQuestion,
+    // v2.0 §2.2: 位运算
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
