@@ -252,9 +252,11 @@ type_decl ::= "type" ident "=" type ";?"
 ### SYN-REQ-009：箭头函数与闭包
 
 ```ebnf
-arrow_fn ::= ("move")? "(" param_list? ")" "=>" (expr | block)
+arrow_fn ::= ("move")? "(" param_list? ")" (":" type)? "=>" (expr | block)
 closure   ::= ("move")? "(" param_list? ")" "=>" block
 ```
+
+> **注：** 与 SYN-REQ-002 一致——箭头可选 `: ReturnType` 在 `=>` 之前（2.3 已冻结）。
 
 **验收标准：**
 - AC-SYN-030: `let f = (x: number) => x * 2;` → 箭头函数解析
