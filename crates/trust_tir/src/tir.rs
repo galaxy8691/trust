@@ -604,6 +604,7 @@ fn lower_expr_to_value(expr: &HirExpr, ctx: &mut LowerCtx, diags: &mut Vec<DiagE
         HirExpr::FloatLiteral(v, _) => TirValue::FloatLiteral(*v),
         HirExpr::StringLiteral(s, _) => TirValue::StringLiteral(s.clone()),
         HirExpr::BoolLiteral(b, _) => TirValue::BoolLiteral(*b),
+        HirExpr::Null(_) => TirValue::Error, // v2.0: null placeholder, 完整类型归 Phase 4
         HirExpr::Ident(name, binding, _) => {
             if matches!(binding, HirBinding::Function { .. }) {
                 TirValue::Function(name.clone())

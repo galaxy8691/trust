@@ -1,0 +1,17 @@
+# Phase 2.1 — Step 1 编译错误清单
+
+> 创建时间：Phase 2.1 Step 1 执行时
+> 状态：已全部修复（随 Step 2-5 同步解决）
+
+## 初始错误（Step 1 lexer 重核后，cargo build -p trust_parser 预期失败）
+
+共 12 个编译错误，6 种错误类型：
+
+- `TokenKind::Loop` — parser.rs 多处引用（parse_stmt、parse_loop、parse_primary、can_expr_start、Expr parse_binary）
+- `TokenKind::Interface` / `TokenKind::Impl` — parser.rs 同步点
+- `TokenKind::Select` — parser.rs 旧引用
+- `TokenKind::BigIntLiteral` / `TokenKind::BigIntType` — lexer.rs + parser.rs
+- `TokenKind::None_` — parser.rs (parse_primary + can_expr_start)
+- AST 变体引用 — Stmt::Loop、Expr::LoopExpr、Type::BigIntType、Expr::BigIntLiteral、Expr::AssertUnwrap、Expr::TryPropagate
+
+全部在 Step 2-5 中随 AST/parser/HIR/TIR/codegen 同步修复。

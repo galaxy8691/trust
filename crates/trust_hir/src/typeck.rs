@@ -224,6 +224,7 @@ fn check_expr(
         HirExpr::FloatLiteral(..) => {}
         HirExpr::StringLiteral(..) => {}
         HirExpr::BoolLiteral(..) => {}
+        HirExpr::Null(..) => {} // v2.0: lexer→AST→HIR path, full type check → Phase 4
         HirExpr::Error(..) => {}
 
         HirExpr::Ident(_, binding, _) => {
@@ -579,6 +580,7 @@ fn expr_type(expr: &HirExpr) -> HirType {
         HirExpr::FloatLiteral(..) => HirType::F64,
         HirExpr::StringLiteral(..) => HirType::String,
         HirExpr::BoolLiteral(..) => HirType::Bool,
+        HirExpr::Null(..) => HirType::Void, // v2.0: null placeholder, 完整类型归 Phase 4
         HirExpr::Ident(_, binding, _) => match binding {
             HirBinding::LocalVar { ty, .. } => ty.clone(),
             HirBinding::ModuleConst { ty, .. } => ty.clone(),
@@ -620,16 +622,12 @@ fn infer_block_type(block: &HirBlock) -> HirType {
 
 // v2.0: collect_break_info retains for/while break analysis.
 // Break values are no longer possible (loop removed, break value deprecated).
+#[allow(unused_variables)]
 fn collect_break_info(block: &HirBlock, types: &mut Vec<HirType>, has_bare: &mut bool) {
     for stmt in &block.statements {
         match stmt {
-            HirStmt::Break(b) => {
-                if let Some(ref v) = b.value {
-                    types.push(expr_type(v));
-                } else {
-                    *has_bare = true;
-                }
-            }
+            // v2.0: break value removed
+            HirStmt::Break(..) => {}
             HirStmt::If(if_s) => {
                 collect_break_info(&if_s.then_branch, types, has_bare);
                 if let Some(ref else_b) = if_s.else_branch {

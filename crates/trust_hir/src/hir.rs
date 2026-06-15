@@ -196,6 +196,8 @@ pub enum HirExpr {
     StringLiteral(String, Span),
     /// 布尔字面量 bool
     BoolLiteral(bool, Span),
+    /// null 字面量 — v2.0: lexer→AST→HIR 路径通，完整类型检查归 Phase 4
+    Null(Span),
     /// 模板字面量（已拼接为 String 或保留插值）
     TemplateLiteral(Vec<HirTemplatePart>, Span),
     /// 标识符引用（名称解析后填充 HirBinding；降级阶段用 Unresolved 占位）

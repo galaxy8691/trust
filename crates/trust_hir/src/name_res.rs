@@ -304,14 +304,8 @@ fn lower_expr(expr: &ast::Expr, diagnostics: &mut Vec<DiagError>) -> HirExpr {
         ast::Expr::StrLiteral(s) => HirExpr::StringLiteral(s.clone(), Span::dummy()),
         ast::Expr::BoolLiteral(b) => HirExpr::BoolLiteral(*b, Span::dummy()),
 
-        // §3.1.4 降级策略: Null → 降级报错（Phase 1 无 null 语义）
-        ast::Expr::Null => {
-            diagnostics.push(DiagError::new(
-                "`null` literal not supported in Phase 1".into(),
-                Span::dummy(),
-            ));
-            HirExpr::Error(Span::dummy())
-        }
+        // v2.0: null → HirExpr::Null（lexer→AST→HIR 路径通，完整类型检查归 Phase 4）
+        ast::Expr::Null => HirExpr::Null(Span::dummy()),
 
         ast::Expr::Ident(name) => HirExpr::Ident(
             name.clone(),
@@ -919,6 +913,7 @@ fn resolve_expr_names(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<D
         | HirExpr::FloatLiteral(..)
         | HirExpr::StringLiteral(..)
         | HirExpr::BoolLiteral(..)
+        | HirExpr::Null(..) // v2.0: null 字面量无需名称解析
         | HirExpr::Error(..) => {}
     }
 }
@@ -929,6 +924,7 @@ fn infer_type_from_expr(expr: &HirExpr) -> HirType {
         HirExpr::FloatLiteral(..) => HirType::F64,
         HirExpr::StringLiteral(..) => HirType::String,
         HirExpr::BoolLiteral(..) => HirType::Bool,
+        HirExpr::Null(..) => HirType::Void, // v2.0: null placeholder
         HirExpr::Ident(_, binding, _) => match binding {
             HirBinding::LocalVar { ty, .. } => ty.clone(),
             HirBinding::ModuleConst { ty, .. } => ty.clone(),

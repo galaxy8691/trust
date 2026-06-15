@@ -459,7 +459,8 @@ impl Parser {
             let _ = self.parse_expr(); // consume for error recovery
         }
         self.expect_semi();
-        Some(Stmt::Break(BreakStmt { value: None, span: self.span() }))
+        #[allow(deprecated)]
+        { Some(Stmt::Break(BreakStmt { value: None, span: self.span() })) }
     }
 
     fn parse_paren_expr(&mut self) -> Option<Expr> {
