@@ -57,13 +57,11 @@
 | 模板 | `` "`" ... "${" expr "}" ... "`" `` | `string`（展开为 format!） | `` `Hello, ${name}` `` |
 | 布尔 | `true` `false` | `boolean` | |
 | null | `null` | `T \| null`（内部 `Option<T>`） | `null` |
-| 模板 | `` "`" ... "${" expr "}" ... "`" `` | `String`（展开为 format!） | `` `Hello, ${name}` `` |
-| 布尔 | `true` `false` | `bool` | |
 
 **验收标准：**
-- AC-LEX-005: `42` → 词法器输出 `IntLiteral(42)`，类型 `i32`
-- AC-LEX-006: `3.14` → `FloatLiteral(3.14)`，类型 `f64`
-- AC-LEX-007: `9007199254740991n` → `BigIntLiteral(9007199254740991n)`，类型 `i64`
+- AC-LEX-005: `42` → 词法器输出 `IntLiteral(42)`，类型 `number`(f64)（v2.0）
+- AC-LEX-006: `3.14` → `FloatLiteral(3.14)`，类型 `number`(f64)（v2.0）
+- AC-LEX-007: `9007199254740991n` → 词法错误（v2.0 已移除 BigInt `Nn` 后缀）
 
 ### LEX-REQ-003：运算符优先级
 
