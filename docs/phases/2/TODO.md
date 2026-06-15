@@ -40,11 +40,11 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
 **依赖：** Phase 1 完成  
 **分支：** `phase2-v2-align`
 
-### 2.1.1 关键字表重核（lexer）
+### 2.1.1 关键字表重核（lexer）✅
 
 **涉及 crate：** `trust_parser`（`crates/trust_parser/src/lexer.rs`）
 
-- [ ] **移除 16 个关键字：**
+- [x] **移除 16 个关键字：**
   - `loop` → 用 `while (true)` 替代（设计 §6.2）
   - `bigint` → `number`=f64 足够（设计 §14）
   - `interface` / `impl` → 纯结构类型 + Go 风格 receiver（设计 §14）
@@ -55,72 +55,72 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
   - `Rc` / `Arc` / `Weak` / `Box` → 用户不接触底层 Rust 类型（设计 §3.7）
   - `dyn` → 禁止动态分发（设计 §14）
   - `extends` → 无 `<T extends ...>` 语法（设计 §2.5）
-- [ ] **净新增 5 个关键字（以下均为"仅关键字预留"，表达式/语句实现归后续 Phase）：**
+- [x] **净新增 5 个关键字（以下均为"仅关键字预留"，表达式/语句实现归后续 Phase）：**
   - `unknown` → 仅关键字预留，类型/表达式实现归 Phase 3（设计 §2.6）
   - `try` / `catch` → 仅关键字预留，语句实现归 Phase 4（设计 §5.1）
   - `null` → 唯一空值（设计 §2.7）。**注意：** 移除 `None_` 后需将 `null` 关键字映射到 `Expr::Null`（取代旧 `None_→Expr::Null` 路径）
   - `panic` → 仅关键字预留，`panic!("msg")` 表达式实现归 Phase 4（设计 §5.2）
-- [ ] **确认已存在无需操作：** `type` / `match` / `throw` / `shared` / `spawn`（均已存在于当前 lexer）
-- [ ] 更新 `static KEYWORDS` 映射表（54→43），每项附带 `// 设计 §X.X` 来源注释
-- [ ] 更新 lexer 文件头注释：`//! 54 个关键字` → `//! 43 个关键字`
-- [ ] 更新 `TokenKind` 枚举——移除上述 16 个废弃变体（含 `BigIntLiteral`），新增 5 个变体
+- [x] **确认已存在无需操作：** `type` / `match` / `throw` / `shared` / `spawn`（均已存在于当前 lexer）
+- [x] 更新 `static KEYWORDS` 映射表（54→43），每项附带 `// 设计 §X.X` 来源注释
+- [x] 更新 lexer 文件头注释：`//! 54 个关键字` → `//! 43 个关键字`
+- [x] 更新 `TokenKind` 枚举——移除上述 16 个废弃变体（含 `BigIntLiteral`），新增 5 个变体
 
-### 2.1.2 移除 `loop`（端到端）
-
-**涉及 crate：** `trust_parser`、`trust_hir`、`trust_tir`、`trust_codegen`
-
-- [ ] **lexer：** 移除 `TokenKind::Loop` 变体（由 2.1.1 覆盖）
-- [ ] **parser/ast：** 删除 `Stmt::Loop` 与 `Expr::LoopExpr` AST 节点
-- [ ] **parser：** 移除 `loop { ... }` 解析路径（含 `break` 带值在 `LoopExpr` 中的处理）
-- [ ] **parser/ast：** 删除/禁用 `BreakStmt.value` 字段（`loop` 移除后 `break value` 失去合法语境）
-- [ ] **HIR：** 移除 `HirLoop` / `HirStmt::Loop` / `HirExpr::Loop` 及 `LoopExpr` 降级逻辑；删除 `infer_loop_type`；`while (true)` 已在 Phase 1 支持，无需新增
-- [ ] **TIR：** 移除 `Loop` 对应的 TIR 节点与 borrowck 路径
-- [ ] **codegen：** 移除 `loop` → Rust 代码生成分支
-- [ ] **验证：** `grep -r "Loop" crates/trust_parser/src/ crates/trust_hir/src/ crates/trust_tir/src/ crates/trust_codegen/src/` 确认非注释引用已全部清理
-
-### 2.1.3 移除 `bigint`
+### 2.1.2 移除 `loop`（端到端）✅
 
 **涉及 crate：** `trust_parser`、`trust_hir`、`trust_tir`、`trust_codegen`
 
-- [ ] **lexer：** 移除 `TokenKind::BigIntType` 变体 + i64 字面量相关 token（由 2.1.1 覆盖）
-- [ ] **parser/ast：** 删除 `Type::BigIntType` 与 `Expr::BigIntLiteral` AST 节点
-- [ ] **parser：** 移除 `bigint` 类型标注与 i64 字面量解析路径
-- [ ] **HIR typeck：** 移除 `BigInt` 类型检查规则
-- [ ] **codegen：** 移除 `bigint` → Rust `i64` 映射
-- [ ] **验证：** `grep -ri "bigint" crates/` 确认仅剩注释/文档
+- [x] **lexer：** 移除 `TokenKind::Loop` 变体（由 2.1.1 覆盖）
+- [x] **parser/ast：** 删除 `Stmt::Loop` 与 `Expr::LoopExpr` AST 节点
+- [x] **parser：** 移除 `loop { ... }` 解析路径（含 `break` 带值在 `LoopExpr` 中的处理）
+- [x] **parser/ast：** 删除/禁用 `BreakStmt.value` 字段（`loop` 移除后 `break value` 失去合法语境）
+- [x] **HIR：** 移除 `HirLoop` / `HirStmt::Loop` / `HirExpr::Loop` 及 `LoopExpr` 降级逻辑；删除 `infer_loop_type`；`while (true)` 已在 Phase 1 支持，无需新增
+- [x] **TIR：** 移除 `Loop` 对应的 TIR 节点与 borrowck 路径
+- [x] **codegen：** 移除 `loop` → Rust 代码生成分支
+- [x] **验证：** `grep -r "Loop" crates/trust_parser/src/ crates/trust_hir/src/ crates/trust_tir/src/ crates/trust_codegen/src/` 确认非注释引用已全部清理
 
-### 2.1.4 移除 `interface` / `impl` 关键字
+### 2.1.3 移除 `bigint` ✅
+
+**涉及 crate：** `trust_parser`、`trust_hir`、`trust_tir`、`trust_codegen`
+
+- [x] **lexer：** 移除 `TokenKind::BigIntType` 变体 + i64 字面量相关 token（由 2.1.1 覆盖）
+- [x] **parser/ast：** 删除 `Type::BigIntType` 与 `Expr::BigIntLiteral` AST 节点
+- [x] **parser：** 移除 `bigint` 类型标注与 i64 字面量解析路径
+- [x] **HIR typeck：** 移除 `BigInt` 类型检查规则
+- [x] **codegen：** 移除 `bigint` → Rust `i64` 映射
+- [x] **验证：** `grep -ri "bigint" crates/` 确认仅剩注释/文档
+
+### 2.1.4 移除 `interface` / `impl` 关键字 ✅
 
 **涉及 crate：** `trust_parser`
 
-- [ ] **lexer：** 移除 `TokenKind::Interface` / `TokenKind::Impl`（由 2.1.1 覆盖）
-- [ ] **parser：** 移除 parser 中 `interface`/`impl` 关键字同步点（Phase 1 未实现语义，仅清理残留）
-- [ ] **验证：** `grep -r "interface\|impl" crates/trust_parser/src/` 确认仅剩注释
+- [x] **lexer：** 移除 `TokenKind::Interface` / `TokenKind::Impl`（由 2.1.1 覆盖）
+- [x] **parser：** 移除 parser 中 `interface`/`impl` 关键字同步点（Phase 1 未实现语义，仅清理残留）
+- [x] **验证：** `grep -r "interface\|impl" crates/trust_parser/src/` 确认仅剩注释
 
-### 2.1.5 移除 `select` 预留
+### 2.1.5 移除 `select` 预留 ✅
 
 **涉及 crate：** `trust_parser`
 
-- [ ] **lexer：** 移除 `TokenKind::Select`（由 2.1.1 覆盖）
-- [ ] **parser/ast：** 删除 AST 中 `select` 转义槽
-- [ ] **验证：** `grep -ri "select" crates/trust_parser/src/` 确认仅剩注释
+- [x] **lexer：** 移除 `TokenKind::Select`（由 2.1.1 覆盖）
+- [x] **parser/ast：** 删除 AST 中 `select` 转义槽
+- [x] **验证：** `grep -ri "select" crates/trust_parser/src/` 确认仅剩注释
 
-### 2.1.6 移除其余旧设计残留关键字 + 更新辅助函数 + 旧后缀运算符
+### 2.1.6 移除其余旧设计残留关键字 + 更新辅助函数 + 旧后缀运算符 ✅
 
 **涉及 crate：** `trust_parser`、`trust_hir`、`trust_tir`、`trust_codegen`、`trust_error`（若有）
 
-- [ ] **更新 `TokenKind::can_end_stmt`**（`lexer.rs`）：移除 `None_` / `BigIntLiteral` 引用，替换为 `null` 等新 token（**保留 `Bang`**——仅前缀逻辑非 `!x`）
-- [ ] **更新 `Parser::can_expr_start`**（`parser.rs`）：移除 `None_` / `BigIntLiteral` / `Loop` 引用，替换为 `null` 等新 token（**保留 `Bang`**）
-- [ ] **移除旧后缀运算符：** 删除 `Expr::AssertUnwrap` / `Expr::TryPropagate` 及 parser 后缀 `expr!` / `expr?` 分支（**保留** `?.` / `??` 与前缀 `!x`）
-- [ ] **HIR/TIR/Codegen：** 删除 `HirExpr::AssertUnwrap` / `HirExpr::TryPropagate` 降级路径
-- [ ] **验证残留引用：** `grep -rni "tokenkind::undefined\|None_\|Some_\|Ok_\|Err_\|Rc\|Arc\|Weak\|Box_\|Dyn\|Extends\|BigIntLiteral\|AssertUnwrap\|TryPropagate" crates/` 确认所有引用已清理（注释除外）
-- [ ] 若 HIR/codegen 中有对用户暴露的 `Option`/`Result` 类型翻译，一并移除
+- [x] **更新 `TokenKind::can_end_stmt`**（`lexer.rs`）：移除 `None_` / `BigIntLiteral` 引用，替换为 `null` 等新 token（**保留 `Bang`**——仅前缀逻辑非 `!x`）
+- [x] **更新 `Parser::can_expr_start`**（`parser.rs`）：移除 `None_` / `BigIntLiteral` / `Loop` 引用，替换为 `null` 等新 token（**保留 `Bang`**）
+- [x] **移除旧后缀运算符：** 删除 `Expr::AssertUnwrap` / `Expr::TryPropagate` 及 parser 后缀 `expr!` / `expr?` 分支（**保留** `?.` / `??` 与前缀 `!x`）
+- [x] **HIR/TIR/Codegen：** 删除 `HirExpr::AssertUnwrap` / `HirExpr::TryPropagate` 降级路径
+- [x] **验证残留引用：** `grep -rni "tokenkind::undefined\|None_\|Some_\|Ok_\|Err_\|Rc\|Arc\|Weak\|Box_\|Dyn\|Extends\|BigIntLiteral\|AssertUnwrap\|TryPropagate" crates/` 确认所有引用已清理（注释除外）
+- [x] 若 HIR/codegen 中有对用户暴露的 `Option`/`Result` 类型翻译，一并移除
 
-### 2.1.7 语言规范对齐 v2.0（`trust-spec.md`，随实现增量推进）
+### 2.1.7 语言规范对齐 v2.0（`trust-spec.md`，随实现增量推进）✅
 
 **产出物：** `spec/trust-spec.md` 中已废弃条目清除 + 前瞻规范条目 + 章节冻结矩阵
 
-- [ ] **删除已废弃规范条目：**
+- [x] **删除已废弃规范条目：**
   - `interface` / `impl` 词法+语法+语义条目
   - ADT（`type X = | ...`）语法+语义条目
   - 旧 `Option` / `Result` 用户暴露语义、**后缀** `expr?`（Result 传播）、**后缀** `expr!`（Option 断言）条目
@@ -133,14 +133,14 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
   - `number` 位运算约束（`&`/`|`/`^`/`<<`/`>>` 仅允许 `number`，对应 2.2）
   - 块体函数强制返回标注规则（对应 2.3）
   - 表达式体函数（`function f(...) = expr`）语法+语义（对应 2.3）
-- [ ] **不在 2.1 写入：** 具名类型、receiver、隐式泛型、`unknown`+`match`、`throw`/`try-catch` 穷举、完整 `null` 安全——归 Phase 3+（见上表）
-- [ ] **废止旧审计：** 在 `docs/phases/0/0.3/audit-report.md` 顶部添加废止声明：
+- [x] **不在 2.1 写入：** 具名类型、receiver、隐式泛型、`unknown`+`match`、`throw`/`try-catch` 穷举、完整 `null` 安全——归 Phase 3+（见上表）
+- [x] **废止旧审计：** 在 `docs/phases/0/0.3/audit-report.md` 顶部添加废止声明：
   ```
   > ⚠️ 本审计报告基于旧设计（pre-v2.0），已被 v2.0 设计取代。
   > 请以 `docs/Trust-设计文档.md` v2.0 为唯一权威规范。
   > v2.0 重新审计随 Phase 2+ 逐 Phase 推进。
   ```
-- [ ] **章节冻结矩阵**（记入 spec 前言或 `2.1-spec.md`）：
+- [x] **章节冻结矩阵**（记入 spec 前言或 `2.1-spec.md`）：
   | 规范章节 | 冻结时机 | 对应实现 |
   |---------|---------|---------|
   | 词法规范（关键字集、字面量） | 2.1 完成前 | 2.1.1 关键字重核 |
@@ -150,18 +150,18 @@ Phase 0 产出的 `spec/trust-spec.md` 与 `spec/stdlib.md` 基于**旧设计**�
   | 具名类型/泛型/`unknown` | Phase 3 各子任务启动前 | Phase 3 |
   | 错误/`null` | Phase 4 各子任务启动前 | Phase 4 |
   | 并发/FFI | Phase 5/7 启动前 | Phase 5/7 |
-- [ ] **验证：** 2.1 完成时四文档交叉核对（设计文档 / `trust-spec` / `stdlib` / `design-constraints`）
+- [x] **验证：** 2.1 完成时四文档交叉核对（设计文档 / `trust-spec` / `stdlib` / `design-constraints`）
 
-### 2.1.8 标准库规范对齐 v2.0（`stdlib.md`，2.1 骨架修正）
+### 2.1.8 标准库规范对齐 v2.0（`stdlib.md`，2.1 骨架修正）✅
 
 **产出物：** `spec/stdlib.md` 移除旧设计用户面 API，模块大纲对齐设计 §13 骨架
 
-- [ ] **删除/废止 `std::result` 模块**（`Option`/`Result` 不暴露给用户；`Some`/`None`/`Ok`/`Err` 构造器从 stdlib 移除）
-- [ ] **更新模块依赖图**：去除以 `result` 为根的依赖；对齐设计 §13 模块列表（`error`、`console`、`collections`、`string`、`sync`、`async`、`fs`、`time` 等）
-- [ ] **清除 stdlib 设计决策中的旧语义**：删除「`!` 仅限 Option」「`??` 用于 Result」等 pre-v2.0 表述
-- [ ] **API 签名过渡标注**：仍含 `Result<T,E>` / `Option<T>` 的函数（如 `fs.readToString`）标注 `> ⚠️ v2.0 待改 — Phase 4 改为 `throws` 或 `T | null``，不在 2.1 一次性改完全部 API
-- [ ] **新增骨架模块占位**（仅模块标题 + 对齐设计 §13 的一句话说明，API 随 Phase 4+ 补齐）：`std::error`、`std::console`
-- [ ] **验证：** `grep -ri 'Option::\|Result::\|std::result' spec/stdlib.md` 仅剩废弃标注或过渡标注；模块列表与设计 §13 一致
+- [x] **删除/废止 `std::result` 模块**（`Option`/`Result` 不暴露给用户；`Some`/`None`/`Ok`/`Err` 构造器从 stdlib 移除）
+- [x] **更新模块依赖图**：去除以 `result` 为根的依赖；对齐设计 §13 模块列表（`error`、`console`、`collections`、`string`、`sync`、`async`、`fs`、`time` 等）
+- [x] **清除 stdlib 设计决策中的旧语义**：删除「`!` 仅限 Option」「`??` 用于 Result」等 pre-v2.0 表述
+- [x] **API 签名过渡标注**：仍含 `Result<T,E>` / `Option<T>` 的函数（如 `fs.readToString`）标注 `> ⚠️ v2.0 待改 — Phase 4 改为 `throws` 或 `T | null``，不在 2.1 一次性改完全部 API
+- [x] **新增骨架模块占位**（仅模块标题 + 对齐设计 §13 的一句话说明，API 随 Phase 4+ 补齐）：`std::error`、`std::console`
+- [x] **验证：** `grep -ri 'Option::\|Result::\|std::result' spec/stdlib.md` 仅剩废弃标注或过渡标注；模块列表与设计 §13 一致
 
 ---
 
