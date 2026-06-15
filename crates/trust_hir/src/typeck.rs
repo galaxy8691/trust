@@ -94,10 +94,7 @@ fn check_stmt(
         HirStmt::Let(let_s) => {
             check_expr(&mut let_s.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&let_s.init);
-            // §3.3.2: `let x: number = 3.14` → HirType::F64（类型标注覆盖字面量推断）
-            if let_s.ty == HirType::I32 && init_ty == HirType::F64 {
-                let_s.ty = HirType::F64;
-            }
+            // v2.0: number 统一，不再 I32↔F64 提升
 
             let was_unannotated = let_s.ty == HirType::Error;
             let mismatched = let_s.ty != HirType::Error
@@ -118,9 +115,8 @@ fn check_stmt(
         HirStmt::Const(c) => {
             check_expr(&mut c.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&c.init);
-            if c.ty == HirType::I32 && init_ty == HirType::F64 {
-                c.ty = HirType::F64;
-            }
+            // v2.0: number 统一
+
             let was_unannotated = c.ty == HirType::Error;
             let mismatched = c.ty != HirType::Error
                 && init_ty != HirType::Error
@@ -138,9 +134,8 @@ fn check_stmt(
         HirStmt::Shared(s) => {
             check_expr(&mut s.init, scope, diagnostics, fn_return_type);
             let init_ty = expr_type(&s.init);
-            if s.ty == HirType::I32 && init_ty == HirType::F64 {
-                s.ty = HirType::F64;
-            }
+            // v2.0: number 统一
+
             let was_unannotated = s.ty == HirType::Error;
             let mismatched = s.ty != HirType::Error
                 && init_ty != HirType::Error
@@ -262,7 +257,7 @@ fn check_expr(
             check_expr(inner, scope, diagnostics, fn_return_type);
             let inner_ty = expr_type(inner);
             *ty = match (op, &inner_ty) {
-                (UnaryOp::Neg, HirType::I32 | HirType::F64) => inner_ty.clone(),
+                (UnaryOp::Neg, HirType::Number) => inner_ty.clone(),
                 (UnaryOp::Neg, HirType::Error) => HirType::Error,
                 (UnaryOp::Neg, _) => {
                     diagnostics.push(DiagError::new(
@@ -408,7 +403,7 @@ pub fn check_binary_op(
                 return Err(());
             }
             match lhs {
-                HirType::I32 | HirType::F64 => Ok(lhs.clone()),
+                HirType::Number => Ok(lhs.clone()),
                 _ => {
                     diagnostics.push(DiagError::new(
                         format!("arithmetic not supported for type `{lhs}`"),
@@ -481,37 +476,35 @@ fn check_as_cast(
     span: Span,
     diagnostics: &mut Vec<DiagError>,
 ) -> bool {
-    if *src == *target {
-        return true; // no-op
-    }
-
+    // v2.0: number→number as 恒等变换，拒绝（无意义代码）
+    // 注：此检查在 `src == target` 之前，因为 number 统一后 `Number == Number` 为恒等
     match (src, target) {
-        // I32 ↔ F64
-        (HirType::I32, HirType::F64) => true,
-        (HirType::F64, HirType::I32) => {
-            diagnostics
-                .push(DiagError::new("truncation: `f64 as i32` may lose precision".into(), span));
-            true // 允许但 warning
+        // v2.0: number 统一——number→number as 恒等变换，拒绝无意义代码
+        (HirType::Number, HirType::Number) => {
+            diagnostics.push(DiagError::new("`as` between number types is unnecessary — number is unified as f64".into(), span));
+            false
         }
         // Bool → 数字禁止
-        (HirType::Bool, HirType::I32) | (HirType::Bool, HirType::F64) => {
+        (HirType::Bool, HirType::Number) => {
             diagnostics.push(DiagError::new(format!("cannot cast `bool` to `{target}`"), span));
             false
         }
 
         // 数字 → Bool 禁止
-        (HirType::I32 | HirType::F64, HirType::Bool) => {
+        (HirType::Number, HirType::Bool) => {
             diagnostics.push(DiagError::new(format!("cannot cast `{src}` to `bool`"), span));
             false
         }
 
         // String → 数字禁止
-        (HirType::String, HirType::I32 | HirType::F64 | HirType::Bool) => {
+        (HirType::String, HirType::Number | HirType::Bool) => {
             diagnostics.push(DiagError::new(format!("cannot cast `string` to `{target}`"), span));
             false
         }
 
-        // 跨族转换禁止
+        // 同类型 no-op（非 Number——Number 已在上面拒绝）
+        _ if src == target => true,
+        // 其余跨族转换禁止
         _ => {
             diagnostics.push(DiagError::new(format!("invalid cast: `{src}` to `{target}`"), span));
             false
@@ -576,8 +569,8 @@ pub fn check_call(
 
 fn expr_type(expr: &HirExpr) -> HirType {
     match expr {
-        HirExpr::IntLiteral(..) => HirType::I32,
-        HirExpr::FloatLiteral(..) => HirType::F64,
+        HirExpr::IntLiteral(..) => HirType::Number, // v2.0
+        HirExpr::FloatLiteral(..) => HirType::Number,
         HirExpr::StringLiteral(..) => HirType::String,
         HirExpr::BoolLiteral(..) => HirType::Bool,
         HirExpr::Null(..) => HirType::Void, // v2.0: null placeholder, 完整类型归 Phase 4
@@ -679,47 +672,32 @@ mod tests {
 
     // AC-TYP-001: i32 + f64 → 编译错误
     #[test]
-    fn check_binary_i32_plus_f64_error() {
+    fn check_binary_number_plus_number_ok() {
         let mut diags = vec![];
         let r =
-            check_binary_op(BinOp::Add, &HirType::I32, &HirType::F64, Span::dummy(), &mut diags);
-        assert!(r.is_err(), "i32 + f64 should fail");
-        assert!(
-            diags.iter().any(|d| d.message.contains("type mismatch")),
-            "should have type mismatch diagnostic"
-        );
+            check_binary_op(BinOp::Add, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        assert!(r.is_ok(), "number + number should be allowed (v2.0 number=f64)");
     }
 
     // AC-TYP-002/003: as 转换通过
     #[test]
-    fn check_as_i32_to_f64_allowed() {
+    fn check_as_number_to_number_rejected() {
         let mut diags = vec![];
-        let ok = check_as_cast(&HirType::I32, &HirType::F64, Span::dummy(), &mut diags);
-        assert!(ok, "i32 as f64 should be allowed");
+        let ok = check_as_cast(&HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        assert!(!ok, "number as number should be rejected (v2.0 identity cast)");
     }
 
     #[test]
-    fn check_as_f64_to_i32_allowed_with_warning() {
+    fn check_as_bool_to_number_forbidden() {
         let mut diags = vec![];
-        let ok = check_as_cast(&HirType::F64, &HirType::I32, Span::dummy(), &mut diags);
-        assert!(ok, "f64 as i32 should be allowed");
-        assert!(
-            diags.iter().any(|d| d.message.contains("truncation")),
-            "should warn about truncation"
-        );
-    }
-
-    #[test]
-    fn check_as_bool_to_i32_forbidden() {
-        let mut diags = vec![];
-        let ok = check_as_cast(&HirType::Bool, &HirType::I32, Span::dummy(), &mut diags);
+        let ok = check_as_cast(&HirType::Bool, &HirType::Number, Span::dummy(), &mut diags);
         assert!(!ok, "bool as i32 should be forbidden");
     }
 
     #[test]
     fn check_as_string_to_i32_forbidden() {
         let mut diags = vec![];
-        let ok = check_as_cast(&HirType::String, &HirType::I32, Span::dummy(), &mut diags);
+        let ok = check_as_cast(&HirType::String, &HirType::Number, Span::dummy(), &mut diags);
         assert!(!ok, "string as i32 should be forbidden");
     }
 
@@ -728,8 +706,8 @@ mod tests {
     fn check_binary_i32_plus_i32_ok() {
         let mut diags = vec![];
         let r =
-            check_binary_op(BinOp::Add, &HirType::I32, &HirType::I32, Span::dummy(), &mut diags);
-        assert_eq!(r, Ok(HirType::I32));
+            check_binary_op(BinOp::Add, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        assert_eq!(r, Ok(HirType::Number));
         assert!(diags.is_empty());
     }
 
@@ -738,15 +716,15 @@ mod tests {
     fn check_binary_f64_plus_f64_ok() {
         let mut diags = vec![];
         let r =
-            check_binary_op(BinOp::Add, &HirType::F64, &HirType::F64, Span::dummy(), &mut diags);
-        assert_eq!(r, Ok(HirType::F64));
+            check_binary_op(BinOp::Add, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
+        assert_eq!(r, Ok(HirType::Number));
     }
 
     // TY-RULE-02: I32 == I32 → Bool
     #[test]
     fn check_binary_eq_i32_returns_bool() {
         let mut diags = vec![];
-        let r = check_binary_op(BinOp::Eq, &HirType::I32, &HirType::I32, Span::dummy(), &mut diags);
+        let r = check_binary_op(BinOp::Eq, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
         assert_eq!(r, Ok(HirType::Bool));
     }
 
@@ -764,18 +742,18 @@ mod tests {
     fn check_binary_and_i32_error() {
         let mut diags = vec![];
         let r =
-            check_binary_op(BinOp::And, &HirType::I32, &HirType::I32, Span::dummy(), &mut diags);
+            check_binary_op(BinOp::And, &HirType::Number, &HirType::Number, Span::dummy(), &mut diags);
         assert!(r.is_err());
     }
 
     // 函数调用签名验证
     #[test]
     fn check_call_matching_params_returns_ret_type() {
-        let func_ty = HirType::Function(vec![HirType::I32, HirType::F64], Box::new(HirType::Bool));
+        let func_ty = HirType::Function(vec![HirType::Number, HirType::Number], Box::new(HirType::Bool));
         let args = vec![
             HirCallArg {
                 mode: ParamMode::Default,
-                expr: Box::new(HirExpr::IntLiteral(1, Span::dummy())),
+                expr: Box::new(HirExpr::IntLiteral(1.0, Span::dummy())),
                 span: Span::dummy(),
             },
             HirCallArg {
@@ -791,7 +769,7 @@ mod tests {
 
     #[test]
     fn check_call_wrong_arg_count_error() {
-        let func_ty = HirType::Function(vec![HirType::I32], Box::new(HirType::Void));
+        let func_ty = HirType::Function(vec![HirType::Number], Box::new(HirType::Void));
         let args = vec![];
         let mut diags = vec![];
         let r = check_call("f", &func_ty, &args, Span::dummy(), &mut diags);
@@ -800,7 +778,7 @@ mod tests {
 
     #[test]
     fn check_call_wrong_arg_type_error() {
-        let func_ty = HirType::Function(vec![HirType::I32], Box::new(HirType::Void));
+        let func_ty = HirType::Function(vec![HirType::Number], Box::new(HirType::Void));
         let args = vec![HirCallArg {
             mode: ParamMode::Default,
             expr: Box::new(HirExpr::StringLiteral("hi".into(), Span::dummy())),
@@ -818,7 +796,7 @@ mod tests {
         // 这在 check_expr 中已处理：遇到 Error 操作数直接返回
         let mut diags = vec![];
         let r =
-            check_binary_op(BinOp::Add, &HirType::Error, &HirType::F64, Span::dummy(), &mut diags);
+            check_binary_op(BinOp::Add, &HirType::Error, &HirType::Number, Span::dummy(), &mut diags);
         assert!(r.is_err()); // Error 哨兵仍返回 Err
     }
 }

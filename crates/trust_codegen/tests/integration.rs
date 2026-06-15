@@ -171,7 +171,7 @@ fn gen_param_default() {
     let src = "function echo(x: number): number { return x; }";
     let (_tir, rust) = run_pipeline(src);
     assert!(rust.contains("&"), "default param should be &: {}", rust);
-    assert!(rust.contains("i32"), "should have i32 type: {}", rust);
+    assert!(rust.contains("f64"), "should have f64 type (v2.0 number=f64): {}", rust);
 }
 
 #[test]

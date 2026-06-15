@@ -136,13 +136,12 @@ fn integration_block_expression() {
 
 #[test]
 fn integration_type_error_mix_numbers() {
+    // v2.0: number 统一为 f64，i32+f64 不再报错
     let src = "function f(): number { let a = 42; let b = 3.14; return a + b; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
-
-    let has_type_err = type_diags.iter().any(|d| d.message.contains("type mismatch"));
     assert!(
-        has_type_err,
-        "expected type mismatch for i32 + f64, got: {:?}",
+        type_diags.is_empty(),
+        "v2.0: number+number should be allowed, got: {:?}",
         type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
@@ -152,14 +151,13 @@ fn integration_type_error_mix_numbers() {
 // ============================================================================
 
 #[test]
-fn integration_as_cast_allows_same_type() {
-    // Phase 1: `as` 在类型同为 number 时是 no-op
+fn integration_as_cast_number_to_number_rejected() {
+    // v2.0: number→number as 恒等变换，应拒绝（无意义代码）
     let src = "function f(): number { let a = 42; return a as number; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
     assert!(
-        type_diags.is_empty(),
-        "unexpected type diags: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        !type_diags.is_empty(),
+        "v2.0: number as number should be rejected, got empty diags"
     );
 }
 
@@ -168,14 +166,13 @@ fn integration_as_cast_allows_same_type() {
 // ============================================================================
 
 #[test]
-fn integration_as_cast_in_expression() {
-    // Phase 1: a as number + b → 类型检查中 as 的结果与 b 类型兼容
+fn integration_as_cast_in_expression_rejected() {
+    // v2.0: a as number 在表达式中也应被拒绝
     let src = "function f(): number { let a = 42; let b = 10; return a as number + b; }";
     let (_hir, _name_diags, type_diags) = run_full_pipeline(src);
     assert!(
-        type_diags.is_empty(),
-        "unexpected type diags: {:?}",
-        type_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        !type_diags.is_empty(),
+        "v2.0: as number should be rejected"
     );
 }
 
@@ -389,12 +386,12 @@ fn check_binary_sub_i32_ok() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
         BinOp::Sub,
-        &HirType::I32,
-        &HirType::I32,
+        &HirType::Number,
+        &HirType::Number,
         Span::dummy(),
         &mut diags,
     );
-    assert_eq!(r, Ok(HirType::I32));
+    assert_eq!(r, Ok(HirType::Number));
 }
 
 #[test]
@@ -402,12 +399,12 @@ fn check_binary_div_f64_ok() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
         BinOp::Div,
-        &HirType::F64,
-        &HirType::F64,
+        &HirType::Number,
+        &HirType::Number,
         Span::dummy(),
         &mut diags,
     );
-    assert_eq!(r, Ok(HirType::F64));
+    assert_eq!(r, Ok(HirType::Number));
 }
 
 #[test]
@@ -428,8 +425,8 @@ fn check_binary_lt_f64_returns_bool() {
     let mut diags = vec![];
     let r = trust_hir::typeck::check_binary_op(
         BinOp::Lt,
-        &HirType::F64,
-        &HirType::F64,
+        &HirType::Number,
+        &HirType::Number,
         Span::dummy(),
         &mut diags,
     );

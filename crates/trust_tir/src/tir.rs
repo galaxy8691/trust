@@ -113,7 +113,7 @@ pub enum Terminator {
 #[derive(Debug, Clone)]
 pub enum TirValue {
     Var(TmpVar),
-    IntLiteral(i32),
+    IntLiteral(f64), // v2.0: f64（设计 §2.2）
     FloatLiteral(f64),
     StringLiteral(String),
     BoolLiteral(bool),
@@ -547,7 +547,7 @@ fn lower_forof_stmt(f: &HirForOf, ctx: &mut LowerCtx, _diags: &mut Vec<DiagError
 
     // 迭代计数标记（Phase 1 简化：迭代恰好 1 次）
     let count_tmp = ctx.next_tmp();
-    ctx.emit(TirOp::Let(count_tmp, TirValue::IntLiteral(1), f.span.clone()));
+    ctx.emit(TirOp::Let(count_tmp, TirValue::IntLiteral(1.0), f.span.clone()));
 
     let cond_id = ctx.next_block_id();
     let body_id = ctx.next_block_id();
@@ -560,7 +560,7 @@ fn lower_forof_stmt(f: &HirForOf, ctx: &mut LowerCtx, _diags: &mut Vec<DiagError
     // cond_block: 检查 count_tmp > 0 → 进入 body，否则 exit
     ctx.new_block(cond_id, f.span.clone());
     let zero_tmp = ctx.next_tmp();
-    ctx.emit(TirOp::Let(zero_tmp, TirValue::IntLiteral(0), f.span.clone()));
+    ctx.emit(TirOp::Let(zero_tmp, TirValue::IntLiteral(0.0), f.span.clone()));
     let cond_tmp = ctx.next_tmp();
     ctx.emit(TirOp::Binary(
         cond_tmp,
@@ -578,7 +578,7 @@ fn lower_forof_stmt(f: &HirForOf, ctx: &mut LowerCtx, _diags: &mut Vec<DiagError
         dec_tmp,
         TirValue::Var(count_tmp),
         BinOp::Sub,
-        TirValue::IntLiteral(1),
+        TirValue::IntLiteral(1.0),
         f.span.clone(),
     ));
     ctx.emit(TirOp::Let(count_tmp, TirValue::Var(dec_tmp), f.span.clone()));
@@ -1035,25 +1035,25 @@ mod tests {
         let f = HirFunction {
             name: "test".into(),
             params: vec![],
-            return_type: HirType::I32,
+            return_type: HirType::Number,
             body: HirBlock {
                 statements: vec![HirStmt::Let(HirLet {
                     name: "x".into(),
                     mutable: false,
-                    ty: HirType::I32,
+                    ty: HirType::Number,
                     init: Box::new(HirExpr::If(
                         HirIf {
                             condition: Box::new(HirExpr::BoolLiteral(true, Span::dummy())),
                             then_branch: HirBlock {
                                 statements: vec![HirStmt::Expr(HirExpr::IntLiteral(
-                                    1,
+                                    1.0,
                                     Span::dummy(),
                                 ))],
                                 span: Span::dummy(),
                             },
                             else_branch: Some(HirBlock {
                                 statements: vec![HirStmt::Expr(HirExpr::IntLiteral(
-                                    0,
+                                    0.0,
                                     Span::dummy(),
                                 ))],
                                 span: Span::dummy(),

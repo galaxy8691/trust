@@ -155,14 +155,14 @@ fn check_var_use_mut(
 /// ```
 /// # use trust_hir::hir::HirType;
 /// # use trust_tir::moveck::is_copy_type;
-/// assert!(is_copy_type(&HirType::I32));
+/// assert!(is_copy_type(&HirType::Number));
 /// assert!(is_copy_type(&HirType::Bool));
 /// assert!(!is_copy_type(&HirType::String));
-/// assert!(!is_copy_type(&HirType::Array(Box::new(HirType::I32))));
+/// assert!(!is_copy_type(&HirType::Array(Box::new(HirType::Number))));
 /// ```
 pub fn is_copy_type(ty: &HirType) -> bool {
     match ty {
-        HirType::I32 | HirType::F64 | HirType::Bool => true,
+        HirType::Number | HirType::Bool => true, // v2.0: number 统一
         HirType::Ref(_) => true,
         HirType::String
         | HirType::Void

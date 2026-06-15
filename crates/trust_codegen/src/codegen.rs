@@ -46,9 +46,8 @@ pub const CRATE_KEYWORD: &str = "crate";
 // 字面量
 pub const TRUE_LITERAL: &str = "true";
 pub const FALSE_LITERAL: &str = "false";
-// Rust 类型名（禁止硬编码）
-pub const TYPE_I32: &str = "i32";
-pub const TYPE_F64: &str = "f64";
+// Rust 类型名（禁止硬编码）— v2.0: number 统一 f64
+pub const TYPE_NUMBER: &str = "f64";
 pub const TYPE_BOOL: &str = "bool";
 pub const TYPE_STRING: &str = "String";
 pub const TYPE_VEC: &str = "Vec";
@@ -172,15 +171,14 @@ impl GenCtx {
 /// ```
 /// # use trust_hir::hir::HirType;
 /// # use trust_codegen::codegen::hir_type_to_rust;
-/// assert_eq!(hir_type_to_rust(&HirType::I32), "i32");
-/// assert_eq!(hir_type_to_rust(&HirType::F64), "f64");
+/// assert_eq!(hir_type_to_rust(&HirType::Number), "i32");
+/// assert_eq!(hir_type_to_rust(&HirType::Number), "f64");
 /// assert_eq!(hir_type_to_rust(&HirType::Bool), "bool");
 /// assert_eq!(hir_type_to_rust(&HirType::Void), "()");
 /// ```
 pub fn hir_type_to_rust(ty: &HirType) -> &'static str {
     match ty {
-        HirType::I32 => TYPE_I32,
-        HirType::F64 => TYPE_F64,
+        HirType::Number => TYPE_NUMBER, // v2.0: 统一 f64
         HirType::String => TYPE_STRING,
         HirType::Bool => TYPE_BOOL,
         HirType::Void => TYPE_UNIT,
@@ -419,7 +417,7 @@ fn infer_tmp_type(tmp: &TmpVar, func: &TirFunction) -> String {
             match op {
                 TirOp::Let(dst, val, _) if dst == tmp => return tir_value_type(val),
                 TirOp::Move(dst, _, _) if dst == tmp => return String::new(), // 类型由源决定
-                TirOp::Binary(dst, _, _, _, _) if dst == tmp => return TYPE_I32.to_string(),
+                TirOp::Binary(dst, _, _, _, _) if dst == tmp => return TYPE_NUMBER.to_string(), // v2.0: f64
                 TirOp::Call(Some(dst), _, _, _) if dst == tmp => {
                     return String::new(); // 类型由函数签名决定
                 }
@@ -432,8 +430,8 @@ fn infer_tmp_type(tmp: &TmpVar, func: &TirFunction) -> String {
 
 fn tir_value_type(val: &TirValue) -> String {
     match val {
-        TirValue::IntLiteral(_) => TYPE_I32.to_string(),
-        TirValue::FloatLiteral(_) => TYPE_F64.to_string(),
+        TirValue::IntLiteral(_) => TYPE_NUMBER.to_string(), // v2.0: f64
+        TirValue::FloatLiteral(_) => TYPE_NUMBER.to_string(),
         TirValue::StringLiteral(_) => TYPE_STRING.to_string(),
         TirValue::BoolLiteral(_) => TYPE_BOOL.to_string(),
         TirValue::Var(_) | TirValue::Function(_) | TirValue::Error => String::new(),

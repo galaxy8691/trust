@@ -188,8 +188,8 @@ pub struct HirStub {
 /// 不含泛型/闭包推断/method resolve（Phase 2+）
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirExpr {
-    /// 整数字面量 i32
-    IntLiteral(i32, Span),
+    /// 数字字面量 f64 — v2.0: i32/f64 统一（设计 §2.2）
+    IntLiteral(f64, Span),
     /// 浮点字面量 f64
     FloatLiteral(f64, Span),
     /// 字符串字面量 String
@@ -250,10 +250,8 @@ pub struct HirCallArg {
 /// Phase 2+: Generic / TraitObject / Option / Result / ADT
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirType {
-    /// number 字面量 42 → i32
-    I32,
-    /// number 字面量 3.14 → f64
-    F64,
+    /// number 类型 — v2.0: i32/f64 合并为单一 f64（设计 §2.2）
+    Number,
     /// string 类型
     String,
     /// boolean 类型
@@ -387,7 +385,7 @@ impl HirType {
     /// §3.3.2: 从 AST Type 降级到 HirType
     pub fn from_ast_type(ast_ty: &trust_parser::ast::Type) -> Self {
         match ast_ty {
-            trust_parser::ast::Type::NumberType => HirType::I32, // 默认 I32
+            trust_parser::ast::Type::NumberType => HirType::Number, // v2.0: 统一 f64
             trust_parser::ast::Type::StringType => HirType::String,
             trust_parser::ast::Type::BooleanType => HirType::Bool,
             trust_parser::ast::Type::VoidType => HirType::Void,
@@ -435,7 +433,7 @@ impl HirType {
 
     pub fn as_rust_type(&self) -> &'static str {
         match self {
-            HirType::I32 | HirType::F64 => "number",
+            HirType::Number => "number",
             HirType::String => "string",
             HirType::Bool => "boolean",
             HirType::Void => "void",
@@ -451,8 +449,7 @@ impl HirType {
 impl std::fmt::Display for HirType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HirType::I32 => write!(f, "i32"),
-            HirType::F64 => write!(f, "f64"),
+            HirType::Number => write!(f, "number"),
             HirType::String => write!(f, "string"),
             HirType::Bool => write!(f, "boolean"),
             HirType::Void => write!(f, "void"),
@@ -479,13 +476,8 @@ mod tests {
     // === HirType Display ===
 
     #[test]
-    fn hir_type_display_i32() {
-        assert_eq!(format!("{}", HirType::I32), "i32");
-    }
-
-    #[test]
-    fn hir_type_display_f64() {
-        assert_eq!(format!("{}", HirType::F64), "f64");
+    fn hir_type_display_number() {
+        assert_eq!(format!("{}", HirType::Number), "number");
     }
 
     #[test]
@@ -500,7 +492,7 @@ mod tests {
 
     #[test]
     fn hir_type_display_array() {
-        assert_eq!(format!("{}", HirType::Array(Box::new(HirType::I32))), "i32[]");
+        assert_eq!(format!("{}", HirType::Array(Box::new(HirType::Number))), "number[]");
     }
 
     #[test]
@@ -515,10 +507,10 @@ mod tests {
         let mut scope = Scope::new();
         scope.insert(
             "x",
-            HirBinding::LocalVar { ty: HirType::I32, mutable: false, span: Span::dummy() },
+            HirBinding::LocalVar { ty: HirType::Number, mutable: false, span: Span::dummy() },
         );
         let b = scope.lookup("x").expect("x should be found");
-        assert!(matches!(b, HirBinding::LocalVar { ty: HirType::I32, .. }));
+        assert!(matches!(b, HirBinding::LocalVar { ty: HirType::Number, .. }));
     }
 
     #[test]
@@ -538,9 +530,9 @@ mod tests {
     // === HirType::from_ast_type ===
 
     #[test]
-    fn from_ast_type_number_defaults_to_i32() {
+    fn from_ast_type_number_defaults_to_number() {
         let h = HirType::from_ast_type(&trust_parser::ast::Type::NumberType);
-        assert_eq!(h, HirType::I32);
+        assert_eq!(h, HirType::Number);
     }
 
     #[test]

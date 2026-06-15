@@ -233,7 +233,7 @@ pub enum Type {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    IntLiteral(i32),
+    IntLiteral(f64), // v2.0: f64（设计 §2.2）
     FloatLiteral(f64),
     StrLiteral(String),
     BoolLiteral(bool),
@@ -346,7 +346,7 @@ mod tests {
         let node = Stmt::Let(LetStmt {
             name: "x".into(),
             ty: None,
-            init: Box::new(Expr::IntLiteral(42)),
+            init: Box::new(Expr::IntLiteral(42.0)),
             mutable: false,
             span: Span::dummy(),
         });
@@ -354,7 +354,7 @@ mod tests {
         if let Stmt::Let(l) = &node {
             assert_eq!(l.name, "x");
             assert!(!l.mutable);
-            assert_eq!(l.init, Box::new(Expr::IntLiteral(42)));
+            assert_eq!(l.init, Box::new(Expr::IntLiteral(42.0)));
         }
     }
 
@@ -364,7 +364,7 @@ mod tests {
         let stmt = Stmt::Let(LetStmt {
             name: "x".into(),
             ty: None,
-            init: Box::new(Expr::IntLiteral(1)),
+            init: Box::new(Expr::IntLiteral(1.0)),
             mutable: false,
             span: Span {
                 file: "test.trust".into(),
@@ -386,7 +386,7 @@ mod tests {
         let stmt = Stmt::Let(LetStmt {
             name: "x".into(),
             ty: Some(Type::NumberType),
-            init: Box::new(Expr::IntLiteral(42)),
+            init: Box::new(Expr::IntLiteral(42.0)),
             mutable: false,
             span: Span::dummy(),
         });
@@ -394,7 +394,7 @@ mod tests {
         assert!(!debug.contains(".."), "Debug output contains ellipsis: {}", debug);
         assert!(debug.contains("Let"));
         assert!(debug.contains("NumberType"));
-        assert!(debug.contains("IntLiteral(42)"));
+        assert!(debug.contains("IntLiteral(42.0)"));
     }
 
     /// Expr 枚举变体完整性测试
@@ -402,7 +402,7 @@ mod tests {
     fn expr_variants_cover_all_phase1_syntax() {
         // 验证 Expr 包含 Phase 1 需要的所有变体
         let literals = vec![
-            Expr::IntLiteral(1),
+            Expr::IntLiteral(1.0),
             Expr::FloatLiteral(2.0),
             Expr::StrLiteral("hello".into()),
             Expr::BoolLiteral(true),
@@ -412,12 +412,12 @@ mod tests {
 
         // Binary / Unary
         let _bin =
-            Expr::Binary(Box::new(Expr::IntLiteral(1)), BinOp::Add, Box::new(Expr::IntLiteral(2)));
-        let _un = Expr::Unary(UnaryOp::Neg, Box::new(Expr::IntLiteral(1)));
+            Expr::Binary(Box::new(Expr::IntLiteral(1.0)), BinOp::Add, Box::new(Expr::IntLiteral(2.0)));
+        let _un = Expr::Unary(UnaryOp::Neg, Box::new(Expr::IntLiteral(1.0)));
 
         // Reference / AsCast
         let _ref = Expr::Reference(Box::new(Expr::Ident("x".into())));
-        let _as = Expr::AsCast { expr: Box::new(Expr::IntLiteral(1)), ty: Type::NumberType };
+        let _as = Expr::AsCast { expr: Box::new(Expr::IntLiteral(1.0)), ty: Type::NumberType };
 
         // MemberAccess
         let _ma = Expr::MemberAccess(MemberAccess {

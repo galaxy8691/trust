@@ -920,8 +920,8 @@ fn resolve_expr_names(expr: &mut HirExpr, scope: &Scope, diagnostics: &mut Vec<D
 
 fn infer_type_from_expr(expr: &HirExpr) -> HirType {
     match expr {
-        HirExpr::IntLiteral(..) => HirType::I32,
-        HirExpr::FloatLiteral(..) => HirType::F64,
+        HirExpr::IntLiteral(..) => HirType::Number, // v2.0: 统一 f64
+        HirExpr::FloatLiteral(..) => HirType::Number,
         HirExpr::StringLiteral(..) => HirType::String,
         HirExpr::BoolLiteral(..) => HirType::Bool,
         HirExpr::Null(..) => HirType::Void, // v2.0: null placeholder

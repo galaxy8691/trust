@@ -1089,7 +1089,6 @@ mod tests {
             _ => panic!(),
         }
     }
-    #[test]
     // v2.0: syn037_bang and syn038_try removed (AssertUnwrap/TryPropagate removed)
     #[test]
     fn syn039_opt_chain() {

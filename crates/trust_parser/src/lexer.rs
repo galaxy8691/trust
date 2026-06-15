@@ -110,7 +110,7 @@ pub enum TokenKind {
     Null,    // §2.7
     Panic,   // §5.2 — Phase 4
     // 字面量
-    IntLiteral(i32),
+    IntLiteral(f64), // v2.0: f64（设计 §2.2）
     FloatLiteral(f64),
     StrLiteral(String),
     TemplateHead(String),
@@ -567,7 +567,7 @@ impl Lexer {
         }
         // v2.0: BigIntLiteral removed — 'n' suffix no longer supported
         let s: String = self.source[start..self.pos].iter().collect();
-        self.emit(TokenKind::IntLiteral(s.parse().unwrap_or(0)))
+        self.emit(TokenKind::IntLiteral(s.parse().unwrap_or(0.0))) // v2.0: f64
     }
 
     fn lex_ident(&mut self) -> TokenKind {
@@ -611,11 +611,11 @@ mod tests {
         assert!(ts.iter().any(|t| matches!(t, TokenKind::Let)));
         assert!(ts.iter().any(|t| matches!(t, TokenKind::Ident(s) if s == "x")));
         assert!(ts.iter().any(|t| matches!(t, TokenKind::NumberType)));
-        assert!(ts.iter().any(|t| matches!(t, TokenKind::IntLiteral(42))));
+        assert!(ts.iter().any(|t| matches!(t, TokenKind::IntLiteral(42.0))));
     }
     #[test]
     fn lex_number_literal_returns_int_token() {
-        assert_eq!(tokenize("42")[0], TokenKind::IntLiteral(42));
+        assert_eq!(tokenize("42")[0], TokenKind::IntLiteral(42.0));
     }
     #[test]
     fn lex_float_literal_returns_float_token() {
